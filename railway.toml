@@ -1,0 +1,22 @@
+# Railway configuration for CyxCloud Gateway
+# Deploy with: railway up
+# Or connect GitHub repo at https://railway.app
+
+[build]
+# Use the gateway Dockerfile
+dockerfilePath = "Dockerfile.gateway"
+
+[deploy]
+# Number of instances
+numReplicas = 1
+
+# Health check endpoint
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+
+# Restart policy
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+
+# Start command (optional, uses ENTRYPOINT from Dockerfile)
+# startCommand = "cyxcloud-gateway"

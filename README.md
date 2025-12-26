@@ -360,6 +360,41 @@ sudo firewall-cmd --permanent --add-port=4001/tcp
 sudo firewall-cmd --reload
 ```
 
+## Deploy to Railway (Free Tier)
+
+Deploy CyxCloud Gateway to [Railway](https://railway.app) with one click:
+
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/cyxcloud?referralCode=cyxwiz)
+
+### Manual Railway Setup
+
+1. **Create Railway Account**: Sign up at [railway.app](https://railway.app)
+
+2. **Create New Project**: Click "New Project" → "Deploy from GitHub repo"
+
+3. **Connect Repository**: Select `CYXWIZ-Lab/cyxcloud`
+
+4. **Add PostgreSQL**: Click "New" → "Database" → "Add PostgreSQL"
+
+5. **Add Redis**: Click "New" → "Database" → "Add Redis"
+
+6. **Configure Environment Variables**:
+   ```
+   DATABASE_URL        → ${{Postgres.DATABASE_URL}}
+   REDIS_URL           → ${{Redis.REDIS_URL}}
+   RUST_LOG            → info
+   GATEWAY_HTTP_PORT   → 8080
+   GATEWAY_GRPC_PORT   → 50052
+   ```
+
+7. **Deploy**: Railway auto-deploys on every push to main
+
+### Railway Endpoints
+
+After deployment, your gateway will be available at:
+- **HTTP API**: `https://your-project.up.railway.app`
+- **Health Check**: `https://your-project.up.railway.app/health`
+
 ## Documentation
 
 - **[Usage Guide](USAGE.md)** - Detailed build, run, and API documentation
