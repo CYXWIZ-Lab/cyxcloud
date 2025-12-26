@@ -1,137 +1,9 @@
-# CyxCloud Docker Compose Configuration
-# Local development and testing setup with 3 storage nodes
+# CyxCloud Docker Compose - Full Stack Testing
+# Includes: PostgreSQL, Redis, Gateway, 3 Storage Nodes, Rebalancer
 
 version: '3.8'
 
 services:
-  # ===========================================
-  # Gateway - S3-compatible HTTP API
-  # ===========================================
-  gateway:
-    build:
-      context: .
-      dockerfile: Dockerfile.gateway
-    container_name: cyxcloud-gateway
-    ports:
-      - "8080:8080"
-    environment:
-      RUST_LOG: info
-      GATEWAY_HOST: 0.0.0.0
-      GATEWAY_PORT: 8080
-    volumes:
-      - gateway-data:/data
-    networks:
-      - cyxcloud-net
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
-    restart: unless-stopped
-
-  # ===========================================
-  # Storage Node 1
-  # ===========================================
-  node1:
-    build:
-      context: .
-      dockerfile: Dockerfile.node
-    container_name: cyxcloud-node1
-    ports:
-      - "50051:50051"
-      - "4001:4001"
-    environment:
-      RUST_LOG: info
-      NODE_ID: node-1
-      GRPC_HOST: 0.0.0.0
-      GRPC_PORT: 50051
-      LIBP2P_PORT: 4001
-      STORAGE_CAPACITY_GB: 100
-      BOOTSTRAP_PEERS: /ip4/node2/tcp/4001,/ip4/node3/tcp/4001
-    volumes:
-      - node1-data:/data
-    networks:
-      - cyxcloud-net
-    depends_on:
-      - gateway
-    restart: unless-stopped
-
-  # ===========================================
-  # Storage Node 2
-  # ===========================================
-  node2:
-    build:
-      context: .
-      dockerfile: Dockerfile.node
-    container_name: cyxcloud-node2
-    ports:
-      - "50052:50051"
-      - "4002:4001"
-    environment:
-      RUST_LOG: info
-      NODE_ID: node-2
-      GRPC_HOST: 0.0.0.0
-      GRPC_PORT: 50051
-      LIBP2P_PORT: 4001
-      STORAGE_CAPACITY_GB: 100
-      BOOTSTRAP_PEERS: /ip4/node1/tcp/4001,/ip4/node3/tcp/4001
-    volumes:
-      - node2-data:/data
-    networks:
-      - cyxcloud-net
-    depends_on:
-      - gateway
-    restart: unless-stopped
-
-  # ===========================================
-  # Storage Node 3
-  # ===========================================
-  node3:
-    build:
-      context: .
-      dockerfile: Dockerfile.node
-    container_name: cyxcloud-node3
-    ports:
-      - "50053:50051"
-      - "4003:4001"
-    environment:
-      RUST_LOG: info
-      NODE_ID: node-3
-      GRPC_HOST: 0.0.0.0
-      GRPC_PORT: 50051
-      LIBP2P_PORT: 4001
-      STORAGE_CAPACITY_GB: 100
-      BOOTSTRAP_PEERS: /ip4/node1/tcp/4001,/ip4/node2/tcp/4001
-    volumes:
-      - node3-data:/data
-    networks:
-      - cyxcloud-net
-    depends_on:
-      - gateway
-    restart: unless-stopped
-
-  # ===========================================
-  # Rebalancer - Background chunk repair
-  # ===========================================
-  rebalancer:
-    build:
-      context: .
-      dockerfile: Dockerfile.rebalancer
-    container_name: cyxcloud-rebalancer
-    environment:
-      RUST_LOG: info
-      SCAN_INTERVAL_SECS: 3600
-      REPAIR_PARALLELISM: 4
-      RATE_LIMIT_BYTES_PER_HOUR: 10737418240
-    networks:
-      - cyxcloud-net
-    depends_on:
-      - node1
-      - node2
-      - node3
-    restart: unless-stopped
-
   # ===========================================
   # PostgreSQL - Metadata storage
   # ===========================================
@@ -146,13 +18,14 @@ services:
       POSTGRES_DB: cyxcloud
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - ./cyxcloud-metadata/migrations:/docker-entrypoint-initdb.d:ro
     networks:
       - cyxcloud-net
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U cyxcloud"]
-      interval: 10s
+      interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
     restart: unless-stopped
 
   # ===========================================
@@ -163,15 +36,186 @@ services:
     container_name: cyxcloud-redis
     ports:
       - "6379:6379"
+    command: redis-server --appendonly yes
     volumes:
       - redis-data:/data
     networks:
       - cyxcloud-net
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # ===========================================
+  # Gateway - S3-compatible API + gRPC
+  # ===========================================
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    container_name: cyxcloud-gateway
+    ports:
+      - "8080:8080"     # HTTP/S3 API
+      - "50052:50052"   # gRPC for nodes
+    environment:
+      RUST_LOG: info,cyxcloud_gateway=debug
+      GATEWAY_HTTP_PORT: 8080
+      GATEWAY_GRPC_PORT: 50052
+      DATABASE_URL: postgres://cyxcloud:cyxcloud_secret@postgres:5432/cyxcloud
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: cyxcloud-dev-secret-change-in-production
+      # Blockchain (optional - devnet)
+      SOLANA_RPC_URL: https://api.devnet.solana.com
+    volumes:
+      - gateway-data:/data
+    networks:
+      - cyxcloud-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # ===========================================
+  # Storage Node 1
+  # ===========================================
+  node1:
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+    container_name: cyxcloud-node1
+    ports:
+      - "50061:50051"   # gRPC
+      - "4001:4001"     # libp2p
+      - "9091:9090"     # Metrics
+    environment:
+      RUST_LOG: info,cyxcloud_node=debug
+      NODE_ID: node-1
+      NODE_NAME: storage-node-1
+      GRPC_HOST: 0.0.0.0
+      GRPC_PORT: 50051
+      LIBP2P_PORT: 4001
+      METRICS_PORT: 9090
+      STORAGE_PATH: /data/storage
+      STORAGE_CAPACITY_GB: 100
+      CENTRAL_SERVER_ADDR: http://gateway:50052
+      BOOTSTRAP_PEERS: ""
+    volumes:
+      - node1-data:/data
+    networks:
+      - cyxcloud-net
+    depends_on:
+      gateway:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ===========================================
+  # Storage Node 2
+  # ===========================================
+  node2:
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+    container_name: cyxcloud-node2
+    ports:
+      - "50062:50051"
+      - "4002:4001"
+      - "9092:9090"
+    environment:
+      RUST_LOG: info,cyxcloud_node=debug
+      NODE_ID: node-2
+      NODE_NAME: storage-node-2
+      GRPC_HOST: 0.0.0.0
+      GRPC_PORT: 50051
+      LIBP2P_PORT: 4001
+      METRICS_PORT: 9090
+      STORAGE_PATH: /data/storage
+      STORAGE_CAPACITY_GB: 100
+      CENTRAL_SERVER_ADDR: http://gateway:50052
+      BOOTSTRAP_PEERS: /dns4/node1/tcp/4001
+    volumes:
+      - node2-data:/data
+    networks:
+      - cyxcloud-net
+    depends_on:
+      gateway:
+        condition: service_healthy
+      node1:
+        condition: service_started
+    restart: unless-stopped
+
+  # ===========================================
+  # Storage Node 3
+  # ===========================================
+  node3:
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+    container_name: cyxcloud-node3
+    ports:
+      - "50063:50051"
+      - "4003:4001"
+      - "9093:9090"
+    environment:
+      RUST_LOG: info,cyxcloud_node=debug
+      NODE_ID: node-3
+      NODE_NAME: storage-node-3
+      GRPC_HOST: 0.0.0.0
+      GRPC_PORT: 50051
+      LIBP2P_PORT: 4001
+      METRICS_PORT: 9090
+      STORAGE_PATH: /data/storage
+      STORAGE_CAPACITY_GB: 100
+      CENTRAL_SERVER_ADDR: http://gateway:50052
+      BOOTSTRAP_PEERS: /dns4/node1/tcp/4001,/dns4/node2/tcp/4001
+    volumes:
+      - node3-data:/data
+    networks:
+      - cyxcloud-net
+    depends_on:
+      gateway:
+        condition: service_healthy
+      node1:
+        condition: service_started
+      node2:
+        condition: service_started
+    restart: unless-stopped
+
+  # ===========================================
+  # Rebalancer - Background chunk repair
+  # ===========================================
+  rebalancer:
+    build:
+      context: .
+      dockerfile: Dockerfile.rebalancer
+    container_name: cyxcloud-rebalancer
+    environment:
+      RUST_LOG: info,cyxcloud_rebalancer=debug
+      DATABASE_URL: postgres://cyxcloud:cyxcloud_secret@postgres:5432/cyxcloud
+      REDIS_URL: redis://redis:6379
+      SCAN_INTERVAL_SECS: 300
+      REPAIR_PARALLELISM: 4
+      MIN_REPLICAS: 3
+    networks:
+      - cyxcloud-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      node1:
+        condition: service_started
+      node2:
+        condition: service_started
+      node3:
+        condition: service_started
     restart: unless-stopped
 
 # ===========================================
