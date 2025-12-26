@@ -5,6 +5,9 @@
 [build]
 # Use the gateway Dockerfile
 dockerfilePath = "Dockerfile.gateway"
+# Rust builds can take time
+buildCommand = ""
+watchPatterns = ["cyxcloud-*/src/**", "cyxcloud-*/Cargo.toml", "Cargo.toml", "Cargo.lock"]
 
 [deploy]
 # Number of instances
