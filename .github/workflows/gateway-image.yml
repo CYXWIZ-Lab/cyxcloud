@@ -12,7 +12,7 @@ on:
       - 'cyxcloud-network/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
-      - 'Dockerfile.gateway'
+      - 'Dockerfile.gateway.build'
   workflow_dispatch:  # Allow manual trigger
 
 env:
