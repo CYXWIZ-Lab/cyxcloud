@@ -1,0 +1,49 @@
+[package]
+name = "cyxcloud-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# Erasure coding
+reed-solomon-erasure = { workspace = true }
+
+# Cryptography
+blake3 = { workspace = true }
+aes-gcm = { workspace = true }
+argon2 = { workspace = true }
+ring = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+bincode = { workspace = true }
+
+# Utilities
+thiserror = { workspace = true }
+uuid = { workspace = true }
+bytes = { workspace = true }
+chrono = { workspace = true }
+rand = { workspace = true }
+base64 = { workspace = true }
+bs58 = { workspace = true }
+
+# Performance
+rayon = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+proptest = { workspace = true }
+tempfile = { workspace = true }
+
+[features]
+default = ["simd"]
+simd = ["reed-solomon-erasure/simd-accel"]
+fips = []  # Future: aws-lc-rs for FIPS compliance
+
+[[bench]]
+name = "erasure_coding"
+harness = false
+
+[[bench]]
+name = "crypto"
+harness = false

@@ -1,0 +1,46 @@
+[package]
+name = "cyxcloud-storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# Core library
+cyxcloud-core = { path = "../cyxcloud-core" }
+
+# Storage backends
+rocksdb = { workspace = true }
+sled = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+futures = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+bincode = { workspace = true }
+
+# Utilities
+thiserror = { workspace = true }
+bytes = { workspace = true }
+tracing = { workspace = true }
+parking_lot = { workspace = true }
+memmap2 = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+# Performance
+rayon = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+criterion = { workspace = true }
+
+[features]
+default = []
+io-uring = []  # Linux-specific io_uring support
+
+[[bench]]
+name = "storage"
+harness = false

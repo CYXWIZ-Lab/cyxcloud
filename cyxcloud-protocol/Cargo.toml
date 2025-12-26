@@ -1,0 +1,15 @@
+[package]
+name = "cyxcloud-protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Protocol Buffers definitions for CyxCloud"
+
+[dependencies]
+prost = { workspace = true }
+prost-types = { workspace = true }
+tonic = { workspace = true }
+bytes = { workspace = true }
+
+[build-dependencies]
+tonic-build = { workspace = true }

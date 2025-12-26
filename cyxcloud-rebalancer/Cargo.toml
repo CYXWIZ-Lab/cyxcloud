@@ -1,0 +1,34 @@
+[package]
+name = "cyxcloud-rebalancer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Data rebalancing and repair service for CyxCloud"
+
+[[bin]]
+name = "cyxcloud-rebalancer"
+path = "src/main.rs"
+
+[dependencies]
+cyxcloud-core = { path = "../cyxcloud-core" }
+cyxcloud-storage = { path = "../cyxcloud-storage" }
+cyxcloud-metadata = { path = "../cyxcloud-metadata" }
+cyxcloud-network = { path = "../cyxcloud-network" }
+
+# Async
+tokio = { workspace = true }
+futures = { workspace = true }
+
+# Observability
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# CLI
+clap = { workspace = true }
+
+# Utilities
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+hex = "0.4"
+async-trait = "0.1"
+rand = "0.8"

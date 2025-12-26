@@ -1,0 +1,101 @@
+syntax = "proto3";
+
+package cyxcloud.metadata;
+
+// Metadata service for file and chunk indexing
+service MetadataService {
+    // Register a new file
+    rpc RegisterFile(RegisterFileRequest) returns (RegisterFileResponse);
+
+    // Get file metadata
+    rpc GetFile(GetFileRequest) returns (GetFileResponse);
+
+    // List files
+    rpc ListFiles(ListFilesRequest) returns (ListFilesResponse);
+
+    // Delete file
+    rpc DeleteFile(DeleteFileRequest) returns (DeleteFileResponse);
+
+    // Get chunk locations
+    rpc GetChunkLocations(GetChunkLocationsRequest) returns (GetChunkLocationsResponse);
+
+    // Update chunk location
+    rpc UpdateChunkLocation(UpdateChunkLocationRequest) returns (UpdateChunkLocationResponse);
+}
+
+message RegisterFileRequest {
+    FileMetadata metadata = 1;
+}
+
+message RegisterFileResponse {
+    bytes file_id = 1;
+    bool success = 2;
+    string error = 3;
+}
+
+message GetFileRequest {
+    oneof identifier {
+        bytes file_id = 1;
+        string name = 2;
+    }
+}
+
+message GetFileResponse {
+    FileMetadata metadata = 1;
+    bool found = 2;
+}
+
+message ListFilesRequest {
+    string owner = 1;           // Filter by owner
+    uint32 limit = 2;           // Max results
+    uint32 offset = 3;          // Pagination offset
+}
+
+message ListFilesResponse {
+    repeated FileMetadata files = 1;
+    uint32 total = 2;
+}
+
+message DeleteFileRequest {
+    bytes file_id = 1;
+}
+
+message DeleteFileResponse {
+    bool deleted = 1;
+}
+
+message GetChunkLocationsRequest {
+    bytes chunk_id = 1;
+}
+
+message GetChunkLocationsResponse {
+    repeated string node_ids = 1;
+}
+
+message UpdateChunkLocationRequest {
+    bytes chunk_id = 1;
+    string node_id = 2;
+    LocationAction action = 3;
+}
+
+enum LocationAction {
+    ADD = 0;
+    REMOVE = 1;
+}
+
+message UpdateChunkLocationResponse {
+    bool success = 1;
+}
+
+message FileMetadata {
+    bytes id = 1;               // UUID
+    string name = 2;
+    uint64 size = 3;
+    string content_type = 4;
+    repeated bytes chunk_ids = 5;
+    bool encrypted = 6;
+    int64 created_at = 7;
+    int64 modified_at = 8;
+    string owner = 9;           // Wallet address or public key
+    map<string, string> custom = 10;
+}

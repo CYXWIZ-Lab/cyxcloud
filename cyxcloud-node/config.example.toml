@@ -1,0 +1,107 @@
+# CyxCloud Storage Node Configuration
+# Copy to config.toml and edit as needed
+
+# ============================================================
+# Node Identity
+# ============================================================
+[node]
+# Unique node identifier (auto-generated if not provided)
+# id = "550e8400-e29b-41d4-a716-446655440000"
+
+# Human-readable node name (defaults to hostname)
+name = "my-storage-node"
+
+# Geographic region for topology-aware placement
+region = "us-west"
+
+# Zone within region (e.g., availability zone)
+zone = "az-1"
+
+# Solana wallet address for receiving storage payments
+# wallet_address = "GwLqe8XZ8R4kpXvGJJ9kVpWfVb8KiL4RMxKqKn3D6W3j"
+
+# ============================================================
+# Storage Settings
+# ============================================================
+[storage]
+# Directory for chunk data storage (relative or absolute path)
+data_dir = "./data"
+
+# Maximum storage capacity in GB (0 = unlimited)
+max_capacity_gb = 100
+
+# Enable LZ4 compression for stored chunks (recommended)
+compression = true
+
+# RocksDB block cache size in MB (adjust based on available RAM)
+cache_size_mb = 512
+
+# Number of background compaction threads
+compaction_threads = 4
+
+# ============================================================
+# Network Settings
+# ============================================================
+[network]
+# Address to bind for gRPC and P2P servers
+bind_address = "0.0.0.0"
+
+# gRPC server port for chunk operations
+grpc_port = 50051
+
+# libp2p P2P port for peer discovery
+p2p_port = 4001
+
+# Public address for other nodes to connect (optional, auto-detected)
+# public_address = "203.0.113.10"
+
+# Maximum message size in MB
+max_message_size_mb = 64
+
+# Enable TLS for gRPC connections
+enable_tls = false
+
+# TLS certificate and key paths (required if enable_tls = true)
+# tls_cert = "/path/to/cert.pem"
+# tls_key = "/path/to/key.pem"
+
+# Bootstrap peers for P2P discovery
+# bootstrap_peers = [
+#     "/dns4/bootstrap1.cyxcloud.io/tcp/4001/p2p/12D3KooW...",
+#     "/dns4/bootstrap2.cyxcloud.io/tcp/4001/p2p/12D3KooW...",
+# ]
+
+# ============================================================
+# Metrics and Monitoring
+# ============================================================
+[metrics]
+# Enable Prometheus metrics endpoint
+enabled = true
+
+# HTTP port for metrics and health endpoints
+port = 9090
+
+# Health check endpoint path
+health_path = "/health"
+
+# Prometheus metrics endpoint path
+metrics_path = "/metrics"
+
+# ============================================================
+# Central Server Connection
+# ============================================================
+[central]
+# Central server gRPC address
+address = "http://localhost:50052"
+
+# Enable registration with central server
+register = true
+
+# Heartbeat interval in seconds
+heartbeat_interval_secs = 30
+
+# Connection timeout in seconds
+connect_timeout_secs = 10
+
+# Authentication token (if required by central server)
+# auth_token = "your-auth-token"

@@ -1,0 +1,72 @@
+[package]
+name = "cyxcloud-gateway"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "CyxCloud API gateway with S3-compatible REST API"
+
+[[bin]]
+name = "cyxcloud-gateway"
+path = "src/main.rs"
+
+[dependencies]
+cyxcloud-core = { path = "../cyxcloud-core" }
+cyxcloud-storage = { path = "../cyxcloud-storage" }
+cyxcloud-metadata = { path = "../cyxcloud-metadata" }
+cyxcloud-network = { path = "../cyxcloud-network" }
+cyxcloud-protocol = { path = "../cyxcloud-protocol" }
+
+# HTTP/API
+axum = { workspace = true }
+hyper = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+
+# gRPC
+tonic = { workspace = true }
+prost = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+futures = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# CLI
+clap = { workspace = true }
+
+# Observability
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Utilities
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+bytes = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+rand = "0.8"
+md5 = "0.7"
+base64 = "0.21"
+hex = "0.4"
+
+# Authentication
+jsonwebtoken = { workspace = true }
+ed25519-dalek = { workspace = true }
+bs58 = { workspace = true }
+
+# Blockchain (Solana) - optional, requires OpenSSL on Windows
+solana-sdk = { workspace = true, optional = true }
+solana-client = { workspace = true, optional = true }
+sha2 = { version = "0.10", optional = true }
+
+[features]
+default = []
+# Enable blockchain integration (requires OpenSSL on Windows)
+blockchain = ["solana-sdk", "solana-client", "sha2"]
+
+[dev-dependencies]
+reqwest = { version = "0.11", features = ["json"] }

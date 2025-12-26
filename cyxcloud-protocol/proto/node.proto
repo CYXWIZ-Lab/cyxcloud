@@ -1,0 +1,151 @@
+syntax = "proto3";
+
+package cyxcloud.node;
+
+// Node service for cluster management
+service NodeService {
+    // Register a storage node
+    rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse);
+
+    // Send heartbeat
+    rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+
+    // Get node info
+    rpc GetNode(GetNodeRequest) returns (GetNodeResponse);
+
+    // List all nodes
+    rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
+
+    // Report node metrics
+    rpc ReportMetrics(ReportMetricsRequest) returns (ReportMetricsResponse);
+
+    // Request node drain (for graceful shutdown)
+    rpc DrainNode(DrainNodeRequest) returns (DrainNodeResponse);
+}
+
+message RegisterNodeRequest {
+    string node_id = 1;
+    NodeInfo info = 2;
+}
+
+message RegisterNodeResponse {
+    bool success = 1;
+    string error = 2;
+    string auth_token = 3;      // Token for subsequent requests
+}
+
+message HeartbeatRequest {
+    string node_id = 1;
+    NodeMetrics metrics = 2;
+}
+
+message HeartbeatResponse {
+    bool acknowledged = 1;
+    repeated NodeCommand commands = 2;  // Commands for node to execute
+}
+
+message GetNodeRequest {
+    string node_id = 1;
+}
+
+message GetNodeResponse {
+    NodeInfo info = 1;
+    NodeMetrics metrics = 2;
+    bool found = 3;
+}
+
+message ListNodesRequest {
+    NodeStatus status_filter = 1;
+    string region_filter = 2;
+}
+
+message ListNodesResponse {
+    repeated NodeInfo nodes = 1;
+}
+
+message ReportMetricsRequest {
+    string node_id = 1;
+    NodeMetrics metrics = 2;
+}
+
+message ReportMetricsResponse {
+    bool success = 1;
+}
+
+message DrainNodeRequest {
+    string node_id = 1;
+    string reason = 2;
+}
+
+message DrainNodeResponse {
+    bool accepted = 1;
+    uint64 estimated_duration_secs = 2;
+}
+
+message NodeInfo {
+    string node_id = 1;
+    string public_key = 2;      // For authentication
+    string wallet_address = 3;  // For payments
+    repeated string listen_addrs = 4;
+    NodeLocation location = 5;
+    NodeCapacity capacity = 6;
+    NodeStatus status = 7;
+    int64 registered_at = 8;
+}
+
+message NodeLocation {
+    string datacenter = 1;      // e.g., "us-east-1"
+    uint32 rack = 2;
+    string region = 3;
+    double latitude = 4;
+    double longitude = 5;
+}
+
+message NodeCapacity {
+    uint64 storage_total = 1;   // Total storage in bytes
+    uint64 storage_used = 2;    // Used storage in bytes
+    uint64 bandwidth_mbps = 3;  // Available bandwidth
+    uint32 max_connections = 4;
+}
+
+message NodeMetrics {
+    uint64 storage_used = 1;
+    uint64 storage_available = 2;
+    uint64 chunks_stored = 3;
+    uint64 bytes_uploaded = 4;
+    uint64 bytes_downloaded = 5;
+    double cpu_usage = 6;
+    double memory_usage = 7;
+    uint64 active_connections = 8;
+    int64 last_updated = 9;
+}
+
+enum NodeStatus {
+    UNKNOWN = 0;
+    ONLINE = 1;
+    OFFLINE = 2;
+    DRAINING = 3;
+    MAINTENANCE = 4;
+}
+
+message NodeCommand {
+    oneof command {
+        RepairChunkCommand repair_chunk = 1;
+        DeleteChunkCommand delete_chunk = 2;
+        TransferChunkCommand transfer_chunk = 3;
+    }
+}
+
+message RepairChunkCommand {
+    bytes chunk_id = 1;
+    repeated string source_nodes = 2;
+}
+
+message DeleteChunkCommand {
+    bytes chunk_id = 1;
+}
+
+message TransferChunkCommand {
+    bytes chunk_id = 1;
+    string target_node = 2;
+}

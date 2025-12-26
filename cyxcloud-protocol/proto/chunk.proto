@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+package cyxcloud.chunk;
+
+// Chunk service for storing and retrieving data chunks
+service ChunkService {
+    // Store a chunk
+    rpc StoreChunk(StoreChunkRequest) returns (StoreChunkResponse);
+
+    // Retrieve a chunk
+    rpc GetChunk(GetChunkRequest) returns (GetChunkResponse);
+
+    // Delete a chunk
+    rpc DeleteChunk(DeleteChunkRequest) returns (DeleteChunkResponse);
+
+    // Stream chunks (for large transfers)
+    rpc StreamChunks(StreamChunksRequest) returns (stream ChunkData);
+
+    // Verify chunk integrity
+    rpc VerifyChunk(VerifyChunkRequest) returns (VerifyChunkResponse);
+}
+
+message StoreChunkRequest {
+    bytes chunk_id = 1;      // 32-byte content hash
+    bytes data = 2;          // Chunk data
+    ChunkMetadata metadata = 3;
+}
+
+message StoreChunkResponse {
+    bool success = 1;
+    string error = 2;
+}
+
+message GetChunkRequest {
+    bytes chunk_id = 1;
+}
+
+message GetChunkResponse {
+    bytes data = 1;
+    ChunkMetadata metadata = 2;
+    bool found = 3;
+}
+
+message DeleteChunkRequest {
+    bytes chunk_id = 1;
+}
+
+message DeleteChunkResponse {
+    bool deleted = 1;
+}
+
+message StreamChunksRequest {
+    repeated bytes chunk_ids = 1;
+}
+
+message ChunkData {
+    bytes chunk_id = 1;
+    bytes data = 2;
+    uint32 index = 3;
+}
+
+message VerifyChunkRequest {
+    bytes chunk_id = 1;
+}
+
+message VerifyChunkResponse {
+    bool valid = 1;
+    uint64 size = 2;
+}
+
+message ChunkMetadata {
+    bytes chunk_id = 1;
+    uint64 size = 2;
+    uint32 index = 3;
+    uint32 total_chunks = 4;
+    bytes parent_id = 5;     // UUID of parent file
+    int64 created_at = 6;
+    bool encrypted = 7;
+    uint32 shard_index = 8;  // Erasure coding shard index
+}

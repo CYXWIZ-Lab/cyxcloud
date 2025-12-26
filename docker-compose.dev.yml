@@ -1,0 +1,63 @@
+# CyxCloud Docker Compose - Development Override
+# Use: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+version: '3.8'
+
+services:
+  gateway:
+    environment:
+      RUST_LOG: debug,tower_http=debug
+    # For development, build from local source
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+
+  node1:
+    environment:
+      RUST_LOG: debug
+    # Mount local config for hot reloading
+    volumes:
+      - node1-data:/data
+      - ./config/node1:/data/config:ro
+
+  node2:
+    environment:
+      RUST_LOG: debug
+    volumes:
+      - node2-data:/data
+      - ./config/node2:/data/config:ro
+
+  node3:
+    environment:
+      RUST_LOG: debug
+    volumes:
+      - node3-data:/data
+      - ./config/node3:/data/config:ro
+
+  rebalancer:
+    environment:
+      RUST_LOG: debug
+      # Run scans more frequently in dev
+      SCAN_INTERVAL_SECS: 300
+
+  # Adminer for database management UI
+  adminer:
+    image: adminer
+    container_name: cyxcloud-adminer
+    ports:
+      - "8081:8080"
+    networks:
+      - cyxcloud-net
+    depends_on:
+      - postgres
+
+  # RedisInsight for Redis management UI
+  redis-insight:
+    image: redislabs/redisinsight:latest
+    container_name: cyxcloud-redis-insight
+    ports:
+      - "8082:8001"
+    networks:
+      - cyxcloud-net
+    depends_on:
+      - redis

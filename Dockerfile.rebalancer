@@ -1,0 +1,58 @@
+# CyxCloud Rebalancer Dockerfile
+# Multi-stage build for optimized image size
+
+# ========================================
+# Stage 1: Build
+# ========================================
+FROM rust:1.75-bookworm as builder
+
+WORKDIR /app
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    protobuf-compiler \
+    libprotobuf-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy workspace configuration
+COPY Cargo.toml Cargo.lock ./
+COPY rust-toolchain.toml ./
+
+# Copy all crates
+COPY cyxcloud-core ./cyxcloud-core
+COPY cyxcloud-storage ./cyxcloud-storage
+COPY cyxcloud-protocol ./cyxcloud-protocol
+COPY cyxcloud-network ./cyxcloud-network
+COPY cyxcloud-metadata ./cyxcloud-metadata
+COPY cyxcloud-gateway ./cyxcloud-gateway
+COPY cyxcloud-node ./cyxcloud-node
+COPY cyxcloud-cli ./cyxcloud-cli
+COPY cyxcloud-rebalancer ./cyxcloud-rebalancer
+
+# Build release binary
+RUN cargo build --release -p cyxcloud-rebalancer
+
+# ========================================
+# Stage 2: Runtime
+# ========================================
+FROM debian:bookworm-slim
+
+WORKDIR /app
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy binary from builder
+COPY --from=builder /app/target/release/cyxcloud-rebalancer /usr/local/bin/
+
+# Environment variables
+ENV RUST_LOG=info
+ENV SCAN_INTERVAL_SECS=3600
+ENV REPAIR_PARALLELISM=4
+ENV RATE_LIMIT_BYTES_PER_HOUR=10737418240
+
+# Run rebalancer
+ENTRYPOINT ["cyxcloud-rebalancer"]

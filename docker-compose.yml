@@ -1,0 +1,196 @@
+# CyxCloud Docker Compose Configuration
+# Local development and testing setup with 3 storage nodes
+
+version: '3.8'
+
+services:
+  # ===========================================
+  # Gateway - S3-compatible HTTP API
+  # ===========================================
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    container_name: cyxcloud-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      RUST_LOG: info
+      GATEWAY_HOST: 0.0.0.0
+      GATEWAY_PORT: 8080
+    volumes:
+      - gateway-data:/data
+    networks:
+      - cyxcloud-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # ===========================================
+  # Storage Node 1
+  # ===========================================
+  node1:
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+    container_name: cyxcloud-node1
+    ports:
+      - "50051:50051"
+      - "4001:4001"
+    environment:
+      RUST_LOG: info
+      NODE_ID: node-1
+      GRPC_HOST: 0.0.0.0
+      GRPC_PORT: 50051
+      LIBP2P_PORT: 4001
+      STORAGE_CAPACITY_GB: 100
+      BOOTSTRAP_PEERS: /ip4/node2/tcp/4001,/ip4/node3/tcp/4001
+    volumes:
+      - node1-data:/data
+    networks:
+      - cyxcloud-net
+    depends_on:
+      - gateway
+    restart: unless-stopped
+
+  # ===========================================
+  # Storage Node 2
+  # ===========================================
+  node2:
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+    container_name: cyxcloud-node2
+    ports:
+      - "50052:50051"
+      - "4002:4001"
+    environment:
+      RUST_LOG: info
+      NODE_ID: node-2
+      GRPC_HOST: 0.0.0.0
+      GRPC_PORT: 50051
+      LIBP2P_PORT: 4001
+      STORAGE_CAPACITY_GB: 100
+      BOOTSTRAP_PEERS: /ip4/node1/tcp/4001,/ip4/node3/tcp/4001
+    volumes:
+      - node2-data:/data
+    networks:
+      - cyxcloud-net
+    depends_on:
+      - gateway
+    restart: unless-stopped
+
+  # ===========================================
+  # Storage Node 3
+  # ===========================================
+  node3:
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+    container_name: cyxcloud-node3
+    ports:
+      - "50053:50051"
+      - "4003:4001"
+    environment:
+      RUST_LOG: info
+      NODE_ID: node-3
+      GRPC_HOST: 0.0.0.0
+      GRPC_PORT: 50051
+      LIBP2P_PORT: 4001
+      STORAGE_CAPACITY_GB: 100
+      BOOTSTRAP_PEERS: /ip4/node1/tcp/4001,/ip4/node2/tcp/4001
+    volumes:
+      - node3-data:/data
+    networks:
+      - cyxcloud-net
+    depends_on:
+      - gateway
+    restart: unless-stopped
+
+  # ===========================================
+  # Rebalancer - Background chunk repair
+  # ===========================================
+  rebalancer:
+    build:
+      context: .
+      dockerfile: Dockerfile.rebalancer
+    container_name: cyxcloud-rebalancer
+    environment:
+      RUST_LOG: info
+      SCAN_INTERVAL_SECS: 3600
+      REPAIR_PARALLELISM: 4
+      RATE_LIMIT_BYTES_PER_HOUR: 10737418240
+    networks:
+      - cyxcloud-net
+    depends_on:
+      - node1
+      - node2
+      - node3
+    restart: unless-stopped
+
+  # ===========================================
+  # PostgreSQL - Metadata storage
+  # ===========================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: cyxcloud-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: cyxcloud
+      POSTGRES_PASSWORD: cyxcloud_secret
+      POSTGRES_DB: cyxcloud
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - cyxcloud-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cyxcloud"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ===========================================
+  # Redis - Caching layer
+  # ===========================================
+  redis:
+    image: redis:7-alpine
+    container_name: cyxcloud-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - cyxcloud-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+# ===========================================
+# Networks
+# ===========================================
+networks:
+  cyxcloud-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+# ===========================================
+# Volumes
+# ===========================================
+volumes:
+  gateway-data:
+  node1-data:
+  node2-data:
+  node3-data:
+  postgres-data:
+  redis-data:

@@ -1,0 +1,39 @@
+# Build artifacts
+target/
+*.rs.bk
+*.swp
+*.swo
+
+# IDE
+.idea/
+.vscode/
+*.sublime-*
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Documentation
+*.md
+docs/
+README*
+LICENSE
+
+# Tests
+tests/
+benches/
+examples/
+
+# Development files
+.env*
+*.log
+*.tmp
+
+# OS files
+.DS_Store
+Thumbs.db

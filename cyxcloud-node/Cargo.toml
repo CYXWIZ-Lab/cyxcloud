@@ -1,0 +1,74 @@
+[package]
+name = "cyxcloud-node"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "CyxCloud storage node daemon"
+
+[[bin]]
+name = "cyxcloud-node"
+path = "src/main.rs"
+
+[lib]
+name = "cyxcloud_node"
+path = "src/lib.rs"
+
+[dependencies]
+cyxcloud-core = { path = "../cyxcloud-core" }
+cyxcloud-storage = { path = "../cyxcloud-storage" }
+cyxcloud-network = { path = "../cyxcloud-network" }
+cyxcloud-protocol = { path = "../cyxcloud-protocol" }
+
+# Async
+tokio = { workspace = true }
+futures = { workspace = true }
+
+# Configuration
+serde = { workspace = true }
+toml = { workspace = true }
+
+# CLI
+clap = { workspace = true }
+
+# gRPC
+tonic = { workspace = true }
+
+# HTTP server for metrics
+axum = { workspace = true }
+
+# Observability
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+metrics = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }
+
+# Utilities
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+bytes = { workspace = true }
+hostname = "0.3"
+
+# System metrics
+sysinfo = "0.31"
+
+# HTTP client for cyxwiz-api
+reqwest = { version = "0.12", features = ["json"] }
+serde_json = "1"
+rpassword = "7"
+
+# Local IP detection
+local-ip-address = "0.6"
+
+# Blockchain (optional, for Solana integration)
+solana-sdk = { workspace = true, optional = true }
+solana-client = { workspace = true, optional = true }
+sha2 = { version = "0.10", optional = true }
+
+[features]
+default = []
+blockchain = ["solana-sdk", "solana-client", "sha2"]
+
+[dev-dependencies]
+tempfile = { workspace = true }

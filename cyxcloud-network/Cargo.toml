@@ -1,0 +1,49 @@
+[package]
+name = "cyxcloud-network"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "P2P networking layer for CyxCloud using libp2p and gRPC"
+
+[dependencies]
+cyxcloud-core = { path = "../cyxcloud-core" }
+cyxcloud-storage = { path = "../cyxcloud-storage" }
+cyxcloud-protocol = { path = "../cyxcloud-protocol" }
+
+# Networking - libp2p for discovery
+libp2p = { workspace = true }
+quinn = { workspace = true }
+
+# gRPC for data transfer
+tonic = { workspace = true }
+
+# TLS
+rustls = { workspace = true }
+rustls-pemfile = "2.0"
+
+# Async
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+futures = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+bincode = { workspace = true }
+prost = { workspace = true }
+
+# Utilities
+thiserror = { workspace = true }
+bytes = { workspace = true }
+tracing = { workspace = true }
+parking_lot = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+clap = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[[example]]
+name = "cluster_node"
+path = "examples/cluster_node.rs"

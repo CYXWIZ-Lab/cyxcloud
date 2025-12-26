@@ -1,0 +1,74 @@
+# CyxCloud Storage Node Dockerfile
+# Multi-stage build for optimized image size
+
+# ========================================
+# Stage 1: Build
+# ========================================
+FROM rust:1.75-bookworm as builder
+
+WORKDIR /app
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    protobuf-compiler \
+    libprotobuf-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy workspace configuration
+COPY Cargo.toml Cargo.lock ./
+COPY rust-toolchain.toml ./
+
+# Copy all crates
+COPY cyxcloud-core ./cyxcloud-core
+COPY cyxcloud-storage ./cyxcloud-storage
+COPY cyxcloud-protocol ./cyxcloud-protocol
+COPY cyxcloud-network ./cyxcloud-network
+COPY cyxcloud-metadata ./cyxcloud-metadata
+COPY cyxcloud-gateway ./cyxcloud-gateway
+COPY cyxcloud-node ./cyxcloud-node
+COPY cyxcloud-cli ./cyxcloud-cli
+COPY cyxcloud-rebalancer ./cyxcloud-rebalancer
+
+# Build release binary
+RUN cargo build --release -p cyxcloud-node
+
+# ========================================
+# Stage 2: Runtime
+# ========================================
+FROM debian:bookworm-slim
+
+WORKDIR /app
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy binary from builder
+COPY --from=builder /app/target/release/cyxcloud-node /usr/local/bin/
+
+# Create data directories
+RUN mkdir -p /data/chunks /data/config
+
+# Environment variables
+ENV RUST_LOG=info
+ENV NODE_ID=node-1
+ENV GRPC_HOST=0.0.0.0
+ENV GRPC_PORT=50051
+ENV LIBP2P_PORT=4001
+ENV STORAGE_PATH=/data/chunks
+ENV CONFIG_PATH=/data/config
+ENV STORAGE_CAPACITY_GB=100
+
+# Expose ports
+# 50051: gRPC for chunk transfer
+# 4001: libp2p for peer discovery
+EXPOSE 50051 4001
+
+# Health check via gRPC health endpoint
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD grpc_health_probe -addr=:50051 || exit 1
+
+# Run node
+ENTRYPOINT ["cyxcloud-node"]
