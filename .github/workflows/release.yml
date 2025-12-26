@@ -55,8 +55,7 @@ jobs:
         if: matrix.os == 'windows-latest'
         run: choco install protoc -y
 
-      - name: Build Gateway
-        run: cargo build --release --target ${{ matrix.target }} -p cyxcloud-gateway
+      # Gateway binary excluded from public releases (internal use only)
 
       - name: Build Node
         run: cargo build --release --target ${{ matrix.target }} -p cyxcloud-node
@@ -68,7 +67,6 @@ jobs:
         if: matrix.os != 'windows-latest'
         run: |
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/cyxcloud-gateway dist/
           cp target/${{ matrix.target }}/release/cyxcloud-node dist/
           cp target/${{ matrix.target }}/release/cyxcloud dist/
           cp README.md LICENSE dist/
@@ -79,7 +77,6 @@ jobs:
         shell: pwsh
         run: |
           mkdir dist
-          cp target/${{ matrix.target }}/release/cyxcloud-gateway.exe dist/
           cp target/${{ matrix.target }}/release/cyxcloud-node.exe dist/
           cp target/${{ matrix.target }}/release/cyxcloud.exe dist/
           cp README.md dist/
