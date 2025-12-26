@@ -23,11 +23,6 @@ RUN mkdir -p /data/storage /data/metadata
 
 # Environment variables
 ENV RUST_LOG=info
-ENV GATEWAY_HOST=0.0.0.0
-ENV GATEWAY_HTTP_PORT=8080
-ENV GATEWAY_GRPC_PORT=50052
-ENV STORAGE_PATH=/data/storage
-ENV METADATA_PATH=/data/metadata
 
 # Expose ports
 EXPOSE 8080 50052
@@ -36,5 +31,5 @@ EXPOSE 8080 50052
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8080/health || exit 1
 
-# Run gateway on port 8080 (Railway expects this)
+# Run gateway on port 8080
 ENTRYPOINT ["cyxcloud-gateway", "--http-addr", "0.0.0.0:8080", "--grpc-addr", "0.0.0.0:50052"]
