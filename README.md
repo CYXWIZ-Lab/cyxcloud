@@ -177,6 +177,188 @@ cyxcloud ls my-bucket/
 cyxcloud rm my-bucket/file.txt
 ```
 
+## Arch Linux Setup
+
+Complete guide for running CyxCloud on Arch Linux.
+
+### Install Dependencies
+
+```bash
+# Update system
+sudo pacman -Syu
+
+# Install build tools
+sudo pacman -S base-devel git rustup protobuf
+
+# Install Rust
+rustup default stable
+
+# Install Docker (for full stack)
+sudo pacman -S docker docker-compose
+sudo systemctl enable --now docker
+sudo usermod -aG docker $USER
+newgrp docker  # or logout/login
+```
+
+### Option 1: Run with Docker Compose (Recommended)
+
+```bash
+# Clone repository
+git clone https://github.com/CYXWIZ-Lab/cyxcloud.git
+cd cyxcloud
+
+# Start full stack (PostgreSQL, Redis, Gateway, 3 Nodes, Rebalancer)
+docker compose up -d --build
+
+# View logs
+docker compose logs -f
+
+# Check health
+curl http://localhost:8080/health
+
+# Test upload
+echo "Hello CyxCloud!" > test.txt
+./target/release/cyxcloud --gateway http://localhost:8080 upload test.txt -b mybucket
+
+# Stop
+docker compose down
+```
+
+**Services started:**
+| Service | Port | Description |
+|---------|------|-------------|
+| PostgreSQL | 5432 | Metadata storage |
+| Redis | 6379 | Caching |
+| Gateway | 8080, 50052 | S3 API + gRPC |
+| Node 1 | 50061, 4001, 9091 | Storage + P2P + Metrics |
+| Node 2 | 50062, 4002, 9092 | Storage + P2P + Metrics |
+| Node 3 | 50063, 4003, 9093 | Storage + P2P + Metrics |
+
+### Option 2: Run from Pre-built Binaries
+
+```bash
+# Download latest release
+wget https://github.com/CYXWIZ-Lab/cyxcloud/releases/download/v0.1.0-alpha/cyxcloud-v0.1.0-alpha-linux-x64.tar.gz
+tar -xzf cyxcloud-v0.1.0-alpha-linux-x64.tar.gz
+cd cyxcloud-v0.1.0-alpha-linux-x64
+
+# Install PostgreSQL and Redis
+sudo pacman -S postgresql redis
+sudo systemctl enable --now postgresql redis
+
+# Initialize PostgreSQL
+sudo -u postgres createuser -s cyxcloud
+sudo -u postgres createdb cyxcloud
+
+# Run gateway
+export DATABASE_URL="postgres://cyxcloud@localhost/cyxcloud"
+export REDIS_URL="redis://localhost:6379"
+./cyxcloud-gateway &
+
+# Run storage node
+export NODE_ID="my-node-001"
+export STORAGE_PATH="$HOME/.cyxcloud/data"
+export CENTRAL_SERVER_ADDR="http://localhost:50052"
+mkdir -p $STORAGE_PATH
+./cyxcloud-node &
+
+# Test with CLI
+./cyxcloud --gateway http://localhost:8080 status
+```
+
+### Option 3: Build from Source
+
+```bash
+# Clone repository
+git clone https://github.com/CYXWIZ-Lab/cyxcloud.git
+cd cyxcloud
+
+# Build all components
+cargo build --release
+
+# Binaries are in target/release/
+ls target/release/cyxcloud*
+```
+
+### Run as Systemd Service
+
+**Gateway service** (`/etc/systemd/system/cyxcloud-gateway.service`):
+```ini
+[Unit]
+Description=CyxCloud Gateway
+After=network.target postgresql.service redis.service
+
+[Service]
+Type=simple
+User=cyxcloud
+Environment=RUST_LOG=info
+Environment=DATABASE_URL=postgres://cyxcloud@localhost/cyxcloud
+Environment=REDIS_URL=redis://localhost:6379
+ExecStart=/usr/local/bin/cyxcloud-gateway
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+**Storage node service** (`/etc/systemd/system/cyxcloud-node.service`):
+```ini
+[Unit]
+Description=CyxCloud Storage Node
+After=network.target cyxcloud-gateway.service
+
+[Service]
+Type=simple
+User=cyxcloud
+Environment=RUST_LOG=info
+Environment=NODE_ID=arch-node-001
+Environment=STORAGE_PATH=/var/lib/cyxcloud/data
+Environment=CENTRAL_SERVER_ADDR=http://localhost:50052
+ExecStart=/usr/local/bin/cyxcloud-node
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+# Install binaries
+sudo cp target/release/cyxcloud-gateway /usr/local/bin/
+sudo cp target/release/cyxcloud-node /usr/local/bin/
+sudo cp target/release/cyxcloud /usr/local/bin/
+
+# Create user and directories
+sudo useradd -r -s /bin/false cyxcloud
+sudo mkdir -p /var/lib/cyxcloud/data
+sudo chown -R cyxcloud:cyxcloud /var/lib/cyxcloud
+
+# Enable services
+sudo systemctl daemon-reload
+sudo systemctl enable --now cyxcloud-gateway
+sudo systemctl enable --now cyxcloud-node
+
+# Check status
+systemctl status cyxcloud-gateway
+systemctl status cyxcloud-node
+```
+
+### Firewall Configuration
+
+```bash
+# If using ufw
+sudo ufw allow 8080/tcp    # S3 API
+sudo ufw allow 50052/tcp   # gRPC
+sudo ufw allow 4001/tcp    # libp2p
+
+# If using firewalld
+sudo firewall-cmd --permanent --add-port=8080/tcp
+sudo firewall-cmd --permanent --add-port=50052/tcp
+sudo firewall-cmd --permanent --add-port=4001/tcp
+sudo firewall-cmd --reload
+```
+
 ## Documentation
 
 - **[Usage Guide](USAGE.md)** - Detailed build, run, and API documentation
