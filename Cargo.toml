@@ -134,6 +134,13 @@ opt-level = 3
 strip = true
 panic = "abort"
 
+# Low-memory profile for CI/CD platforms like Railway (512MB limit)
+[profile.release-railway]
+inherits = "release"
+lto = "thin"           # Much less memory than "fat"
+codegen-units = 16     # Parallel codegen uses less peak memory
+opt-level = "z"        # Optimize for size
+
 [profile.bench]
 inherits = "release"
 debug = true

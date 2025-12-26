@@ -29,8 +29,12 @@ COPY cyxcloud-node ./cyxcloud-node
 COPY cyxcloud-cli ./cyxcloud-cli
 COPY cyxcloud-rebalancer ./cyxcloud-rebalancer
 
-# Build release binary
-RUN cargo build --release -p cyxcloud-gateway
+# Build with low-memory profile for Railway (512MB limit)
+# - Uses "thin" LTO instead of "fat" (saves ~3GB RAM)
+# - Uses 16 codegen units instead of 1 (lower peak memory)
+ENV CARGO_INCREMENTAL=0
+ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
+RUN cargo build --profile release-railway -p cyxcloud-gateway
 
 # ========================================
 # Stage 2: Runtime
@@ -46,8 +50,8 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy binary from builder
-COPY --from=builder /app/target/release/cyxcloud-gateway /usr/local/bin/
+# Copy binary from builder (using release-railway profile)
+COPY --from=builder /app/target/release-railway/cyxcloud-gateway /usr/local/bin/
 
 # Create data directories
 RUN mkdir -p /data/storage /data/metadata
