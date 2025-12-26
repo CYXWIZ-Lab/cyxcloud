@@ -42,6 +42,24 @@ CyxCloud distributes data across multiple storage nodes using Reed-Solomon erasu
 - **Proof-of-Storage** - Cryptographic verification of stored data
 - **Automatic Rebalancing** - Self-healing network
 
+## Downloads
+
+Pre-built binaries for all platforms:
+
+| Platform | Download |
+|----------|----------|
+| **Linux x64** | [cyxcloud-v0.1.0-alpha-linux-x64.tar.gz](https://github.com/CYXWIZ-Lab/cyxcloud/releases/download/v0.1.0-alpha/cyxcloud-v0.1.0-alpha-linux-x64.tar.gz) |
+| **macOS x64** | [cyxcloud-v0.1.0-alpha-macos-x64.tar.gz](https://github.com/CYXWIZ-Lab/cyxcloud/releases/download/v0.1.0-alpha/cyxcloud-v0.1.0-alpha-macos-x64.tar.gz) |
+| **macOS ARM64** | [cyxcloud-v0.1.0-alpha-macos-arm64.tar.gz](https://github.com/CYXWIZ-Lab/cyxcloud/releases/download/v0.1.0-alpha/cyxcloud-v0.1.0-alpha-macos-arm64.tar.gz) |
+| **Windows x64** | [cyxcloud-v0.1.0-alpha-windows-x64.zip](https://github.com/CYXWIZ-Lab/cyxcloud/releases/download/v0.1.0-alpha/cyxcloud-v0.1.0-alpha-windows-x64.zip) |
+
+[All Releases](https://github.com/CYXWIZ-Lab/cyxcloud/releases)
+
+**Included binaries:**
+- `cyxcloud-gateway` - S3-compatible API server
+- `cyxcloud-node` - Storage node daemon
+- `cyxcloud` - Command-line client
+
 ## Components
 
 | Component | Description | Port |
