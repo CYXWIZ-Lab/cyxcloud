@@ -51,7 +51,7 @@ pub mod topology;
 pub use cache::{Cache, CacheConfig, CacheError, OptionalCache};
 pub use health::{HealthChecker, HealthConfig, HealthMonitor, HealthStatus, HealthSummary};
 pub use models::*;
-pub use postgres::{Database, DbConfig, DbError};
+pub use postgres::{Database, DbConfig, DbError, FaultToleranceConfig};
 pub use quorum::{QuorumConfig, QuorumCoordinator, QuorumError, QuorumResult};
 pub use topology::{PlacementConfig, PlacementEngine, PlacementNode, RebalanceSuggestion};
 
@@ -290,10 +290,19 @@ impl MetadataService {
         Ok(nodes)
     }
 
-    /// Update node heartbeat
+    /// Update node heartbeat (legacy - marks as online immediately)
     pub async fn heartbeat(&self, node_id: Uuid) -> Result<()> {
         self.db.update_node_heartbeat(node_id).await?;
         Ok(())
+    }
+
+    /// Update node heartbeat with recovery-aware logic
+    /// Returns the node's new status after the heartbeat
+    /// - If node was online/recovering: stays in current state, heartbeat updated
+    /// - If node was offline/draining: enters 'recovering' quarantine state
+    pub async fn heartbeat_with_recovery(&self, node_id: Uuid) -> Result<NodeStatus> {
+        let status = self.db.update_node_heartbeat_with_recovery(node_id).await?;
+        Ok(status)
     }
 
     /// Select nodes for placement

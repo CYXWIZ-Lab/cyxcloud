@@ -12,6 +12,7 @@ mod auth_api;
 pub mod blockchain;
 mod grpc_api;
 mod node_client;
+mod node_monitor;
 mod s3_api;
 mod state;
 mod websocket;
@@ -131,6 +132,16 @@ async fn main() -> anyhow::Result<()> {
             .await
             .expect("Failed to initialize application state"),
     );
+
+    // Start node lifecycle monitor (background task)
+    if state.metadata_service().is_some() {
+        let monitor_config = node_monitor::NodeMonitorConfig::from_env();
+        let monitor = Arc::new(node_monitor::NodeMonitor::new(monitor_config));
+        let _monitor_handle = monitor.start(state.clone());
+        info!("Node lifecycle monitor started");
+    } else {
+        info!("Metadata service not configured, node monitor disabled");
+    }
 
     // Build CORS layer
     let cors = if cli.cors_permissive {

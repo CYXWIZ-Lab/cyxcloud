@@ -175,10 +175,19 @@ impl NodeService for NodeServiceImpl {
             Status::invalid_argument(format!("Invalid node_id format: {}", e))
         })?;
 
-        // Update heartbeat in metadata
-        match metadata.heartbeat(node_uuid).await {
-            Ok(()) => {
-                debug!(node_id = %node_id_str, "Heartbeat recorded");
+        // Update heartbeat with recovery-aware logic
+        match metadata.heartbeat_with_recovery(node_uuid).await {
+            Ok(status) => {
+                let status_str = status.to_string();
+                if status == cyxcloud_metadata::NodeStatus::Recovering {
+                    debug!(
+                        node_id = %node_id_str,
+                        status = %status_str,
+                        "Heartbeat recorded - node in recovery quarantine"
+                    );
+                } else {
+                    debug!(node_id = %node_id_str, status = %status_str, "Heartbeat recorded");
+                }
                 Ok(Response::new(HeartbeatResponse {
                     acknowledged: true,
                     commands: vec![], // TODO: Return pending commands

@@ -40,6 +40,62 @@ pub struct DbConfig {
     pub idle_timeout: Duration,
 }
 
+/// Fault tolerance threshold configuration
+#[derive(Debug, Clone)]
+pub struct FaultToleranceConfig {
+    /// Mark node offline after no heartbeat for this duration (default: 5 minutes)
+    pub offline_threshold: Duration,
+    /// Start draining node after offline for this duration (default: 4 hours)
+    pub drain_threshold: Duration,
+    /// Remove node from database after offline for this duration (default: 7 days)
+    pub remove_threshold: Duration,
+    /// Recovery quarantine period before marking fully online (default: 5 minutes)
+    pub recovery_quarantine: Duration,
+}
+
+impl Default for FaultToleranceConfig {
+    fn default() -> Self {
+        Self {
+            offline_threshold: Duration::from_secs(5 * 60),         // 5 minutes
+            drain_threshold: Duration::from_secs(4 * 60 * 60),      // 4 hours
+            remove_threshold: Duration::from_secs(7 * 24 * 60 * 60), // 7 days
+            recovery_quarantine: Duration::from_secs(5 * 60),       // 5 minutes
+        }
+    }
+}
+
+impl FaultToleranceConfig {
+    /// Create configuration from environment variables
+    pub fn from_env() -> Self {
+        Self {
+            offline_threshold: Duration::from_secs(
+                std::env::var("NODE_OFFLINE_THRESHOLD_SECS")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(5 * 60),
+            ),
+            drain_threshold: Duration::from_secs(
+                std::env::var("NODE_DRAIN_THRESHOLD_SECS")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(4 * 60 * 60),
+            ),
+            remove_threshold: Duration::from_secs(
+                std::env::var("NODE_REMOVE_THRESHOLD_SECS")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(7 * 24 * 60 * 60),
+            ),
+            recovery_quarantine: Duration::from_secs(
+                std::env::var("NODE_RECOVERY_QUARANTINE_SECS")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(5 * 60),
+            ),
+        }
+    }
+}
+
 impl Default for DbConfig {
     fn default() -> Self {
         Self {
@@ -210,6 +266,253 @@ impl Database {
             sqlx::query_as::<_, NodeStorageSummary>("SELECT * FROM node_storage_summary")
                 .fetch_all(&self.pool)
                 .await?;
+        Ok(result)
+    }
+
+    // =========================================================================
+    // FAULT TOLERANCE OPERATIONS
+    // =========================================================================
+
+    /// Get online nodes that have not sent a heartbeat within the threshold
+    /// These should be marked as offline
+    #[instrument(skip(self))]
+    pub async fn get_stale_online_nodes(&self, threshold: Duration) -> Result<Vec<Node>> {
+        let threshold_secs = threshold.as_secs() as i64;
+        let result = sqlx::query_as::<_, Node>(
+            r#"
+            SELECT * FROM nodes
+            WHERE status = 'online'
+            AND (last_heartbeat IS NULL OR last_heartbeat < NOW() - make_interval(secs => $1))
+            "#,
+        )
+        .bind(threshold_secs)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
+    /// Get offline nodes that should start draining (offline > threshold)
+    #[instrument(skip(self))]
+    pub async fn get_nodes_for_draining(&self, threshold: Duration) -> Result<Vec<Node>> {
+        let threshold_secs = threshold.as_secs() as i64;
+        let result = sqlx::query_as::<_, Node>(
+            r#"
+            SELECT * FROM nodes
+            WHERE status = 'offline'
+            AND first_offline_at IS NOT NULL
+            AND first_offline_at < NOW() - make_interval(secs => $1)
+            "#,
+        )
+        .bind(threshold_secs)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
+    /// Get nodes that should be removed (offline/draining > threshold)
+    #[instrument(skip(self))]
+    pub async fn get_nodes_for_removal(&self, threshold: Duration) -> Result<Vec<Node>> {
+        let threshold_secs = threshold.as_secs() as i64;
+        let result = sqlx::query_as::<_, Node>(
+            r#"
+            SELECT * FROM nodes
+            WHERE status IN ('offline', 'draining')
+            AND first_offline_at IS NOT NULL
+            AND first_offline_at < NOW() - make_interval(secs => $1)
+            "#,
+        )
+        .bind(threshold_secs)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
+    /// Get recovering nodes that have completed their quarantine period
+    #[instrument(skip(self))]
+    pub async fn get_recovered_nodes(&self, quarantine: Duration) -> Result<Vec<Node>> {
+        let quarantine_secs = quarantine.as_secs() as i64;
+        let result = sqlx::query_as::<_, Node>(
+            r#"
+            SELECT * FROM nodes
+            WHERE status = 'recovering'
+            AND status_changed_at IS NOT NULL
+            AND status_changed_at < NOW() - make_interval(secs => $1)
+            "#,
+        )
+        .bind(quarantine_secs)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
+    /// Mark a node as offline and record when it first went offline
+    #[instrument(skip(self))]
+    pub async fn mark_node_offline(&self, node_id: Uuid) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE nodes
+            SET status = 'offline',
+                status_changed_at = NOW(),
+                first_offline_at = COALESCE(first_offline_at, NOW())
+            WHERE id = $1
+            "#,
+        )
+        .bind(node_id)
+        .execute(&self.pool)
+        .await?;
+        debug!(node_id = %node_id, "Node marked as offline");
+        Ok(())
+    }
+
+    /// Mark a node as recovering (quarantine state after coming back)
+    #[instrument(skip(self))]
+    pub async fn mark_node_recovering(&self, node_id: Uuid) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE nodes
+            SET status = 'recovering',
+                status_changed_at = NOW(),
+                last_heartbeat = NOW(),
+                failure_count = 0
+            WHERE id = $1
+            "#,
+        )
+        .bind(node_id)
+        .execute(&self.pool)
+        .await?;
+        debug!(node_id = %node_id, "Node marked as recovering");
+        Ok(())
+    }
+
+    /// Mark a recovering node as fully online (quarantine complete)
+    #[instrument(skip(self))]
+    pub async fn mark_node_online(&self, node_id: Uuid) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE nodes
+            SET status = 'online',
+                status_changed_at = NOW(),
+                first_offline_at = NULL,
+                last_heartbeat = NOW(),
+                failure_count = 0
+            WHERE id = $1
+            "#,
+        )
+        .bind(node_id)
+        .execute(&self.pool)
+        .await?;
+        debug!(node_id = %node_id, "Node marked as online");
+        Ok(())
+    }
+
+    /// Mark a node as draining (chunk evacuation should begin)
+    #[instrument(skip(self))]
+    pub async fn mark_node_draining(&self, node_id: Uuid) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE nodes
+            SET status = 'draining',
+                status_changed_at = NOW()
+            WHERE id = $1
+            "#,
+        )
+        .bind(node_id)
+        .execute(&self.pool)
+        .await?;
+        debug!(node_id = %node_id, "Node marked as draining");
+        Ok(())
+    }
+
+    /// Update node heartbeat with recovery-aware logic
+    /// Returns the new status after the update
+    #[instrument(skip(self))]
+    pub async fn update_node_heartbeat_with_recovery(&self, node_id: Uuid) -> Result<NodeStatus> {
+        // First get the current status
+        let node = self.get_node(node_id).await?
+            .ok_or_else(|| DbError::NotFound(format!("Node {} not found", node_id)))?;
+
+        match node.status.as_str() {
+            "online" | "recovering" => {
+                // Just update heartbeat timestamp
+                sqlx::query(
+                    r#"
+                    UPDATE nodes
+                    SET last_heartbeat = NOW(), failure_count = 0
+                    WHERE id = $1
+                    "#,
+                )
+                .bind(node_id)
+                .execute(&self.pool)
+                .await?;
+
+                if node.status == "recovering" {
+                    debug!(node_id = %node_id, "Heartbeat updated (recovering)");
+                    Ok(NodeStatus::Recovering)
+                } else {
+                    debug!(node_id = %node_id, "Heartbeat updated (online)");
+                    Ok(NodeStatus::Online)
+                }
+            }
+            "offline" | "draining" => {
+                // Node coming back - enter quarantine
+                sqlx::query(
+                    r#"
+                    UPDATE nodes
+                    SET status = 'recovering',
+                        status_changed_at = NOW(),
+                        last_heartbeat = NOW(),
+                        failure_count = 0
+                    WHERE id = $1
+                    "#,
+                )
+                .bind(node_id)
+                .execute(&self.pool)
+                .await?;
+
+                debug!(node_id = %node_id, "Node entering recovery quarantine");
+                Ok(NodeStatus::Recovering)
+            }
+            _ => {
+                // maintenance or unknown - just update heartbeat
+                sqlx::query("UPDATE nodes SET last_heartbeat = NOW() WHERE id = $1")
+                    .bind(node_id)
+                    .execute(&self.pool)
+                    .await?;
+
+                debug!(node_id = %node_id, status = %node.status, "Heartbeat updated");
+                Ok(NodeStatus::Maintenance)
+            }
+        }
+    }
+
+    /// Get all chunk locations stored on a specific node
+    pub async fn get_chunks_on_node(&self, node_id: Uuid) -> Result<Vec<ChunkLocation>> {
+        let result = sqlx::query_as::<_, ChunkLocation>(
+            "SELECT * FROM chunk_locations WHERE node_id = $1 AND status = 'stored'",
+        )
+        .bind(node_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
+    /// Delete a node from the database
+    /// Note: chunk_locations has ON DELETE CASCADE, so locations are auto-deleted
+    #[instrument(skip(self))]
+    pub async fn delete_node(&self, node_id: Uuid) -> Result<()> {
+        sqlx::query("DELETE FROM nodes WHERE id = $1")
+            .bind(node_id)
+            .execute(&self.pool)
+            .await?;
+        debug!(node_id = %node_id, "Node deleted from database");
+        Ok(())
+    }
+
+    /// Get all nodes (for health monitoring)
+    pub async fn get_all_nodes(&self) -> Result<Vec<Node>> {
+        let result = sqlx::query_as::<_, Node>("SELECT * FROM nodes ORDER BY created_at")
+            .fetch_all(&self.pool)
+            .await?;
         Ok(result)
     }
 
@@ -736,7 +1039,17 @@ mod tests {
     fn test_node_status_display() {
         assert_eq!(NodeStatus::Online.to_string(), "online");
         assert_eq!(NodeStatus::Offline.to_string(), "offline");
+        assert_eq!(NodeStatus::Recovering.to_string(), "recovering");
         assert_eq!(NodeStatus::Draining.to_string(), "draining");
         assert_eq!(NodeStatus::Maintenance.to_string(), "maintenance");
+    }
+
+    #[test]
+    fn test_fault_tolerance_config_default() {
+        let config = FaultToleranceConfig::default();
+        assert_eq!(config.offline_threshold.as_secs(), 5 * 60);
+        assert_eq!(config.drain_threshold.as_secs(), 4 * 60 * 60);
+        assert_eq!(config.remove_threshold.as_secs(), 7 * 24 * 60 * 60);
+        assert_eq!(config.recovery_quarantine.as_secs(), 5 * 60);
     }
 }

@@ -13,6 +13,7 @@ use uuid::Uuid;
 pub enum NodeStatus {
     Online,
     Offline,
+    Recovering, // Quarantine period after coming back from offline/draining
     Draining,
     Maintenance,
 }
@@ -28,6 +29,7 @@ impl std::fmt::Display for NodeStatus {
         match self {
             Self::Online => write!(f, "online"),
             Self::Offline => write!(f, "offline"),
+            Self::Recovering => write!(f, "recovering"),
             Self::Draining => write!(f, "draining"),
             Self::Maintenance => write!(f, "maintenance"),
         }
@@ -107,6 +109,10 @@ pub struct Node {
     pub status: String,
     pub last_heartbeat: Option<DateTime<Utc>>,
     pub failure_count: i32,
+
+    // Fault tolerance tracking
+    pub first_offline_at: Option<DateTime<Utc>>,
+    pub status_changed_at: Option<DateTime<Utc>>,
 
     // Metadata
     pub version: Option<String>,

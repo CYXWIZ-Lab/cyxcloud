@@ -126,6 +126,7 @@ enum NodeStatus {
     OFFLINE = 2;
     DRAINING = 3;
     MAINTENANCE = 4;
+    RECOVERING = 5;  // Quarantine period after coming back from offline/draining
 }
 
 message NodeCommand {

@@ -170,8 +170,10 @@ pub struct Detector {
     config: DetectorConfig,
     /// Last scan time
     last_scan: Option<Instant>,
-    /// Cached node health status
+    /// Cached node health status (legacy, for backwards compatibility)
     node_health: HashMap<String, bool>,
+    /// Cached node availability status
+    node_availability: HashMap<String, NodeAvailability>,
 }
 
 impl Detector {
@@ -181,6 +183,7 @@ impl Detector {
             config,
             last_scan: None,
             node_health: HashMap::new(),
+            node_availability: HashMap::new(),
         }
     }
 
@@ -262,7 +265,8 @@ impl Detector {
         Ok(result)
     }
 
-    /// Get list of healthy nodes
+    /// Get list of healthy nodes (can read from these nodes)
+    /// This includes both 'online' and 'recovering' nodes since they can serve existing chunks.
     async fn get_healthy_nodes<N: NetworkClient>(&mut self, client: &N) -> Result<Vec<String>> {
         let all_nodes = client
             .get_all_nodes()
@@ -272,19 +276,40 @@ impl Detector {
         let mut healthy = Vec::new();
 
         for node_id in all_nodes {
-            let is_healthy = client
-                .check_node_health(&node_id, self.config.health_check_timeout)
+            let availability = client
+                .check_node_availability(&node_id, self.config.health_check_timeout)
                 .await
-                .unwrap_or(false);
+                .unwrap_or(NodeAvailability::Unavailable);
 
-            self.node_health.insert(node_id.clone(), is_healthy);
+            // Update both caches for backwards compatibility
+            self.node_availability.insert(node_id.clone(), availability);
+            self.node_health.insert(node_id.clone(), availability != NodeAvailability::Unavailable);
 
-            if is_healthy {
+            // For reading chunks, both online and recovering nodes are acceptable
+            if availability == NodeAvailability::Online || availability == NodeAvailability::Recovering {
                 healthy.push(node_id);
             }
         }
 
         Ok(healthy)
+    }
+
+    /// Get list of write-healthy nodes (can write new chunks to these nodes)
+    /// This only includes 'online' nodes since 'recovering' nodes are in quarantine.
+    pub fn get_write_healthy_nodes(&self) -> Vec<String> {
+        self.node_availability
+            .iter()
+            .filter(|(_, avail)| **avail == NodeAvailability::Online)
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
+
+    /// Get node availability status
+    pub fn get_node_availability(&self, node_id: &str) -> NodeAvailability {
+        self.node_availability
+            .get(node_id)
+            .copied()
+            .unwrap_or(NodeAvailability::Unavailable)
     }
 
     /// Check if enough time has passed since last scan
@@ -295,9 +320,14 @@ impl Detector {
         }
     }
 
-    /// Get node health cache
+    /// Get node health cache (legacy)
     pub fn node_health(&self) -> &HashMap<String, bool> {
         &self.node_health
+    }
+
+    /// Get node availability cache
+    pub fn node_availability_cache(&self) -> &HashMap<String, NodeAvailability> {
+        &self.node_availability
     }
 }
 
@@ -319,6 +349,17 @@ pub trait MetadataClient: Send + Sync {
     ) -> std::result::Result<Vec<ChunkInfo>, Box<dyn std::error::Error + Send + Sync>>;
 }
 
+/// Node availability status for rebalancing
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeAvailability {
+    /// Node is fully online - can read and write
+    Online,
+    /// Node is recovering (quarantine) - can read only
+    Recovering,
+    /// Node is not available
+    Unavailable,
+}
+
 /// Network client trait for testing
 #[async_trait::async_trait]
 pub trait NetworkClient: Send + Sync {
@@ -326,11 +367,34 @@ pub trait NetworkClient: Send + Sync {
         &self,
     ) -> std::result::Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>>;
 
+    /// Get all nodes with their status
+    /// Returns (node_id, status) pairs
+    async fn get_all_nodes_with_status(
+        &self,
+    ) -> std::result::Result<Vec<(String, String)>, Box<dyn std::error::Error + Send + Sync>> {
+        // Default implementation: all nodes are online
+        let nodes = self.get_all_nodes().await?;
+        Ok(nodes.into_iter().map(|n| (n, "online".to_string())).collect())
+    }
+
     async fn check_node_health(
         &self,
         node_id: &str,
         timeout: Duration,
     ) -> std::result::Result<bool, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Check node availability (online, recovering, or unavailable)
+    async fn check_node_availability(
+        &self,
+        node_id: &str,
+        timeout: Duration,
+    ) -> std::result::Result<NodeAvailability, Box<dyn std::error::Error + Send + Sync>> {
+        // Default implementation: healthy = online, not healthy = unavailable
+        match self.check_node_health(node_id, timeout).await {
+            Ok(true) => Ok(NodeAvailability::Online),
+            _ => Ok(NodeAvailability::Unavailable),
+        }
+    }
 
     async fn verify_chunk_integrity(
         &self,
