@@ -1232,74 +1232,278 @@ cyxcloud node stop
 
 ## Docker Deployment
 
+Docker provides the easiest way to run the full CyxCloud stack with all dependencies.
+
+### Install Docker
+
+**Windows:**
+1. Download [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+2. Install and restart
+3. Enable WSL 2 backend (recommended)
+
+**macOS:**
+```bash
+# Using Homebrew
+brew install --cask docker
+
+# Or download Docker Desktop from docker.com
+```
+
+**Linux (Ubuntu/Debian):**
+```bash
+sudo apt-get update
+sudo apt-get install docker.io docker-compose-plugin
+sudo systemctl enable --now docker
+sudo usermod -aG docker $USER
+# Logout and login again
+```
+
+**Linux (Arch):**
+```bash
+sudo pacman -S docker docker-compose
+sudo systemctl enable --now docker
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+**Linux (Fedora):**
+```bash
+sudo dnf install docker docker-compose-plugin
+sudo systemctl enable --now docker
+sudo usermod -aG docker $USER
+```
+
 ### Quick Start
 
 ```bash
-cd cyx_cloud
+# Clone repository
+git clone https://github.com/CYXWIZ-Lab/cyxcloud.git
+cd cyxcloud
 
-# Start the full cluster (gateway + 3 nodes + PostgreSQL + Redis)
-docker-compose up -d
+# Start the full cluster (PostgreSQL, Redis, Gateway, 3 Nodes, Rebalancer)
+docker compose up -d --build
 
 # Check status
-docker-compose ps
+docker compose ps
 
-# View logs
-docker-compose logs -f gateway
-docker-compose logs -f node1
+# View logs (all services)
+docker compose logs -f
+
+# View specific service logs
+docker compose logs -f gateway
+docker compose logs -f node1
 
 # Stop cluster
-docker-compose down
+docker compose down
+
+# Stop and remove all data
+docker compose down -v
+```
+
+### Service Ports
+
+| Service | Container Port | Host Port | Description |
+|---------|----------------|-----------|-------------|
+| PostgreSQL | 5432 | 5432 | Metadata database |
+| Redis | 6379 | 6379 | Cache layer |
+| Gateway | 8080, 50052 | 8080, 50052 | S3 API + gRPC |
+| Node 1 | 50051, 4001, 9090 | 50061, 4001, 9091 | gRPC, P2P, Metrics |
+| Node 2 | 50051, 4001, 9090 | 50062, 4002, 9092 | gRPC, P2P, Metrics |
+| Node 3 | 50051, 4001, 9090 | 50063, 4003, 9093 | gRPC, P2P, Metrics |
+
+### Testing the Cluster
+
+```bash
+# Check gateway health
+curl http://localhost:8080/health
+
+# Create a test file
+echo "Hello from CyxCloud!" > testfile.txt
+
+# Upload using curl
+curl -X PUT http://localhost:8080/s3/mybucket/testfile.txt \
+    -H "Content-Type: text/plain" \
+    --data-binary @testfile.txt
+
+# List bucket contents
+curl "http://localhost:8080/s3/mybucket?list-type=2"
+
+# Download file
+curl http://localhost:8080/s3/mybucket/testfile.txt -o downloaded.txt
+cat downloaded.txt
+```
+
+### Using CLI with Docker Cluster
+
+```bash
+# Download CLI binary for your platform (or build from source)
+# Then connect to the Docker cluster:
+
+# Upload file
+./cyxcloud --gateway http://localhost:8080 upload testfile.txt -b mybucket
+
+# List files
+./cyxcloud --gateway http://localhost:8080 list mybucket
+
+# Download file
+./cyxcloud --gateway http://localhost:8080 download mybucket -k testfile.txt -o downloaded.txt
+
+# Check status
+./cyxcloud --gateway http://localhost:8080 status
 ```
 
 ### Development Mode
 
-Development mode enables debug logging and adds management UIs.
+Development mode enables verbose logging and optional management UIs.
 
 ```bash
-# Start with development overrides
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+# Start with debug logging
+docker compose up -d
+
+# View detailed logs
+docker compose logs -f gateway 2>&1 | grep -E "(INFO|DEBUG|WARN|ERROR)"
 ```
 
-**Additional Services in Dev Mode:**
-- **Adminer** (PostgreSQL UI): http://localhost:8081
-- **RedisInsight** (Redis UI): http://localhost:8082
+**Environment variables for debugging:**
+```yaml
+environment:
+  RUST_LOG: debug,cyxcloud_gateway=trace
+```
 
-### Service Ports
+### Monitoring
 
-| Service | Port | Description |
-|---------|------|-------------|
-| Gateway | 8080 | S3-compatible HTTP API |
-| Node 1 | 50051 / 4001 | gRPC / libp2p |
-| Node 2 | 50052 / 4002 | gRPC / libp2p |
-| Node 3 | 50053 / 4003 | gRPC / libp2p |
-| PostgreSQL | 5432 | Metadata database |
-| Redis | 6379 | Cache layer |
-| Adminer | 8081 | DB management (dev only) |
-| RedisInsight | 8082 | Redis management (dev only) |
+Access Prometheus metrics from each node:
+
+```bash
+# Node 1 metrics
+curl http://localhost:9091/metrics
+
+# Node 2 metrics
+curl http://localhost:9092/metrics
+
+# Node 3 metrics
+curl http://localhost:9093/metrics
+```
+
+**Key metrics:**
+- `cyxcloud_storage_bytes_used` - Storage consumption
+- `cyxcloud_chunks_total` - Number of chunks stored
+- `cyxcloud_bandwidth_in_bytes` - Incoming bandwidth
+- `cyxcloud_bandwidth_out_bytes` - Outgoing bandwidth
+- `cyxcloud_heartbeat_success_total` - Successful heartbeats
 
 ### Building Docker Images
 
 ```bash
 # Build all images
-docker-compose build
+docker compose build
 
 # Build specific image
 docker build -f Dockerfile.gateway -t cyxcloud-gateway .
 docker build -f Dockerfile.node -t cyxcloud-node .
 docker build -f Dockerfile.cli -t cyxcloud-cli .
+
+# Build with no cache (clean build)
+docker compose build --no-cache
 ```
 
-### Using CLI in Docker
+### Running CLI in Docker
 
 ```bash
 # Run CLI commands against the cluster
-docker run --rm --network cyxcloud-net cyxcloud-cli \
-    --gateway http://gateway:8080 upload /data -b mybucket
+docker run --rm --network cyxcloud_cyxcloud-net cyxcloud-cli \
+    --gateway http://gateway:8080 upload /data/myfile.txt -b mybucket
 
-# Interactive CLI
-docker run -it --rm --network cyxcloud-net \
+# Interactive CLI with mounted volume
+docker run -it --rm --network cyxcloud_cyxcloud-net \
     -v $(pwd)/data:/workspace/data \
     cyxcloud-cli --gateway http://gateway:8080 list mybucket
+```
+
+### Scaling Nodes
+
+Add more storage nodes by modifying `docker-compose.yml`:
+
+```yaml
+  node4:
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+    container_name: cyxcloud-node4
+    ports:
+      - "50064:50051"
+      - "4004:4001"
+      - "9094:9090"
+    environment:
+      RUST_LOG: info
+      NODE_ID: node-4
+      NODE_NAME: storage-node-4
+      CENTRAL_SERVER_ADDR: http://gateway:50052
+      BOOTSTRAP_PEERS: /dns4/node1/tcp/4001,/dns4/node2/tcp/4001,/dns4/node3/tcp/4001
+    volumes:
+      - node4-data:/data
+    networks:
+      - cyxcloud-net
+    depends_on:
+      gateway:
+        condition: service_healthy
+
+volumes:
+  node4-data:
+```
+
+Then restart:
+```bash
+docker compose up -d
+```
+
+### Troubleshooting Docker
+
+**Container won't start:**
+```bash
+# Check logs
+docker compose logs gateway
+
+# Check container status
+docker compose ps -a
+
+# Restart specific service
+docker compose restart gateway
+```
+
+**Port already in use:**
+```bash
+# Find process using port
+lsof -i :8080  # Linux/macOS
+netstat -ano | findstr :8080  # Windows
+
+# Change port in docker-compose.yml
+ports:
+  - "8081:8080"  # Use 8081 on host instead
+```
+
+**Database connection issues:**
+```bash
+# Check if postgres is healthy
+docker compose exec postgres pg_isready -U cyxcloud
+
+# View postgres logs
+docker compose logs postgres
+
+# Connect to postgres manually
+docker compose exec postgres psql -U cyxcloud -d cyxcloud
+```
+
+**Reset everything:**
+```bash
+# Stop all containers and remove volumes
+docker compose down -v
+
+# Remove all images
+docker compose down --rmi all
+
+# Fresh start
+docker compose up -d --build
 ```
 
 ---
