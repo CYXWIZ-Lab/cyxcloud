@@ -70,7 +70,7 @@ jobs:
           mkdir -p dist
           cp target/${{ matrix.target }}/release/cyxcloud-gateway dist/
           cp target/${{ matrix.target }}/release/cyxcloud-node dist/
-          cp target/${{ matrix.target }}/release/cyxcloud-cli dist/
+          cp target/${{ matrix.target }}/release/cyxcloud dist/
           cp README.md LICENSE dist/
           cd dist && tar -czvf ../cyxcloud-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz *
 
@@ -81,7 +81,7 @@ jobs:
           mkdir dist
           cp target/${{ matrix.target }}/release/cyxcloud-gateway.exe dist/
           cp target/${{ matrix.target }}/release/cyxcloud-node.exe dist/
-          cp target/${{ matrix.target }}/release/cyxcloud-cli.exe dist/
+          cp target/${{ matrix.target }}/release/cyxcloud.exe dist/
           cp README.md dist/
           cp LICENSE dist/
           Compress-Archive -Path dist/* -DestinationPath cyxcloud-${{ github.ref_name }}-${{ matrix.suffix }}.zip
