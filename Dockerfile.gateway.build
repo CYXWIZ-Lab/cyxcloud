@@ -12,6 +12,11 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     protobuf-compiler \
     libprotobuf-dev \
+    clang \
+    libclang-dev \
+    cmake \
+    pkg-config \
+    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy workspace configuration
