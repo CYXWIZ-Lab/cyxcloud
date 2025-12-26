@@ -1,57 +1,22 @@
 # CyxCloud Gateway Dockerfile
-# Multi-stage build for optimized image size
+# Uses pre-built binary from GitHub Releases (no compilation needed)
 
-# ========================================
-# Stage 1: Build
-# ========================================
-FROM rust:1.83-bookworm as builder
-
-WORKDIR /app
-
-# Install build dependencies
-RUN apt-get update && apt-get install -y \
-    protobuf-compiler \
-    libprotobuf-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy workspace configuration
-COPY Cargo.toml Cargo.lock ./
-COPY rust-toolchain.toml ./
-
-# Copy all crates
-COPY cyxcloud-core ./cyxcloud-core
-COPY cyxcloud-storage ./cyxcloud-storage
-COPY cyxcloud-protocol ./cyxcloud-protocol
-COPY cyxcloud-network ./cyxcloud-network
-COPY cyxcloud-metadata ./cyxcloud-metadata
-COPY cyxcloud-gateway ./cyxcloud-gateway
-COPY cyxcloud-node ./cyxcloud-node
-COPY cyxcloud-cli ./cyxcloud-cli
-COPY cyxcloud-rebalancer ./cyxcloud-rebalancer
-
-# Build with low-memory profile for Railway (512MB limit)
-# - Uses "thin" LTO instead of "fat" (saves ~3GB RAM)
-# - Uses 16 codegen units instead of 1 (lower peak memory)
-ENV CARGO_INCREMENTAL=0
-ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
-RUN cargo build --profile release-railway -p cyxcloud-gateway
-
-# ========================================
-# Stage 2: Runtime
-# ========================================
 FROM debian:bookworm-slim
 
 WORKDIR /app
 
-# Install runtime dependencies (including curl for healthcheck)
+# Install runtime dependencies
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     libssl3 \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy binary from builder (using release-railway profile)
-COPY --from=builder /app/target/release-railway/cyxcloud-gateway /usr/local/bin/
+# Download pre-built binary from GitHub Releases
+ARG VERSION=v0.1.0-alpha
+RUN curl -fsSL "https://github.com/CYXWIZ-Lab/cyxcloud/releases/download/${VERSION}/cyxcloud-${VERSION}-linux-x64.tar.gz" \
+    | tar -xz -C /usr/local/bin --strip-components=0 \
+    && chmod +x /usr/local/bin/cyxcloud-*
 
 # Create data directories
 RUN mkdir -p /data/storage /data/metadata
