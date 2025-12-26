@@ -1,0 +1,126 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            suffix: linux-x64
+            ext: ""
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            suffix: macos-x64
+            ext: ""
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            suffix: macos-arm64
+            ext: ""
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            suffix: windows-x64
+            ext: ".exe"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          version: "25.x"
+
+      - name: Install dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config
+
+      - name: Build Gateway
+        run: cargo build --release --target ${{ matrix.target }} -p cyxcloud-gateway
+
+      - name: Build Node
+        run: cargo build --release --target ${{ matrix.target }} -p cyxcloud-node
+
+      - name: Build CLI
+        run: cargo build --release --target ${{ matrix.target }} -p cyxcloud-cli
+
+      - name: Package (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/cyxcloud-gateway dist/
+          cp target/${{ matrix.target }}/release/cyxcloud-node dist/
+          cp target/${{ matrix.target }}/release/cyxcloud-cli dist/
+          cp README.md LICENSE dist/
+          cd dist && tar -czvf ../cyxcloud-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz *
+
+      - name: Package (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          mkdir dist
+          cp target/${{ matrix.target }}/release/cyxcloud-gateway.exe dist/
+          cp target/${{ matrix.target }}/release/cyxcloud-node.exe dist/
+          cp target/${{ matrix.target }}/release/cyxcloud-cli.exe dist/
+          cp README.md dist/
+          cp LICENSE dist/
+          Compress-Archive -Path dist/* -DestinationPath cyxcloud-${{ github.ref_name }}-${{ matrix.suffix }}.zip
+
+      - name: Upload artifact (Unix)
+        if: matrix.os != 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyxcloud-${{ matrix.suffix }}
+          path: cyxcloud-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz
+
+      - name: Upload artifact (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyxcloud-${{ matrix.suffix }}
+          path: cyxcloud-${{ github.ref_name }}-${{ matrix.suffix }}.zip
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts -type f
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: CyxCloud ${{ github.ref_name }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
+          generate_release_notes: true
+          files: |
+            artifacts/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
