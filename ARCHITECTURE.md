@@ -1112,6 +1112,128 @@ message NodeStatus {
 
 ---
 
+## Node Fault Tolerance
+
+CyxCloud implements automatic node lifecycle management to ensure data availability even when storage nodes go offline.
+
+### Node State Machine
+
+```
+                    heartbeat received
+                    ┌──────────────────────┐
+                    │                      │
+                    ▼                      │
+┌────────┐    ┌──────────┐   5 min    ┌─────────┐   4 hours   ┌──────────┐   7 days   ┌─────────┐
+│Register│───▶│  ONLINE  │───────────▶│ OFFLINE │────────────▶│ DRAINING │───────────▶│ REMOVED │
+└────────┘    └──────────┘ no beat    └────┬────┘             └────┬─────┘            └─────────┘
+                    ▲                      │ heartbeat              │ heartbeat
+                    │ 5 min quarantine     ▼                        ▼
+              ┌───────────────────────────────────────────────────────┐
+              │                     RECOVERING                         │
+              └───────────────────────────────────────────────────────┘
+```
+
+### Node Status States
+
+| Status | Description | Can Read | Can Write |
+|--------|-------------|----------|-----------|
+| **ONLINE** | Healthy, sending heartbeats | ✅ | ✅ |
+| **OFFLINE** | No heartbeat for 5+ minutes | ❌ | ❌ |
+| **RECOVERING** | Reconnected, in 5-min quarantine | ✅ | ❌ |
+| **DRAINING** | Offline 4+ hours, chunks evacuating | ❌ | ❌ |
+| **MAINTENANCE** | Manually set, graceful shutdown | ✅ | ❌ |
+
+### Automatic Lifecycle Transitions
+
+1. **Online → Offline**: After 5 minutes without heartbeat
+   - Node marked offline
+   - Chunks still counted but not served
+
+2. **Offline → Draining**: After 4 hours offline
+   - Chunk evacuation begins
+   - Repair jobs created for each chunk on the node
+   - Chunks copied to healthy nodes
+
+3. **Draining → Removed**: After 7 days offline
+   - Node deleted from database
+   - Chunk locations cascade deleted
+   - Node must re-register to rejoin
+
+4. **Offline/Draining → Recovering**: When heartbeat received
+   - Node enters 5-minute quarantine
+   - Can serve existing chunks (read-healthy)
+   - Cannot receive new chunks (not write-healthy)
+
+5. **Recovering → Online**: After 5-minute quarantine completes
+   - Node fully online
+   - Can read and write chunks
+
+### Configuration
+
+Fault tolerance thresholds are configurable via environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NODE_OFFLINE_THRESHOLD_SECS` | 300 (5 min) | Time without heartbeat before marking offline |
+| `NODE_DRAIN_THRESHOLD_SECS` | 14400 (4 hr) | Time offline before starting chunk evacuation |
+| `NODE_REMOVE_THRESHOLD_SECS` | 604800 (7 days) | Time offline before auto-removal |
+| `NODE_RECOVERY_QUARANTINE_SECS` | 300 (5 min) | Quarantine period for reconnecting nodes |
+| `NODE_MONITOR_INTERVAL_SECS` | 30 | How often the monitor checks node status |
+
+### Chunk Evacuation Process
+
+When a node starts draining:
+
+1. **Detection**: Node monitor detects node has been offline > 4 hours
+2. **Status Update**: Node marked as `draining`
+3. **Chunk Discovery**: All chunks on the draining node are identified
+4. **Repair Job Creation**: For each chunk:
+   - Source: draining node (if still reachable) or other replica
+   - Target: healthy online node (round-robin selection)
+   - Priority: 100 (high priority for evacuation)
+5. **Rebalancer Execution**: Repair jobs executed by rebalancer service
+6. **Replica Update**: Chunk locations updated as copies complete
+
+### Node Monitor Architecture
+
+```
++─────────────────────────────────────────────────────────────+
+│                     Gateway Process                          │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │                  Node Monitor                        │   │
+│  │  +──────────────────────────────────────────────+   │   │
+│  │  │              Check Cycle (every 30s)          │   │   │
+│  │  │                                               │   │   │
+│  │  │  1. Find stale online nodes → mark OFFLINE    │   │   │
+│  │  │  2. Find nodes offline > 4hr → mark DRAINING  │   │   │
+│  │  │  3. Find nodes offline > 7d → DELETE          │   │   │
+│  │  │  4. Find recovered nodes → mark ONLINE        │   │   │
+│  │  │                                               │   │   │
+│  │  +──────────────────────────────────────────────+   │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                            │                                 │
+│                            ▼                                 │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │                  Metadata Service                    │   │
+│  │                   (PostgreSQL)                       │   │
+│  └─────────────────────────────────────────────────────┘   │
++─────────────────────────────────────────────────────────────+
+```
+
+### Database Schema Extensions
+
+The fault tolerance system adds two columns to the `nodes` table:
+
+```sql
+-- Track when node first went offline
+first_offline_at TIMESTAMP WITH TIME ZONE;
+
+-- Track when status last changed
+status_changed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+```
+
+---
+
 ## Storage Architecture
 
 ### Erasure Coding Configuration

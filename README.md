@@ -41,6 +41,7 @@ CyxCloud distributes data across multiple storage nodes using Reed-Solomon erasu
 - **Blockchain Payments** - CYXWIZ token for subscriptions and rewards (fully implemented)
 - **Proof-of-Storage** - Cryptographic verification of stored data
 - **Automatic Rebalancing** - Self-healing network
+- **Fault Tolerance** - Automatic node lifecycle management with chunk evacuation
 
 ## Downloads
 
@@ -435,6 +436,16 @@ ws://gateway:8080/ws - Real-time events (upload progress, node status)
 | `REDIS_URL` | - | Redis connection |
 | `SOLANA_RPC_URL` | devnet | Solana RPC endpoint |
 | `GATEWAY_KEYPAIR_PATH` | ~/.config/solana/id.json | Solana keypair |
+
+### Fault Tolerance (Gateway)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NODE_OFFLINE_THRESHOLD_SECS` | 300 | Mark node offline after 5 min without heartbeat |
+| `NODE_DRAIN_THRESHOLD_SECS` | 14400 | Start chunk evacuation after 4 hours offline |
+| `NODE_REMOVE_THRESHOLD_SECS` | 604800 | Auto-remove node after 7 days offline |
+| `NODE_RECOVERY_QUARANTINE_SECS` | 300 | Quarantine period for reconnecting nodes |
+| `NODE_MONITOR_INTERVAL_SECS` | 30 | Node status check interval |
 
 ### Storage Node
 
