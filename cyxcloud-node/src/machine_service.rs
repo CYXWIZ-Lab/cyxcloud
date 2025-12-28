@@ -81,6 +81,7 @@ impl MachineService {
                     info!(
                         email = %creds.email,
                         username = %creds.username,
+                        node_id = ?creds.node_id,
                         "Loaded saved credentials"
                     );
 
@@ -109,14 +110,16 @@ impl MachineService {
         }
     }
 
-    /// Save credentials to file
+    /// Save credentials to file (includes persistent node_id)
     pub async fn save_credentials(&self) -> Result<(), std::io::Error> {
         let client = self.client.read().await;
         let email = self.email.read().await;
         let username = self.username.read().await;
 
         if let (Some(email), Some(username)) = (email.as_ref(), username.as_ref()) {
-            if let Some(creds) = client.get_credentials(email, username) {
+            // Include node_id from config for persistence across restarts
+            let node_id = Some(self.config.node.id.clone());
+            if let Some(creds) = client.get_credentials(email, username, node_id) {
                 let content = serde_json::to_string_pretty(&creds)?;
 
                 // Ensure ~/.cyxcloud/ directory exists
@@ -124,7 +127,11 @@ impl MachineService {
                 std::fs::create_dir_all(&config_dir)?;
 
                 std::fs::write(&self.credentials_path, content)?;
-                info!(path = ?self.credentials_path, "Credentials saved to ~/.cyxcloud/");
+                info!(
+                    path = ?self.credentials_path,
+                    node_id = %self.config.node.id,
+                    "Credentials saved (node ID persisted)"
+                );
             }
         }
 

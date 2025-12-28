@@ -1,6 +1,56 @@
 # CyxCloud Storage Node Dockerfile
 # Multi-stage build for optimized image size
-
+#
+# ========================================
+# USAGE
+# ========================================
+#
+# Build the image:
+#   docker build -f Dockerfile.node -t cyxcloud-node .
+#
+# Run with environment variables:
+#   docker run -d \
+#     --name cyxcloud-node \
+#     -p 50051:50051 \
+#     -p 4001:4001 \
+#     -p 9090:9090 \
+#     -v cyxcloud-data:/data \
+#     -e NODE_ID=my-node-1 \
+#     -e NODE_NAME=my-storage-node \
+#     -e STORAGE_CAPACITY_GB=100 \
+#     -e CENTRAL_SERVER_ADDR=http://gateway.cyxcloud.io:50052 \
+#     -e CYXWIZ_API_URL=https://api.cyxwiz.com \
+#     -e CYXWIZ_EMAIL=your@email.com \
+#     -e CYXWIZ_PASSWORD=yourpassword \
+#     cyxcloud-node
+#
+# Or mount a config file:
+#   docker run -d \
+#     --name cyxcloud-node \
+#     -p 50051:50051 \
+#     -p 4001:4001 \
+#     -p 9090:9090 \
+#     -v cyxcloud-data:/data \
+#     -v ./config.toml:/data/config/config.toml \
+#     -v ~/.cyxcloud:/root/.cyxcloud \
+#     cyxcloud-node -c /data/config/config.toml
+#
+# Ports:
+#   50051 - gRPC (chunk transfer)
+#   4001  - libp2p (peer discovery)
+#   9090  - Prometheus metrics & health check
+#
+# Volumes:
+#   /data/chunks - Chunk storage (persistent)
+#   /data/config - Configuration files
+#   /root/.cyxcloud - Saved credentials
+#
+# Health check:
+#   curl http://localhost:9090/health
+#
+# View logs:
+#   docker logs -f cyxcloud-node
+#
 # ========================================
 # Stage 1: Build
 # ========================================

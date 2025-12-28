@@ -426,6 +426,210 @@ service DataService {
     └──────────┘
 ```
 
+### 4.6 Node Lifecycle Timers
+
+The Gateway uses several configurable timers to manage node health:
+
+| Timer | Default | Description |
+|-------|---------|-------------|
+| Heartbeat Interval | 30 seconds | How often nodes send heartbeats |
+| Offline Threshold | 5 minutes | Time without heartbeat before marking offline |
+| Recovery Quarantine | 5 minutes | Time node must stay healthy before going back online |
+| Drain Threshold | 4 hours | Time offline before starting chunk migration |
+| Remove Threshold | 7 days | Time offline before removing node from database |
+
+#### Recovery Quarantine Explained
+
+When a node comes back online after being offline, it enters a **5-minute quarantine period** (status: `recovering`):
+
+```
+Timeline Example:
+═══════════════════════════════════════════════════════════════════════
+
+00:00  Node goes offline (gateway down, network issue, etc.)
+       └─ Status: offline
+
+00:05  Node sends heartbeat, Gateway receives it
+       └─ Status: recovering (NOT online yet!)
+       └─ Node cannot receive new chunk storage requests
+
+00:10  Node still sending heartbeats every 30 seconds
+       └─ Status: still recovering (quarantine not passed)
+
+00:10  Quarantine period (5 min) passes with stable heartbeats
+       └─ Status: online ✓
+       └─ Node can now receive chunk storage requests
+```
+
+**Why Quarantine?**
+
+The quarantine prevents "flapping" nodes from immediately receiving data:
+- A node that keeps going online/offline is unreliable
+- Data stored on flapping nodes risks being lost
+- Quarantine ensures node stability before trusting it with data
+
+#### Configuring Timers (Gateway)
+
+Timers are configured via environment variables in the Gateway:
+
+```bash
+# docker-compose.yml
+environment:
+  NODE_OFFLINE_THRESHOLD_MINS: 5        # Default: 5
+  NODE_RECOVERY_QUARANTINE_MINS: 5      # Default: 5
+  NODE_DRAIN_THRESHOLD_HOURS: 4         # Default: 4
+  NODE_REMOVE_THRESHOLD_DAYS: 7         # Default: 7
+```
+
+#### Storage Reservation
+
+When a node registers, the Gateway reserves **2 GB** of the node's storage for system use:
+
+```
+Storage Breakdown (100 GB node example):
+┌─────────────────────────────────────────────────────────────────┐
+│                     TOTAL STORAGE (100 GB)                      │
+├──────────────┬──────────────────────────────────────────────────┤
+│   RESERVED   │              ALLOCATABLE (98 GB)                 │
+│    (2 GB)    ├──────────────────────┬───────────────────────────┤
+│              │        USED          │       AVAILABLE           │
+│  System use: │   (stored chunks)    │   (free for new chunks)   │
+│  - Metadata  │                      │                           │
+│  - Parity    │                      │                           │
+│  - Rebalance │                      │                           │
+└──────────────┴──────────────────────┴───────────────────────────┘
+```
+
+The node displays this on successful registration:
+```
+========================================
+  Storage Reservation Summary
+========================================
+  Total Capacity:  100.0 GB
+  System Reserved: 2.0 GB
+  Available:       98.0 GB
+========================================
+```
+
+### 4.7 Node Operator Terms & Conditions
+
+This section explains the rules and penalties for running a CyxCloud storage node.
+
+#### Uptime Requirements
+
+| Requirement | Threshold | Consequence |
+|-------------|-----------|-------------|
+| Heartbeat | Every 30 seconds | Required to maintain "online" status |
+| Maximum Downtime | 5 minutes | Node marked "offline", stops receiving new chunks |
+| Extended Downtime | 4 hours | Node enters "draining" mode, chunks migrated away |
+| Abandonment | 7 days | Node removed from network permanently |
+
+#### Downtime Penalties
+
+```
+Downtime Timeline & Consequences
+═══════════════════════════════════════════════════════════════════════
+
+ 0-5 min     │ Grace period - no penalty
+             │ Node still "online"
+─────────────┼─────────────────────────────────────────────────────────
+ 5 min       │ Node marked "OFFLINE"
+             │ • No new chunks assigned
+             │ • Existing data still served if node comes back
+             │ • No earnings during offline period
+─────────────┼─────────────────────────────────────────────────────────
+ 4 hours     │ Node enters "DRAINING" mode
+             │ • Chunks actively migrated to other nodes
+             │ • Network prepares for permanent loss
+             │ • Reputation score decreased
+─────────────┼─────────────────────────────────────────────────────────
+ 7 days      │ Node "REMOVED" from network
+             │ • All chunk assignments transferred
+             │ • Must re-register as new node
+             │ • Staked tokens enter unstake cooldown
+═══════════════════════════════════════════════════════════════════════
+```
+
+#### Staking & Slashing (Blockchain-Enabled)
+
+When blockchain integration is enabled, node operators must stake tokens:
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| Minimum Stake | 500 CYXWIZ | Required to operate a node |
+| Unstake Lockup | 7 days | Cooldown period to withdraw stake |
+
+**Slashing Penalties** (% of staked tokens):
+
+| Violation | Penalty | Description |
+|-----------|---------|-------------|
+| Extended Downtime | 5% | Offline > 24 hours without notice |
+| Data Loss | 10% | Unable to serve chunks you're responsible for |
+| Failed Proofs | 15% | Failed 3+ consecutive proof-of-storage challenges |
+| Corrupted Data | 50% | Serving invalid/corrupted data to users |
+
+#### Reputation System
+
+Nodes earn reputation based on performance:
+
+```
+Reputation Score (0-10,000 points)
+═══════════════════════════════════════════════════════════════════════
+
+Positive Factors:                    Negative Factors:
+─────────────────────────────────    ─────────────────────────────────
++10  Successful proof-of-storage     -50  Failed proof-of-storage
++5   Fast chunk retrieval (<100ms)   -100 Downtime event
++1   Each hour of uptime             -500 Data loss event
++20  Perfect weekly uptime           -1000 Slashing event
+
+Benefits of High Reputation:
+• Priority for chunk assignments (more storage = more earnings)
+• Higher trust score shown to users
+• Eligible for premium storage tiers
+• Lower proof-of-storage challenge frequency
+═══════════════════════════════════════════════════════════════════════
+```
+
+#### Earnings & Payments
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| Payment Epoch | Weekly | Earnings distributed every 7 days |
+| Node Share | 85% | Of storage fees for chunks you store |
+| Platform Fee | 10% | Goes to CyxCloud platform |
+| Community Fund | 5% | For network development |
+
+**Earnings Calculation:**
+```
+Weekly Earnings = (Chunks Stored × Chunk Size × Price per GB/month × 7/30) × 0.85
+```
+
+#### Best Practices for Node Operators
+
+1. **Stable Internet**: Use wired connection, avoid shared/congested networks
+2. **UPS/Battery Backup**: Prevent data loss during power outages
+3. **Monitoring**: Set up alerts for disk space, CPU, and connectivity
+4. **Planned Maintenance**: Use `--maintenance` flag to gracefully pause
+5. **Sufficient Storage**: Leave 20% headroom beyond your committed capacity
+6. **Regular Updates**: Keep node software updated for security patches
+
+#### Quick Reference Card
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    NODE OPERATOR QUICK REFERENCE                    │
+├─────────────────────────────────────────────────────────────────────┤
+│  STAY ONLINE        │  Heartbeat every 30s, max 5min downtime      │
+│  STAKE REQUIRED     │  500 CYXWIZ minimum                          │
+│  EARNINGS           │  85% of storage fees, paid weekly            │
+│  WORST PENALTY      │  50% stake slash for corrupted data          │
+│  RECOVERY TIME      │  5 min quarantine after coming back online   │
+│  LOGOUT COMMAND     │  cyxcloud-node --logout                      │
+│  CHECK STATUS       │  curl http://localhost:9090/health           │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
 ---
 
 ## 5. CLI Component

@@ -10,9 +10,9 @@
 //! - `upload` - Upload a file or directory
 //! - `download` - Download a file or directory
 //! - `list` - List stored files
+//! - `delete` - Delete a file from storage
 //! - `status` - Show storage status
 //! - `config` - Show or edit configuration
-//! - `node` - Node management commands
 //!
 //! # Configuration
 //! Config file: ~/.cyxcloud/config.toml
@@ -156,12 +156,6 @@ enum Commands {
         force: bool,
     },
 
-    /// Node management
-    Node {
-        #[command(subcommand)]
-        command: NodeCommands,
-    },
-
     /// Show or initialize configuration
     Config {
         #[command(subcommand)]
@@ -191,22 +185,6 @@ enum ConfigCommands {
         /// Value to set
         value: String,
     },
-}
-
-#[derive(Subcommand)]
-enum NodeCommands {
-    /// Show node status
-    Status,
-
-    /// Start local node
-    Start {
-        /// Storage allocation in GB
-        #[arg(long, default_value = "100")]
-        storage_gb: u64,
-    },
-
-    /// Stop local node
-    Stop,
 }
 
 #[tokio::main]
@@ -319,23 +297,6 @@ async fn main() -> Result<()> {
             let config = delete::DeleteConfig { bucket, key, force };
             delete::run(&client, config).await?;
         }
-
-        Commands::Node { command } => match command {
-            NodeCommands::Status => {
-                println!("Node status: Not implemented yet");
-                println!("Local node management will be available in a future release.");
-            }
-            NodeCommands::Start { storage_gb } => {
-                println!(
-                    "Starting node with {} GB storage: Not implemented yet",
-                    storage_gb
-                );
-                println!("Use cyxcloud-node binary to run a storage node.");
-            }
-            NodeCommands::Stop => {
-                println!("Stopping node: Not implemented yet");
-            }
-        },
 
         Commands::Config { command } => {
             handle_config_command(command)?;

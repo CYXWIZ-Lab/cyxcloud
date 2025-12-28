@@ -50,12 +50,28 @@ struct Cli {
     /// Enable verbose logging
     #[arg(short, long)]
     verbose: bool,
+
+    /// Logout and clear saved credentials
+    #[arg(long)]
+    logout: bool,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Parse CLI arguments
     let cli = Cli::parse();
+
+    // Handle logout command
+    if cli.logout {
+        let creds_path = cyxcloud_node::config::node_credentials_path();
+        if creds_path.exists() {
+            std::fs::remove_file(&creds_path)?;
+            println!("Logged out successfully. Credentials removed from {:?}", creds_path);
+        } else {
+            println!("No saved credentials found.");
+        }
+        return Ok(());
+    }
 
     // Initialize tracing
     if cli.verbose {
@@ -72,16 +88,79 @@ async fn main() -> anyhow::Result<()> {
 
     // Load configuration
     // Priority: CLI args > node config.toml > shared config (~/.cyxcloud/config.toml) > defaults
-    let config = NodeConfig::load_or_default(&cli.config)
+    let mut config = NodeConfig::load_or_default(&cli.config)
         .with_shared_config()  // Apply shared config from ~/.cyxcloud/config.toml
         .with_overrides(cli.data_dir, cli.port)
         .with_env_overrides();
+
+    // Check if storage capacity is configured
+    if config.storage.max_capacity_gb == 0 {
+        // Check if running in interactive mode (TTY)
+        if atty::is(atty::Stream::Stdin) {
+            use cyxcloud_node::symbols;
+            use std::io::{self, Write};
+
+            println!();
+            println!("{}", symbols::BOX_TOP);
+            println!("{}  Storage Capacity Not Configured                        {}", symbols::BOX_SIDE, symbols::BOX_SIDE);
+            println!("{}", symbols::BOX_BOTTOM);
+            println!();
+            println!("Your storage capacity (max_capacity_gb) is not set in config.toml.");
+            println!("This determines how much disk space you're offering to the network.");
+            println!();
+            println!("Please enter the storage capacity you want to allocate:");
+            println!();
+
+            loop {
+                print!("Storage capacity in GB (e.g., 100): ");
+                io::stdout().flush()?;
+
+                let mut input = String::new();
+                io::stdin().read_line(&mut input)?;
+                let input = input.trim();
+
+                match input.parse::<u64>() {
+                    Ok(gb) if gb >= 1 => {
+                        config.storage.max_capacity_gb = gb;
+                        println!();
+                        println!("{} Storage capacity set to {} GB", symbols::CHECK, gb);
+
+                        // Calculate reserved and available
+                        let reserved_gb = 2;
+                        let available_gb = if gb > reserved_gb { gb - reserved_gb } else { 0 };
+                        println!("  System reserved: {} GB", reserved_gb);
+                        println!("  Available for storage: {} GB", available_gb);
+                        println!();
+
+                        // Suggest saving to config
+                        println!("TIP: Add this to your config.toml to skip this prompt:");
+                        println!();
+                        println!("  [storage]");
+                        println!("  max_capacity_gb = {}", gb);
+                        println!();
+                        break;
+                    }
+                    Ok(_) => {
+                        println!("{} Please enter at least 1 GB", symbols::CROSS);
+                    }
+                    Err(_) => {
+                        println!("{} Invalid input. Please enter a number (e.g., 100)", symbols::CROSS);
+                    }
+                }
+            }
+        } else {
+            // Non-interactive mode, warn but continue with 0 (unlimited)
+            warn!("Storage capacity not configured (max_capacity_gb = 0)");
+            warn!("Set max_capacity_gb in config.toml or run interactively to configure");
+        }
+    }
 
     info!(
         node_id = %config.node.id,
         node_name = %config.node.name,
         grpc_port = config.network.grpc_port,
         data_dir = ?config.storage.data_dir,
+        max_capacity_gb = config.storage.max_capacity_gb,
         "Configuration loaded"
     );
 

@@ -379,10 +379,32 @@ impl HeartbeatService {
         let result = response.into_inner();
 
         if result.success {
+            // Calculate storage info for display
+            let total_gb = stats.bytes_capacity as f64 / (1024.0 * 1024.0 * 1024.0);
+            let reserved_gb = 2.0; // Gateway reserves 2GB
+            let available_gb = (total_gb - reserved_gb).max(0.0);
+
             info!(
                 node_id = %self.node_id,
+                storage_total_gb = format!("{:.1}", total_gb),
+                storage_reserved_gb = format!("{:.1}", reserved_gb),
+                storage_available_gb = format!("{:.1}", available_gb),
                 "Node registered successfully with Gateway"
             );
+
+            // Print user-friendly storage summary
+            if total_gb > 0.0 {
+                info!("========================================");
+                info!("  Storage Reservation Summary");
+                info!("========================================");
+                info!("  Total Capacity:  {:.1} GB", total_gb);
+                info!("  System Reserved: {:.1} GB", reserved_gb);
+                info!("  Available:       {:.1} GB", available_gb);
+                info!("========================================");
+            } else {
+                warn!("No storage capacity configured - set max_capacity_gb in config.toml");
+            }
+
             // Store the gateway auth token for future requests (if any)
             {
                 let mut token = self.auth_token.write().await;

@@ -1069,6 +1069,145 @@ curl http://localhost:9090/metrics
 # cyxcloud_active_connections     - Current gRPC connections
 ```
 
+### Node Operator Terms & Conditions
+
+This section explains the rules and penalties for running a CyxCloud storage node.
+
+#### Uptime Requirements
+
+| Requirement | Threshold | Consequence |
+|-------------|-----------|-------------|
+| Heartbeat | Every 30 seconds | Required to maintain "online" status |
+| Maximum Downtime | 5 minutes | Node marked "offline", stops receiving new chunks |
+| Extended Downtime | 4 hours | Node enters "draining" mode, chunks migrated away |
+| Abandonment | 7 days | Node removed from network permanently |
+
+#### Downtime Timeline & Penalties
+
+```
+TIME OFFLINE              STATUS              CONSEQUENCE
+═══════════════════════════════════════════════════════════════════════
+  0-5 minutes             ONLINE              No impact - grace period
+─────────────────────────────────────────────────────────────────────────
+  5 minutes               OFFLINE             • No new chunks assigned
+                                              • Existing data still served
+                                              • No earnings during downtime
+─────────────────────────────────────────────────────────────────────────
+  4 hours                 DRAINING            • Chunks actively migrated away
+                                              • Reputation score decreased
+                                              • Network prepares for loss
+─────────────────────────────────────────────────────────────────────────
+  7 days                  REMOVED             • Node deleted from registry
+                                              • Must re-register as new node
+                                              • Staked tokens enter cooldown
+═══════════════════════════════════════════════════════════════════════
+```
+
+#### Recovery After Downtime
+
+When a node comes back online after being offline, it enters a **5-minute quarantine**:
+
+```
+RECOVERY TIMELINE
+═══════════════════════════════════════════════════════════════════════
+00:00  Node sends first heartbeat after downtime
+       → Status: RECOVERING (quarantine starts)
+       → Cannot receive new chunk assignments
+
+05:00  Quarantine period ends (5 consecutive minutes of stable heartbeats)
+       → Status: ONLINE
+       → Node can receive new chunks again
+═══════════════════════════════════════════════════════════════════════
+
+Why quarantine? Prevents "flapping" nodes from getting data:
+  • A node that keeps going online/offline is unreliable
+  • Data stored on flapping nodes risks being lost
+  • Quarantine proves the node is stable before trusting it
+```
+
+#### Staking Requirements (Blockchain-Enabled)
+
+When blockchain integration is enabled, node operators must stake tokens:
+
+| Parameter | Value |
+|-----------|-------|
+| **Minimum Stake** | 500 CYXWIZ |
+| **Unstake Lockup** | 7 days (cooldown to withdraw) |
+
+#### Slashing Penalties
+
+If blockchain is enabled, violations result in stake penalties:
+
+| Violation | Penalty | Description |
+|-----------|---------|-------------|
+| **Extended Downtime** | 5% of stake | Offline > 24 hours without notice |
+| **Data Loss** | 10% of stake | Unable to serve chunks you're responsible for |
+| **Failed Proofs** | 15% of stake | Failed 3+ consecutive proof-of-storage |
+| **Corrupted Data** | 50% of stake | Serving invalid/corrupted data to users |
+
+#### Reputation System
+
+Nodes earn reputation based on performance (0-10,000 points):
+
+```
+POSITIVE FACTORS                      NEGATIVE FACTORS
+─────────────────────────────────     ─────────────────────────────────
++10  Successful proof-of-storage      -50   Failed proof-of-storage
++5   Fast chunk retrieval (<100ms)    -100  Each downtime event
++1   Each hour of uptime              -500  Data loss event
++20  Perfect weekly uptime            -1000 Slashing event
+
+HIGH REPUTATION BENEFITS:
+  • Priority for chunk assignments (more storage = more earnings)
+  • Higher trust score shown to users
+  • Eligible for premium storage tiers
+  • Lower proof-of-storage challenge frequency
+```
+
+#### Earnings
+
+| Parameter | Value |
+|-----------|-------|
+| **Payment Schedule** | Weekly |
+| **Node Share** | 85% of storage fees |
+| **Platform Fee** | 10% |
+| **Community Fund** | 5% |
+
+**Earnings Formula:**
+```
+Weekly Earnings = (GB Stored × Price per GB/month × 7/30) × 0.85
+
+Example: 100 GB × $0.02/GB/month × 7/30 × 0.85 = $0.40/week
+```
+
+#### Best Practices
+
+1. **Stable Internet** - Use wired connection, avoid shared networks
+2. **UPS/Battery** - Prevent data loss during power outages
+3. **Monitoring** - Set up alerts for disk space and connectivity
+4. **Planned Maintenance** - Gracefully stop before going offline
+5. **Storage Headroom** - Leave 20% free beyond committed capacity
+6. **Updates** - Keep node software updated
+
+#### Quick Reference
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    NODE OPERATOR QUICK REFERENCE                     │
+├─────────────────────────────────────────────────────────────────────┤
+│  HEARTBEAT           │  Every 30 seconds                            │
+│  GRACE PERIOD        │  5 minutes (before marked offline)           │
+│  RECOVERY TIME       │  5 minutes quarantine after coming back      │
+│  STAKE REQUIRED      │  500 CYXWIZ minimum (if blockchain enabled)  │
+│  EARNINGS            │  85% of storage fees, paid weekly            │
+│  WORST PENALTY       │  50% stake slash for corrupted data          │
+├─────────────────────────────────────────────────────────────────────┤
+│  LOGOUT COMMAND      │  cyxcloud-node --logout                      │
+│  CHECK HEALTH        │  curl http://localhost:9090/health           │
+│  VIEW METRICS        │  curl http://localhost:9090/metrics          │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
 ### 3. Start the Rebalancer (Optional)
 
 The rebalancer monitors chunk health and repairs under-replicated data.

@@ -3,6 +3,7 @@
 //! Supports loading from TOML files and environment variables.
 
 use serde::{Deserialize, Serialize};
+use serde_json;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -192,8 +193,29 @@ impl Default for NodeIdentity {
     }
 }
 
+/// Generate or load persistent node ID.
+/// Checks ~/.cyxcloud/node_credentials.json first, generates new UUID if not found.
 fn generate_node_id() -> String {
-    uuid::Uuid::new_v4().to_string()
+    // Try to load saved node ID from credentials file
+    let creds_path = node_credentials_path();
+    if creds_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&creds_path) {
+            // Parse JSON and extract node_id field
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(node_id) = json.get("node_id").and_then(|v| v.as_str()) {
+                    if !node_id.is_empty() {
+                        tracing::debug!(node_id = %node_id, "Loaded persistent node ID from credentials");
+                        return node_id.to_string();
+                    }
+                }
+            }
+        }
+    }
+
+    // Generate new node ID
+    let new_id = uuid::Uuid::new_v4().to_string();
+    tracing::info!(node_id = %new_id, "Generated new node ID (will be persisted on login)");
+    new_id
 }
 
 fn default_node_name() -> String {

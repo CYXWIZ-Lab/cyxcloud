@@ -199,6 +199,9 @@ pub struct SavedCredentials {
     pub auth_token: String,
     pub machine_id: Option<String>,
     pub api_key: Option<String>,
+    /// Persistent node ID (survives restarts)
+    #[serde(default)]
+    pub node_id: Option<String>,
 }
 
 // ============ API Client ============
@@ -293,7 +296,7 @@ impl CyxWizApiClient {
     }
 
     /// Get current credentials for saving
-    pub fn get_credentials(&self, email: &str, username: &str) -> Option<SavedCredentials> {
+    pub fn get_credentials(&self, email: &str, username: &str, node_id: Option<String>) -> Option<SavedCredentials> {
         Some(SavedCredentials {
             user_id: self.user_id.clone()?,
             email: email.to_string(),
@@ -301,6 +304,7 @@ impl CyxWizApiClient {
             auth_token: self.auth_token.clone()?,
             machine_id: self.machine_id.clone(),
             api_key: self.api_key.clone(),
+            node_id,
         })
     }
 

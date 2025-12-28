@@ -145,13 +145,24 @@ impl Database {
     // NODE OPERATIONS
     // =========================================================================
 
-    /// Register a new node
+    /// Register a new node (upsert - updates if peer_id exists)
     #[instrument(skip(self, node))]
     pub async fn create_node(&self, node: CreateNode) -> Result<Node> {
         let result = sqlx::query_as::<_, Node>(
             r#"
             INSERT INTO nodes (peer_id, grpc_address, storage_total, storage_reserved, bandwidth_mbps, datacenter, region, version, status)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'online')
+            ON CONFLICT (peer_id) DO UPDATE SET
+                grpc_address = EXCLUDED.grpc_address,
+                storage_total = EXCLUDED.storage_total,
+                storage_reserved = EXCLUDED.storage_reserved,
+                bandwidth_mbps = EXCLUDED.bandwidth_mbps,
+                datacenter = EXCLUDED.datacenter,
+                region = EXCLUDED.region,
+                version = EXCLUDED.version,
+                status = 'online',
+                last_heartbeat = NOW(),
+                first_offline_at = NULL
             RETURNING *
             "#,
         )
@@ -166,7 +177,7 @@ impl Database {
         .fetch_one(&self.pool)
         .await?;
 
-        debug!(node_id = %result.id, peer_id = %node.peer_id, "Node registered");
+        debug!(node_id = %result.id, peer_id = %node.peer_id, "Node registered/updated");
         Ok(result)
     }
 
