@@ -1021,6 +1021,14 @@ impl AppState {
             // Reassemble the file
             let data = reassemble_chunks(&chunks).map_err(|e| S3Error::Internal(e.to_string()))?;
 
+            // Trim to original file size (erasure coding may add padding)
+            let original_size = file.size_bytes as usize;
+            let data = if data.len() > original_size {
+                data.slice(0..original_size)
+            } else {
+                data
+            };
+
             info!(
                 bucket = bucket,
                 key = key,
