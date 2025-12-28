@@ -9,10 +9,12 @@ use bytes::Bytes;
 use cyxcloud_core::{
     split_into_chunks, reassemble_chunks, DEFAULT_CHUNK_SIZE,
     ErasureEncoder, ShardData, TOTAL_SHARDS, DATA_SHARDS, PARITY_SHARDS,
+    crypto::ContentHash,
 };
 use cyxcloud_metadata::{
     MetadataConfig, MetadataService, MetadataError,
     PlacementConfig, PlacementEngine, PlacementNode,
+    CreateChunk,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -703,6 +705,29 @@ impl AppState {
                 chunk_count, total_shards, DATA_SHARDS, PARITY_SHARDS
             );
 
+            // Create file record FIRST so chunks can reference it (foreign key)
+            let create_file = cyxcloud_metadata::CreateFile {
+                id: Some(file_id),
+                name: key.split('/').last().unwrap_or(key).to_string(),
+                path: format!("{}/{}", bucket, key),
+                content_hash: content_hash.as_bytes().to_vec(),
+                size_bytes: data.len() as i64,
+                chunk_count: chunk_count as i32,
+                data_shards: DATA_SHARDS as i32,
+                parity_shards: PARITY_SHARDS as i32,
+                chunk_size: DEFAULT_CHUNK_SIZE as i32,
+                owner_id: Some(self.user_id),
+                bucket: Some(bucket.to_string()),
+                content_type: Some(content_type.to_string()),
+                metadata: None,
+            };
+            let file = meta
+                .register_file(create_file)
+                .await
+                .map_err(|e| S3Error::Internal(e.to_string()))?;
+
+            debug!(file_id = %file.id, "File record created, now storing shards");
+
             // Track total shards stored for verification
             let mut shards_stored = 0;
             let mut failed_shards = 0;
@@ -747,9 +772,10 @@ impl AppState {
                         continue;
                     }
 
-                    // Create shard-specific chunk ID by appending shard index
-                    let mut shard_id = chunk_id.to_vec();
-                    shard_id.push(shard.index);
+                    // Create shard-specific chunk ID by hashing the shard data
+                    // This satisfies content-addressing: shard_id = hash(shard_data)
+                    // which the storage node validates before storing
+                    let shard_id = ContentHash::compute(&shard.data).as_bytes().to_vec();
 
                     // Create metadata for this shard
                     let shard_meta = ChunkMeta {
@@ -784,6 +810,19 @@ impl AppState {
                                 is_parity = shard.is_parity,
                                 "Shard stored successfully"
                             );
+
+                            // Register chunk in chunks table
+                            let create_chunk = CreateChunk {
+                                chunk_id: shard_id.clone(),
+                                file_id,
+                                shard_index: shard.index as i32,
+                                is_parity: shard.is_parity,
+                                size_bytes: shard.data.len() as i32,
+                                replication_factor: 1,
+                            };
+                            if let Err(e) = meta.register_chunk(create_chunk).await {
+                                warn!(error = %e, "Failed to register chunk in database");
+                            }
 
                             // Record shard location in metadata
                             if let Some(node) = nodes.iter().find(|n| n.grpc_address == target_node.grpc_address) {
@@ -821,6 +860,17 @@ impl AppState {
                                     )
                                     .await
                                 {
+                                    // Register chunk in chunks table
+                                    let create_chunk = CreateChunk {
+                                        chunk_id: shard_id.clone(),
+                                        file_id,
+                                        shard_index: shard.index as i32,
+                                        is_parity: shard.is_parity,
+                                        size_bytes: shard.data.len() as i32,
+                                        replication_factor: 1,
+                                    };
+                                    let _ = meta.register_chunk(create_chunk).await;
+
                                     if let Some(node) = nodes.iter().find(|n| n.grpc_address == backup_node.grpc_address) {
                                         let _ = meta.record_chunk_location(&shard_id, node.id).await;
                                     }
@@ -852,26 +902,6 @@ impl AppState {
                     shards_stored, min_shards_needed
                 )));
             }
-
-            // Create file record in database
-            let create_file = cyxcloud_metadata::CreateFile {
-                name: key.split('/').last().unwrap_or(key).to_string(),
-                path: format!("{}/{}", bucket, key),
-                content_hash: content_hash.as_bytes().to_vec(),
-                size_bytes: data.len() as i64,
-                chunk_count: chunk_count as i32,
-                data_shards: DATA_SHARDS as i32,
-                parity_shards: PARITY_SHARDS as i32,
-                chunk_size: DEFAULT_CHUNK_SIZE as i32,
-                owner_id: Some(self.user_id),
-                bucket: Some(bucket.to_string()),
-                content_type: Some(content_type.to_string()),
-                metadata: None,
-            };
-            let file = meta
-                .register_file(create_file)
-                .await
-                .map_err(|e| S3Error::Internal(e.to_string()))?;
 
             // Calculate ETag
             let etag = hex::encode(content_hash.as_bytes());

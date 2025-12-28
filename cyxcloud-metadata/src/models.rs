@@ -94,6 +94,7 @@ pub struct Node {
 
     // Capacity
     pub storage_total: i64,
+    pub storage_reserved: i64,  // Gateway-reserved storage (2GB default)
     pub storage_used: i64,
     pub bandwidth_mbps: i32,
     pub max_connections: i32,
@@ -120,12 +121,25 @@ pub struct Node {
     pub updated_at: DateTime<Utc>,
 }
 
+impl Node {
+    /// Returns the available storage capacity (total - reserved - used)
+    pub fn storage_available(&self) -> i64 {
+        (self.storage_total - self.storage_reserved - self.storage_used).max(0)
+    }
+
+    /// Returns the allocatable storage (total - reserved, for user data)
+    pub fn storage_allocatable(&self) -> i64 {
+        (self.storage_total - self.storage_reserved).max(0)
+    }
+}
+
 /// Parameters for creating a new node
 #[derive(Debug, Clone)]
 pub struct CreateNode {
     pub peer_id: String,
     pub grpc_address: String,
     pub storage_total: i64,
+    pub storage_reserved: i64,  // Gateway-reserved storage
     pub bandwidth_mbps: i32,
     pub datacenter: Option<String>,
     pub region: Option<String>,
@@ -167,6 +181,8 @@ pub struct File {
 /// Parameters for creating a new file
 #[derive(Debug, Clone)]
 pub struct CreateFile {
+    /// Optional ID - if provided, use this ID; otherwise generate a new one
+    pub id: Option<Uuid>,
     pub name: String,
     pub path: String,
     pub content_hash: Vec<u8>,
@@ -291,8 +307,10 @@ pub struct NodeStorageSummary {
     pub peer_id: String,
     pub grpc_address: String,
     pub storage_total: i64,
+    pub storage_reserved: i64,
     pub storage_used: i64,
     pub storage_available: i64,
+    pub storage_allocatable: i64,
     pub utilization_percent: Option<f64>,
     pub chunk_count: i64,
     pub status: String,

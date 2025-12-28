@@ -150,14 +150,15 @@ impl Database {
     pub async fn create_node(&self, node: CreateNode) -> Result<Node> {
         let result = sqlx::query_as::<_, Node>(
             r#"
-            INSERT INTO nodes (peer_id, grpc_address, storage_total, bandwidth_mbps, datacenter, region, version, status)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, 'online')
+            INSERT INTO nodes (peer_id, grpc_address, storage_total, storage_reserved, bandwidth_mbps, datacenter, region, version, status)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'online')
             RETURNING *
             "#,
         )
         .bind(&node.peer_id)
         .bind(&node.grpc_address)
         .bind(node.storage_total)
+        .bind(node.storage_reserved)
         .bind(node.bandwidth_mbps)
         .bind(&node.datacenter)
         .bind(&node.region)
@@ -485,6 +486,68 @@ impl Database {
         }
     }
 
+    /// Update node heartbeat using peer_id (client-side node identifier)
+    /// This is used by heartbeat RPCs where the node sends its own ID
+    #[instrument(skip(self))]
+    pub async fn update_node_heartbeat_by_peer_id(&self, peer_id: &str) -> Result<NodeStatus> {
+        // First get the node by peer_id
+        let node = self.get_node_by_peer_id(peer_id).await?
+            .ok_or_else(|| DbError::NotFound(format!("Node with peer_id {} not found", peer_id)))?;
+
+        match node.status.as_str() {
+            "online" | "recovering" => {
+                // Just update heartbeat timestamp
+                sqlx::query(
+                    r#"
+                    UPDATE nodes
+                    SET last_heartbeat = NOW(), failure_count = 0
+                    WHERE peer_id = $1
+                    "#,
+                )
+                .bind(peer_id)
+                .execute(&self.pool)
+                .await?;
+
+                if node.status == "recovering" {
+                    debug!(peer_id = %peer_id, "Heartbeat updated (recovering)");
+                    Ok(NodeStatus::Recovering)
+                } else {
+                    debug!(peer_id = %peer_id, "Heartbeat updated (online)");
+                    Ok(NodeStatus::Online)
+                }
+            }
+            "offline" | "draining" => {
+                // Node coming back - enter quarantine
+                sqlx::query(
+                    r#"
+                    UPDATE nodes
+                    SET status = 'recovering',
+                        status_changed_at = NOW(),
+                        last_heartbeat = NOW(),
+                        failure_count = 0
+                    WHERE peer_id = $1
+                    "#,
+                )
+                .bind(peer_id)
+                .execute(&self.pool)
+                .await?;
+
+                debug!(peer_id = %peer_id, "Node entering recovery quarantine");
+                Ok(NodeStatus::Recovering)
+            }
+            _ => {
+                // maintenance or unknown - just update heartbeat
+                sqlx::query("UPDATE nodes SET last_heartbeat = NOW() WHERE peer_id = $1")
+                    .bind(peer_id)
+                    .execute(&self.pool)
+                    .await?;
+
+                debug!(peer_id = %peer_id, status = %node.status, "Heartbeat updated");
+                Ok(NodeStatus::Maintenance)
+            }
+        }
+    }
+
     /// Get all chunk locations stored on a specific node
     pub async fn get_chunks_on_node(&self, node_id: Uuid) -> Result<Vec<ChunkLocation>> {
         let result = sqlx::query_as::<_, ChunkLocation>(
@@ -523,15 +586,19 @@ impl Database {
     /// Create a new file record
     #[instrument(skip(self, file))]
     pub async fn create_file(&self, file: CreateFile) -> Result<File> {
+        // Use provided ID or generate a new one
+        let file_id = file.id.unwrap_or_else(Uuid::new_v4);
+
         let result = sqlx::query_as::<_, File>(
             r#"
-            INSERT INTO files (name, path, content_hash, size_bytes, chunk_count,
+            INSERT INTO files (id, name, path, content_hash, size_bytes, chunk_count,
                               data_shards, parity_shards, chunk_size, owner_id, bucket,
                               content_type, metadata, status)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'pending')
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'pending')
             RETURNING *
             "#,
         )
+        .bind(file_id)
         .bind(&file.name)
         .bind(&file.path)
         .bind(&file.content_hash)
