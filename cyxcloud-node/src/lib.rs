@@ -15,6 +15,7 @@ pub mod cyxwiz_api_client;
 pub mod health;
 pub mod machine_service;
 pub mod metrics;
+pub mod symbols;
 
 #[cfg(feature = "blockchain")]
 pub mod blockchain;

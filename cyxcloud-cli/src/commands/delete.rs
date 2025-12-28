@@ -3,6 +3,7 @@
 //! Deletes files from CyxCloud storage.
 
 use crate::client::GatewayClient;
+use crate::symbols;
 use anyhow::{Context, Result};
 use console::style;
 
@@ -53,7 +54,7 @@ pub async fn run(client: &GatewayClient, config: DeleteConfig) -> Result<()> {
 
     println!(
         "{} Deleted: {}/{}",
-        style("✓").green(),
+        style(symbols::CHECK).green(),
         config.bucket,
         config.key
     );

@@ -86,6 +86,25 @@ impl NodeConfig {
         }
     }
 
+    /// Apply values from the shared config file (~/.cyxcloud/config.toml)
+    /// This allows users to configure gateway/auth URLs in one place
+    pub fn with_shared_config(mut self) -> Self {
+        let shared = load_shared_config();
+
+        // Only override if the node config still has default values
+        if self.central.address == default_central_addr() {
+            self.central.address = shared.gateway.grpc_url;
+        }
+        if self.cyxwiz_api.base_url == default_cyxwiz_api_url() {
+            self.cyxwiz_api.base_url = shared.auth.api_url;
+        }
+        if self.blockchain.rpc_url == default_solana_rpc() {
+            self.blockchain.rpc_url = shared.blockchain.solana_rpc_url;
+        }
+
+        self
+    }
+
     /// Validate the configuration
     pub fn validate(&self) -> Result<(), ConfigError> {
         // Validate storage path is writable
@@ -121,6 +140,18 @@ impl NodeConfig {
             self.network.grpc_port = p;
             self.network.p2p_port = p + 1;
         }
+        self
+    }
+
+    /// Apply environment variable overrides to all settings
+    pub fn with_env_overrides(mut self) -> Self {
+        self.cyxwiz_api = self.cyxwiz_api.with_env_overrides();
+
+        // Central server (Gateway) address
+        if let Ok(addr) = std::env::var("CENTRAL_SERVER_ADDR") {
+            self.central.address = addr;
+        }
+
         self
     }
 }
@@ -441,6 +472,14 @@ pub struct CyxWizApiSettings {
     /// Request timeout in seconds
     #[serde(default = "default_connect_timeout")]
     pub timeout_secs: u64,
+
+    /// Email for non-interactive login (from CYXWIZ_EMAIL env var)
+    #[serde(default)]
+    pub email: Option<String>,
+
+    /// Password for non-interactive login (from CYXWIZ_PASSWORD env var)
+    #[serde(default, skip_serializing)]
+    pub password: Option<String>,
 }
 
 impl Default for CyxWizApiSettings {
@@ -452,12 +491,133 @@ impl Default for CyxWizApiSettings {
             machine_id: None,
             register: true,
             timeout_secs: 10,
+            email: None,
+            password: None,
         }
+    }
+}
+
+impl CyxWizApiSettings {
+    /// Apply environment variable overrides
+    pub fn with_env_overrides(mut self) -> Self {
+        if let Ok(url) = std::env::var("CYXWIZ_API_URL") {
+            self.base_url = url;
+        }
+        if let Ok(email) = std::env::var("CYXWIZ_EMAIL") {
+            self.email = Some(email);
+        }
+        if let Ok(password) = std::env::var("CYXWIZ_PASSWORD") {
+            self.password = Some(password);
+        }
+        self
+    }
+
+    /// Check if credentials are available for non-interactive login
+    pub fn has_credentials(&self) -> bool {
+        self.email.is_some() && self.password.is_some()
     }
 }
 
 fn default_cyxwiz_api_url() -> String {
     "http://localhost:3002".to_string()
+}
+
+/// Get the standard CyxCloud config directory (~/.cyxcloud/)
+pub fn cyxcloud_config_dir() -> std::path::PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join(".cyxcloud")
+}
+
+/// Get the standard credentials file path for node (~/.cyxcloud/node_credentials.json)
+pub fn node_credentials_path() -> std::path::PathBuf {
+    cyxcloud_config_dir().join("node_credentials.json")
+}
+
+/// Get the shared config file path (~/.cyxcloud/config.toml)
+pub fn shared_config_path() -> std::path::PathBuf {
+    cyxcloud_config_dir().join("config.toml")
+}
+
+/// Shared CyxCloud configuration (from ~/.cyxcloud/config.toml)
+/// Used to get gateway and auth server URLs
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SharedConfig {
+    #[serde(default)]
+    pub gateway: SharedGatewayConfig,
+    #[serde(default)]
+    pub auth: SharedAuthConfig,
+    #[serde(default)]
+    pub blockchain: SharedBlockchainConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SharedGatewayConfig {
+    #[serde(default = "default_gateway_http_url")]
+    pub http_url: String,
+    #[serde(default = "default_central_addr")]
+    pub grpc_url: String,
+}
+
+impl Default for SharedGatewayConfig {
+    fn default() -> Self {
+        Self {
+            http_url: default_gateway_http_url(),
+            grpc_url: default_central_addr(),
+        }
+    }
+}
+
+fn default_gateway_http_url() -> String {
+    std::env::var("CYXCLOUD_GATEWAY_HTTP_URL")
+        .unwrap_or_else(|_| "http://localhost:8080".to_string())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SharedAuthConfig {
+    #[serde(default = "default_cyxwiz_api_url")]
+    pub api_url: String,
+}
+
+impl Default for SharedAuthConfig {
+    fn default() -> Self {
+        Self {
+            api_url: default_cyxwiz_api_url(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SharedBlockchainConfig {
+    #[serde(default = "default_solana_rpc")]
+    pub solana_rpc_url: String,
+}
+
+impl Default for SharedBlockchainConfig {
+    fn default() -> Self {
+        Self {
+            solana_rpc_url: default_solana_rpc(),
+        }
+    }
+}
+
+/// Load shared configuration from ~/.cyxcloud/config.toml
+pub fn load_shared_config() -> SharedConfig {
+    let path = shared_config_path();
+    if path.exists() {
+        match std::fs::read_to_string(&path) {
+            Ok(content) => match toml::from_str(&content) {
+                Ok(config) => return config,
+                Err(e) => {
+                    tracing::warn!(error = %e, "Failed to parse shared config file");
+                }
+            },
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to read shared config file");
+            }
+        }
+    }
+    SharedConfig::default()
 }
 
 /// Blockchain (Solana) configuration for staking and rewards
@@ -566,5 +726,18 @@ mod tests {
         assert_eq!(config.storage.data_dir, PathBuf::from("/custom/path"));
         assert_eq!(config.network.grpc_port, 8000);
         assert_eq!(config.network.p2p_port, 8001);
+    }
+
+    #[test]
+    fn test_cyxwiz_api_credentials() {
+        let settings = CyxWizApiSettings {
+            email: Some("test@example.com".to_string()),
+            password: Some("password123".to_string()),
+            ..Default::default()
+        };
+        assert!(settings.has_credentials());
+
+        let no_creds = CyxWizApiSettings::default();
+        assert!(!no_creds.has_credentials());
     }
 }

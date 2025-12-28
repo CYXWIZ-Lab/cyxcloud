@@ -71,8 +71,11 @@ async fn main() -> anyhow::Result<()> {
     info!("CyxCloud Storage Node starting...");
 
     // Load configuration
-    let config = NodeConfig::load_or_default(&cli.config);
-    let config = config.with_overrides(cli.data_dir, cli.port);
+    // Priority: CLI args > node config.toml > shared config (~/.cyxcloud/config.toml) > defaults
+    let config = NodeConfig::load_or_default(&cli.config)
+        .with_shared_config()  // Apply shared config from ~/.cyxcloud/config.toml
+        .with_overrides(cli.data_dir, cli.port)
+        .with_env_overrides();
 
     info!(
         node_id = %config.node.id,
@@ -141,36 +144,73 @@ async fn main() -> anyhow::Result<()> {
     });
     info!("Health checker started");
 
-    // Start heartbeat service for central server registration (Gateway)
-    let heartbeat_service = HeartbeatService::new(
-        config.clone(),
-        node_metrics.clone(),
-        storage.clone(),
-    );
+    // ========================================
+    // Authentication Flow:
+    // 1. Login to CyxWiz API (port 3002) to get JWT token
+    // 2. Use JWT token for Gateway authentication (port 50052)
+    // ========================================
 
-    tokio::spawn(async move {
-        heartbeat_service.run().await;
-    });
-
-    if config.central.register {
-        info!(
-            central_addr = %config.central.address,
-            "Gateway heartbeat service started"
-        );
-    }
-
-    // Start machine service for CyxWiz API (authentication, machine management)
+    // Create machine service for CyxWiz API authentication
     let machine_service = Arc::new(
         MachineService::new(config.clone(), node_metrics.clone())
             .map_err(|e| anyhow::anyhow!("Failed to create machine service: {}", e))?,
     );
 
-    let machine_service_clone = machine_service.clone();
-    tokio::spawn(async move {
-        machine_service_clone.run().await;
-    });
+    // Login to CyxWiz API first (blocks until successful login)
+    let already_registered = if config.cyxwiz_api.register {
+        info!(api_url = %config.cyxwiz_api.base_url, "Authenticating with CyxWiz API...");
+        match machine_service.ensure_logged_in().await {
+            Ok(registered) => {
+                info!("CyxWiz API authentication successful");
+                registered
+            }
+            Err(e) => {
+                error!(error = %e, "Failed to authenticate with CyxWiz API");
+                return Err(anyhow::anyhow!("Authentication failed: {}", e));
+            }
+        }
+    } else {
+        info!("CyxWiz API registration disabled");
+        false
+    };
 
+    // Get JWT token for Gateway authentication
+    let jwt_token = machine_service.get_jwt_token().await;
+    if jwt_token.is_none() && config.central.register {
+        error!("No JWT token available for Gateway authentication");
+        return Err(anyhow::anyhow!("JWT token required for Gateway registration"));
+    }
+
+    // Create heartbeat service for Gateway registration
+    let heartbeat_service = Arc::new(HeartbeatService::new(
+        config.clone(),
+        node_metrics.clone(),
+        storage.clone(),
+    ));
+
+    // Set JWT token for Gateway authentication
+    if let Some(token) = jwt_token {
+        heartbeat_service.set_jwt_token(token).await;
+    }
+
+    // Start Gateway heartbeat service
+    if config.central.register {
+        let heartbeat_clone = heartbeat_service.clone();
+        tokio::spawn(async move {
+            heartbeat_clone.run().await;
+        });
+        info!(
+            central_addr = %config.central.address,
+            "Gateway heartbeat service started (with JWT auth)"
+        );
+    }
+
+    // Start CyxWiz API machine service (for heartbeats to CyxWiz API)
     if config.cyxwiz_api.register {
+        let machine_service_clone = machine_service.clone();
+        tokio::spawn(async move {
+            machine_service_clone.run(already_registered).await;
+        });
         info!(
             api_url = %config.cyxwiz_api.base_url,
             "CyxWiz API machine service started"

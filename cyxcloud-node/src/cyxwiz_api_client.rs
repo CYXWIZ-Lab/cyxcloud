@@ -477,6 +477,8 @@ mod tests {
             machine_id: None,
             register: true,
             timeout_secs: 10,
+            email: None,
+            password: None,
         };
 
         let client = CyxWizApiClient::new(&config);

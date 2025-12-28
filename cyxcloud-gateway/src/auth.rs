@@ -107,14 +107,20 @@ pub struct AuthConfig {
     /// Secret key for JWT signing (32 bytes minimum)
     pub jwt_secret: Vec<u8>,
 
-    /// Issuer claim for JWTs
+    /// Issuer claim for JWTs (can be multiple, comma-separated)
     pub issuer: String,
+
+    /// Additional issuers to accept (e.g., from CyxWiz API)
+    pub accepted_issuers: Vec<String>,
 
     /// Audience claim for JWTs
     pub audience: String,
 
     /// Whether to require wallet verification
     pub require_wallet_verification: bool,
+
+    /// Skip issuer validation (for cross-service token sharing)
+    pub skip_issuer_validation: bool,
 }
 
 impl Default for AuthConfig {
@@ -124,8 +130,10 @@ impl Default for AuthConfig {
             // In production, this should come from environment/config
             jwt_secret: rand::random::<[u8; 32]>().to_vec(),
             issuer: "cyxcloud-gateway".to_string(),
+            accepted_issuers: vec!["cyxwiz-api".to_string()],
             audience: "cyxcloud".to_string(),
             require_wallet_verification: false,
+            skip_issuer_validation: true, // Allow tokens from CyxWiz API
         }
     }
 }
@@ -142,17 +150,28 @@ impl AuthConfig {
 
         let issuer = std::env::var("JWT_ISSUER").unwrap_or_else(|_| "cyxcloud-gateway".to_string());
 
+        // Accept multiple issuers (comma-separated)
+        let accepted_issuers = std::env::var("JWT_ACCEPTED_ISSUERS")
+            .map(|s| s.split(',').map(|s| s.trim().to_string()).collect())
+            .unwrap_or_else(|_| vec!["cyxwiz-api".to_string()]);
+
         let audience = std::env::var("JWT_AUDIENCE").unwrap_or_else(|_| "cyxcloud".to_string());
 
         let require_wallet = std::env::var("REQUIRE_WALLET_VERIFICATION")
             .map(|v| v == "1" || v.to_lowercase() == "true")
             .unwrap_or(false);
 
+        let skip_issuer = std::env::var("JWT_SKIP_ISSUER_VALIDATION")
+            .map(|v| v == "1" || v.to_lowercase() == "true")
+            .unwrap_or(true); // Default to true for CyxWiz API compatibility
+
         Self {
             jwt_secret,
             issuer,
+            accepted_issuers,
             audience,
             require_wallet_verification: require_wallet,
+            skip_issuer_validation: skip_issuer,
         }
     }
 }
@@ -174,8 +193,23 @@ impl AuthService {
         let decoding_key = DecodingKey::from_secret(&config.jwt_secret);
 
         let mut validation = Validation::default();
-        validation.set_issuer(&[&config.issuer]);
-        validation.set_audience(&[&config.audience]);
+
+        // Configure issuer validation
+        if config.skip_issuer_validation {
+            // Skip issuer validation to accept tokens from CyxWiz API
+            // Don't set issuer - validation will skip issuer check
+            validation.set_required_spec_claims::<&str>(&["exp", "sub"]);
+            info!("JWT issuer validation disabled - accepting tokens from external services");
+        } else {
+            // Accept tokens from gateway and additional issuers (e.g., CyxWiz API)
+            let mut all_issuers = vec![config.issuer.clone()];
+            all_issuers.extend(config.accepted_issuers.clone());
+            validation.set_issuer(&all_issuers.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+            info!(issuers = ?all_issuers, "JWT issuer validation enabled");
+        }
+
+        // Skip audience validation for cross-service compatibility
+        validation.set_audience::<&str>(&[]);
 
         Self {
             config,

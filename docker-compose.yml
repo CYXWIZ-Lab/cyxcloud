@@ -1,9 +1,30 @@
 # CyxCloud Docker Compose - Full Stack Testing
-# Includes: PostgreSQL, Redis, Gateway, 3 Storage Nodes, Rebalancer
+# Includes: PostgreSQL, Redis, CyxWiz API, Gateway, 3 Storage Nodes, Rebalancer
 
 version: '3.8'
 
 services:
+  # ===========================================
+  # CyxWiz API - Authentication & Machine Registry
+  # ===========================================
+  cyxwiz-api:
+    build:
+      context: D:/Dev/cyxwiz_web/apps/api
+      dockerfile: Dockerfile
+    container_name: cyxcloud-cyxwiz-api
+    ports:
+      - "3002:3002"
+    environment:
+      RUST_LOG: info,cyxwiz_api=debug
+      PORT: 3002
+      MONGODB_URI: mongodb+srv://mrcj:joel2012@cyxwiz-cluster.auuzk3a.mongodb.net/cyxwiz
+      JWT_SECRET: cyxcloud-dev-secret-change-in-production
+      CENTRAL_SERVER_URL: http://gateway:50052
+    networks:
+      - cyxcloud-net
+    # No healthcheck - curl not available in slim image
+    restart: unless-stopped
+
   # ===========================================
   # PostgreSQL - Metadata storage
   # ===========================================
@@ -54,20 +75,19 @@ services:
   gateway:
     build:
       context: .
-      dockerfile: Dockerfile.gateway
+      dockerfile: Dockerfile.gateway.build
     container_name: cyxcloud-gateway
     ports:
       - "8080:8080"     # HTTP/S3 API
       - "50052:50052"   # gRPC for nodes
     environment:
       RUST_LOG: info,cyxcloud_gateway=debug
-      GATEWAY_HTTP_PORT: 8080
-      GATEWAY_GRPC_PORT: 50052
       DATABASE_URL: postgres://cyxcloud:cyxcloud_secret@postgres:5432/cyxcloud
       REDIS_URL: redis://redis:6379
       JWT_SECRET: cyxcloud-dev-secret-change-in-production
       # Blockchain (optional - devnet)
       SOLANA_RPC_URL: https://api.devnet.solana.com
+    command: ["--http-addr", "0.0.0.0:8080", "--grpc-addr", "0.0.0.0:50052", "--cors-permissive"]
     volumes:
       - gateway-data:/data
     networks:
@@ -109,6 +129,10 @@ services:
       STORAGE_CAPACITY_GB: 100
       CENTRAL_SERVER_ADDR: http://gateway:50052
       BOOTSTRAP_PEERS: ""
+      # CyxWiz API for authentication
+      CYXWIZ_API_URL: http://cyxwiz-api:3002
+      CYXWIZ_EMAIL: test@example.com
+      CYXWIZ_PASSWORD: Test123!
     volumes:
       - node1-data:/data
     networks:
@@ -116,6 +140,8 @@ services:
     depends_on:
       gateway:
         condition: service_healthy
+      cyxwiz-api:
+        condition: service_started
     restart: unless-stopped
 
   # ===========================================
@@ -142,6 +168,10 @@ services:
       STORAGE_CAPACITY_GB: 100
       CENTRAL_SERVER_ADDR: http://gateway:50052
       BOOTSTRAP_PEERS: /dns4/node1/tcp/4001
+      # CyxWiz API for authentication
+      CYXWIZ_API_URL: http://cyxwiz-api:3002
+      CYXWIZ_EMAIL: test@example.com
+      CYXWIZ_PASSWORD: Test123!
     volumes:
       - node2-data:/data
     networks:
@@ -149,6 +179,8 @@ services:
     depends_on:
       gateway:
         condition: service_healthy
+      cyxwiz-api:
+        condition: service_started
       node1:
         condition: service_started
     restart: unless-stopped
@@ -177,6 +209,10 @@ services:
       STORAGE_CAPACITY_GB: 100
       CENTRAL_SERVER_ADDR: http://gateway:50052
       BOOTSTRAP_PEERS: /dns4/node1/tcp/4001,/dns4/node2/tcp/4001
+      # CyxWiz API for authentication
+      CYXWIZ_API_URL: http://cyxwiz-api:3002
+      CYXWIZ_EMAIL: test@example.com
+      CYXWIZ_PASSWORD: Test123!
     volumes:
       - node3-data:/data
     networks:
@@ -184,6 +220,8 @@ services:
     depends_on:
       gateway:
         condition: service_healthy
+      cyxwiz-api:
+        condition: service_started
       node1:
         condition: service_started
       node2:

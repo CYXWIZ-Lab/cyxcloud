@@ -69,11 +69,12 @@ pub struct BucketInfo {
 pub struct GatewayClient {
     client: Client,
     base_url: String,
+    auth_token: Option<String>,
 }
 
 impl GatewayClient {
     /// Create a new gateway client
-    pub fn new(base_url: &str) -> Self {
+    pub fn new(base_url: &str, auth_token: Option<String>) -> Self {
         let client = Client::builder()
             .timeout(Duration::from_secs(300))
             .build()
@@ -82,7 +83,13 @@ impl GatewayClient {
         Self {
             client,
             base_url: base_url.trim_end_matches('/').to_string(),
+            auth_token,
         }
+    }
+
+    /// Add authorization header to a request if token is available
+    fn auth_headers(&self) -> Option<String> {
+        self.auth_token.as_ref().map(|t| format!("Bearer {}", t))
     }
 
     /// Check gateway health
@@ -95,7 +102,11 @@ impl GatewayClient {
     /// Create a bucket
     pub async fn create_bucket(&self, bucket: &str) -> Result<()> {
         let url = format!("{}/s3/{}", self.base_url, bucket);
-        let response = self.client.put(&url).send().await?;
+        let mut req = self.client.put(&url);
+        if let Some(auth) = self.auth_headers() {
+            req = req.header("Authorization", auth);
+        }
+        let response = req.send().await?;
 
         if response.status().is_success() {
             Ok(())
@@ -120,13 +131,17 @@ impl GatewayClient {
     ) -> Result<String> {
         let url = format!("{}/s3/{}/{}", self.base_url, bucket, key);
 
-        let response = self
+        let mut req = self
             .client
             .put(&url)
             .header("Content-Type", content_type)
-            .body(data)
-            .send()
-            .await?;
+            .body(data);
+
+        if let Some(auth) = self.auth_headers() {
+            req = req.header("Authorization", auth);
+        }
+
+        let response = req.send().await?;
 
         if response.status().is_success() {
             let etag = response
@@ -175,7 +190,12 @@ impl GatewayClient {
     pub async fn download_file(&self, bucket: &str, key: &str) -> Result<Bytes> {
         let url = format!("{}/s3/{}/{}", self.base_url, bucket, key);
 
-        let response = self.client.get(&url).send().await?;
+        let mut req = self.client.get(&url);
+        if let Some(auth) = self.auth_headers() {
+            req = req.header("Authorization", auth);
+        }
+
+        let response = req.send().await?;
 
         if response.status().is_success() {
             let bytes = response.bytes().await?;
@@ -210,7 +230,12 @@ impl GatewayClient {
     pub async fn head_object(&self, bucket: &str, key: &str) -> Result<ObjectInfo> {
         let url = format!("{}/s3/{}/{}", self.base_url, bucket, key);
 
-        let response = self.client.head(&url).send().await?;
+        let mut req = self.client.head(&url);
+        if let Some(auth) = self.auth_headers() {
+            req = req.header("Authorization", auth);
+        }
+
+        let response = req.send().await?;
 
         if response.status().is_success() {
             let headers = response.headers();
@@ -254,7 +279,12 @@ impl GatewayClient {
     pub async fn delete_object(&self, bucket: &str, key: &str) -> Result<()> {
         let url = format!("{}/s3/{}/{}", self.base_url, bucket, key);
 
-        let response = self.client.delete(&url).send().await?;
+        let mut req = self.client.delete(&url);
+        if let Some(auth) = self.auth_headers() {
+            req = req.header("Authorization", auth);
+        }
+
+        let response = req.send().await?;
 
         if response.status().is_success() || response.status() == StatusCode::NO_CONTENT {
             Ok(())
@@ -290,7 +320,12 @@ impl GatewayClient {
             url.push_str(&params.join("&"));
         }
 
-        let response = self.client.get(&url).send().await?;
+        let mut req = self.client.get(&url);
+        if let Some(auth) = self.auth_headers() {
+            req = req.header("Authorization", auth);
+        }
+
+        let response = req.send().await?;
 
         if response.status().is_success() {
             // Parse XML response (simplified - would use quick-xml in production)

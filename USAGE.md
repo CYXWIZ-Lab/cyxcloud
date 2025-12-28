@@ -823,7 +823,7 @@ Registering machine...
 3. Receives JWT token and user info
 4. Registers machine with `POST /api/machines/register`
 5. Receives machine ID and API key
-6. Saves credentials to `{data_dir}/.cyxwiz_credentials.json`
+6. Saves credentials to `~/.cyxcloud/node_credentials.json`
 
 **Subsequent Runs:**
 ```
@@ -839,7 +839,7 @@ Credentials are saved locally, so you only need to login once.
 **Logout / Re-login:**
 ```bash
 # Delete saved credentials to login again
-rm ./data/.cyxwiz_credentials.json
+rm ~/.cyxcloud/node_credentials.json
 ./cyxcloud-node   # Will prompt for login
 ```
 
@@ -884,10 +884,32 @@ NODE_ID=node-3 GRPC_PORT=50053 LIBP2P_PORT=4003 \
   ./target/release/cyxcloud-node --data-dir /data/node3
 ```
 
-#### Configuration File
+#### Configuration Files
 
-Nodes can be configured via `config.toml`:
+Nodes use two configuration sources:
 
+1. **Shared config** (`~/.cyxcloud/config.toml`) - Gateway and auth URLs, shared with CLI
+2. **Node config** (`config.toml`) - Node-specific settings
+
+**Shared config (~/.cyxcloud/config.toml):**
+```toml
+[gateway]
+http_url = "http://localhost:8080"
+grpc_url = "http://localhost:50052"
+
+[auth]
+api_url = "http://localhost:3002"
+
+[blockchain]
+solana_rpc_url = "https://api.devnet.solana.com"
+```
+
+Create this file using the CLI:
+```bash
+cyxcloud config init
+```
+
+**Node config (config.toml):**
 ```toml
 [node]
 id = "node-1"                        # Unique node identifier
@@ -896,7 +918,7 @@ region = "us-east"                   # Region for topology placement
 wallet_address = "CyxWiz..."         # Solana wallet for payments
 
 [storage]
-data_dir = "./data"                  # Data directory (credentials saved here)
+data_dir = "./data"                  # Data directory
 max_capacity_gb = 100                # Maximum storage allocation
 compression = true                   # Enable LZ4 compression
 cache_size_mb = 512                  # RocksDB cache size
@@ -908,15 +930,17 @@ p2p_port = 4001                      # libp2p peer discovery
 enable_tls = false
 
 [central]
-address = "http://localhost:50052"   # Gateway gRPC address
+# address defaults to ~/.cyxcloud/config.toml [gateway.grpc_url]
+# Can override here if needed:
+# address = "http://localhost:50052"
 register = true                      # Register with Gateway
 heartbeat_interval_secs = 30         # Heartbeat frequency
 
 [cyxwiz_api]
-base_url = "http://localhost:3002"   # CyxWiz REST API for auth
+# base_url defaults to ~/.cyxcloud/config.toml [auth.api_url]
+# Can override here if needed:
+# base_url = "http://localhost:3002"
 register = true                      # Enable machine registration
-# Credentials are saved after first login, no need to configure:
-# owner_id, api_key, machine_id
 
 [metrics]
 enabled = true
@@ -924,6 +948,13 @@ port = 9090                          # Prometheus metrics endpoint
 health_path = "/health"
 metrics_path = "/metrics"
 ```
+
+**Config priority order:**
+1. Command-line arguments
+2. Node config file (config.toml)
+3. Shared config file (~/.cyxcloud/config.toml)
+4. Environment variables
+5. Built-in defaults
 
 #### Environment Variables
 
@@ -1069,11 +1100,128 @@ cargo install --path cyxcloud-cli
 cargo run -p cyxcloud-cli --release -- <command>
 ```
 
+### Configuration File
+
+The CLI uses a shared configuration file at `~/.cyxcloud/config.toml`. This file is shared with the storage node for consistent settings.
+
+**Create default config:**
+```bash
+cyxcloud config init
+```
+
+**Config file format:**
+```toml
+[gateway]
+http_url = "http://localhost:8080"
+grpc_url = "http://localhost:50052"
+
+[auth]
+api_url = "http://localhost:3002"
+
+[cli]
+default_bucket = "my-default-bucket"
+
+[blockchain]
+solana_rpc_url = "https://api.devnet.solana.com"
+```
+
+**View current config:**
+```bash
+cyxcloud config           # Show all settings
+cyxcloud config show      # Same as above
+cyxcloud config path      # Show config file location
+```
+
+**Modify config:**
+```bash
+cyxcloud config set gateway.http_url "https://api.cyxcloud.io"
+cyxcloud config set auth.api_url "https://auth.cyxwiz.io"
+cyxcloud config set cli.default_bucket "production"
+```
+
 ### Global Options
 
 ```bash
+# Use config file settings (default)
+cyxcloud <command>
+
+# Override gateway URL
 cyxcloud --gateway http://localhost:8080 <command>
+
+# Override auth API URL
+cyxcloud --api-url http://localhost:3002 <command>
 ```
+
+**Priority Order:**
+1. Command-line arguments (`--gateway`, `--api-url`)
+2. Config file (`~/.cyxcloud/config.toml`)
+3. Environment variables (`CYXCLOUD_GATEWAY_HTTP_URL`, etc.)
+4. Built-in defaults
+
+### Authentication
+
+Before using storage commands, you must authenticate with your CyxWiz account.
+
+**Login:**
+```bash
+# Interactive login (prompts for email and password)
+cyxcloud login
+
+# Provide email via command line
+cyxcloud login --email user@example.com
+```
+
+**Example:**
+```
+$ cyxcloud login
+Email: miner@example.com
+Password: ••••••••
+
+* Logging in...
+
+✓ Logged in successfully!
+Welcome, miner@example.com
+```
+
+**Check current user:**
+```bash
+cyxcloud whoami
+```
+
+**Example output:**
+```
+User Profile
+────────────
+Email:    miner@example.com
+Username: john_doe
+User ID:  550e8400-e29b-41d4-a716-446655440000
+Wallet:   (not linked)
+
+Storage
+───────
+Quota:    10.00 GB
+Used:     2.34 GB (23.4%)
+Available: 7.66 GB
+
+Session
+───────
+Expires:  2025-12-29 10:30:00 UTC
+```
+
+**Logout:**
+```bash
+cyxcloud logout
+```
+
+**Register new account:**
+```bash
+cyxcloud register --email newuser@example.com --username mynickname
+```
+
+**Credentials storage:**
+- Credentials are saved to `~/.cyxcloud/credentials.json`
+- Tokens are automatically refreshed when needed
+- Use `cyxcloud logout` to clear stored credentials
 
 ### Upload Files
 
@@ -1596,10 +1744,64 @@ ws.send(JSON.stringify({
 
 ## Configuration
 
+### Shared Configuration File
+
+CyxCloud uses a shared configuration file at `~/.cyxcloud/config.toml` that is used by both the CLI and storage nodes.
+
+**Create the config file:**
+```bash
+cyxcloud config init
+```
+
+**File location:**
+- Linux/macOS: `~/.cyxcloud/config.toml`
+- Windows: `C:\Users\<username>\.cyxcloud\config.toml`
+
+**Default content:**
+```toml
+[gateway]
+http_url = "http://localhost:8080"    # Gateway HTTP API (S3-compatible)
+grpc_url = "http://localhost:50052"   # Gateway gRPC (node registration)
+
+[auth]
+api_url = "http://localhost:3002"      # CyxWiz API (authentication)
+
+[cli]
+default_bucket = ""                    # Optional default bucket
+
+[blockchain]
+solana_rpc_url = "https://api.devnet.solana.com"
+```
+
+**Modify settings:**
+```bash
+# View all settings
+cyxcloud config show
+
+# Set individual values
+cyxcloud config set gateway.http_url "https://api.cyxcloud.io"
+cyxcloud config set auth.api_url "https://auth.cyxwiz.io"
+cyxcloud config set blockchain.solana_rpc_url "https://api.mainnet-beta.solana.com"
+```
+
+### Credentials Storage
+
+| File | Purpose |
+|------|---------|
+| `~/.cyxcloud/config.toml` | Shared configuration (gateway, auth URLs) |
+| `~/.cyxcloud/credentials.json` | CLI user credentials (JWT tokens) |
+| `~/.cyxcloud/node_credentials.json` | Node machine credentials |
+
 ### Environment Variables Summary
+
+Environment variables can override config file settings.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `CYXCLOUD_GATEWAY_HTTP_URL` | config file | Gateway HTTP API URL |
+| `CYXCLOUD_GATEWAY_GRPC_URL` | config file | Gateway gRPC URL |
+| `CYXCLOUD_AUTH_API_URL` | config file | CyxWiz API URL |
+| `CYXCLOUD_SOLANA_RPC_URL` | config file | Solana RPC URL |
 | `RUST_LOG` | `info` | Log level (trace/debug/info/warn/error) |
 | `GATEWAY_HOST` | `0.0.0.0` | Gateway bind address |
 | `GATEWAY_PORT` | `8080` | Gateway HTTP port |
@@ -1610,32 +1812,39 @@ ws.send(JSON.stringify({
 | `STORAGE_PATH` | `/data/chunks` | Chunk storage directory |
 | `STORAGE_CAPACITY_GB` | `100` | Storage allocation in GB |
 | `BOOTSTRAP_PEERS` | - | Comma-separated peer addresses |
-| `SCAN_INTERVAL_SECS` | `3600` | Rebalancer scan interval |
-| `REPAIR_PARALLELISM` | `4` | Concurrent repair tasks |
+| `CYXWIZ_EMAIL` | - | Non-interactive login email |
+| `CYXWIZ_PASSWORD` | - | Non-interactive login password |
 
-### Node Configuration File (Optional)
+### Node Configuration File
 
-Create `config/node.toml`:
+In addition to the shared config, nodes have their own `config.toml`:
 
 ```toml
 [node]
 id = "node-1"
-storage_path = "/data/chunks"
-capacity_gb = 100
+name = "my-node"
+region = "us-east"
 
-[grpc]
-host = "0.0.0.0"
-port = 50051
+[storage]
+data_dir = "/data/chunks"
+max_capacity_gb = 100
 
-[libp2p]
-port = 4001
-bootstrap_peers = [
-    "/ip4/192.168.1.10/tcp/4001",
-    "/ip4/192.168.1.11/tcp/4001"
-]
+[network]
+grpc_port = 50051
+p2p_port = 4001
 
-[logging]
-level = "info"
+[central]
+# Uses ~/.cyxcloud/config.toml [gateway.grpc_url] by default
+register = true
+heartbeat_interval_secs = 30
+
+[cyxwiz_api]
+# Uses ~/.cyxcloud/config.toml [auth.api_url] by default
+register = true
+
+[metrics]
+enabled = true
+port = 9090
 ```
 
 ---

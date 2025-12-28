@@ -178,6 +178,8 @@ pub struct HeartbeatService {
     grpc_address: String,
     client: RwLock<Option<NodeServiceClient<Channel>>>,
     auth_token: RwLock<Option<String>>,
+    /// JWT token from CyxWiz API for Gateway authentication
+    jwt_token: RwLock<Option<String>>,
     system: RwLock<System>,
     command_executor: CommandExecutor,
 }
@@ -220,9 +222,23 @@ impl HeartbeatService {
             grpc_address,
             client: RwLock::new(None),
             auth_token: RwLock::new(None),
+            jwt_token: RwLock::new(None),
             system: RwLock::new(system),
             command_executor,
         }
+    }
+
+    /// Set the JWT token for Gateway authentication
+    /// This token comes from CyxWiz API login
+    pub async fn set_jwt_token(&self, token: String) {
+        let mut jwt = self.jwt_token.write().await;
+        *jwt = Some(token);
+        info!("JWT token set for Gateway authentication");
+    }
+
+    /// Check if JWT token is set
+    pub async fn has_jwt_token(&self) -> bool {
+        self.jwt_token.read().await.is_some()
     }
 
     /// Start the heartbeat loop
@@ -299,13 +315,30 @@ impl HeartbeatService {
         Ok(client)
     }
 
+    /// Create a gRPC request with JWT authorization header
+    fn create_auth_request<T>(&self, inner: T, jwt_token: Option<&str>) -> tonic::Request<T> {
+        let mut request = tonic::Request::new(inner);
+        if let Some(token) = jwt_token {
+            if let Ok(value) = format!("Bearer {}", token).parse() {
+                request.metadata_mut().insert("authorization", value);
+            }
+        }
+        request
+    }
+
     /// Register with central server
     async fn register(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Get JWT token for authentication
+        let jwt_token = self.jwt_token.read().await.clone();
+        if jwt_token.is_none() {
+            return Err("JWT token not set - login to CyxWiz API first".into());
+        }
+
         info!(
             node_id = %self.node_id,
             central_addr = %self.config.central.address,
             grpc_addr = %self.grpc_address,
-            "Registering with central server"
+            "Registering with Gateway (using JWT auth)"
         );
 
         let mut client = self.connect().await?;
@@ -314,7 +347,7 @@ impl HeartbeatService {
         let stats = self.storage.stats().unwrap_or_default();
 
         // Build registration request
-        let request = RegisterNodeRequest {
+        let register_req = RegisterNodeRequest {
             node_id: self.node_id.clone(),
             info: Some(NodeInfo {
                 node_id: self.node_id.clone(),
@@ -339,16 +372,18 @@ impl HeartbeatService {
             }),
         };
 
+        // Create request with JWT auth header
+        let request = self.create_auth_request(register_req, jwt_token.as_deref());
+
         let response = client.register_node(request).await?;
         let result = response.into_inner();
 
         if result.success {
             info!(
                 node_id = %self.node_id,
-                auth_token = %result.auth_token,
-                "Node registered successfully"
+                "Node registered successfully with Gateway"
             );
-            // Store the auth token for future requests
+            // Store the gateway auth token for future requests (if any)
             {
                 let mut token = self.auth_token.write().await;
                 *token = Some(result.auth_token);
@@ -361,6 +396,12 @@ impl HeartbeatService {
 
     /// Send heartbeat to central server
     async fn send_heartbeat(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Get JWT token for authentication
+        let jwt_token = self.jwt_token.read().await.clone();
+        if jwt_token.is_none() {
+            return Err("JWT token not set - login to CyxWiz API first".into());
+        }
+
         let mut client = self.connect().await?;
 
         // Get current stats
@@ -393,7 +434,7 @@ impl HeartbeatService {
         };
 
         // Build heartbeat request with metrics
-        let request = HeartbeatRequest {
+        let heartbeat_req = HeartbeatRequest {
             node_id: self.node_id.clone(),
             metrics: Some(ProtoNodeMetrics {
                 storage_used: stats.bytes_used,
@@ -407,6 +448,9 @@ impl HeartbeatService {
                 last_updated: chrono::Utc::now().timestamp(),
             }),
         };
+
+        // Create request with JWT auth header
+        let request = self.create_auth_request(heartbeat_req, jwt_token.as_deref());
 
         let response = client.heartbeat(request).await?;
         let result = response.into_inner();

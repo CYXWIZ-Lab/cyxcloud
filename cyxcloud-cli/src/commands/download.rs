@@ -3,6 +3,7 @@
 //! Downloads files or directories from CyxCloud storage.
 
 use crate::client::GatewayClient;
+use crate::symbols;
 use anyhow::{Context, Result};
 use console::style;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -78,7 +79,7 @@ async fn download_single_file(
 
     pb.finish_with_message(format!(
         "{} Downloaded {} ({} bytes)",
-        style("✓").green(),
+        style(symbols::CHECK).green(),
         key,
         size
     ));
@@ -154,7 +155,7 @@ async fn download_prefix(
             if let Err(e) = fs::create_dir_all(parent).await {
                 eprintln!(
                     "{} Failed to create directory {}: {}",
-                    style("✗").red(),
+                    style(symbols::CROSS).red(),
                     parent.display(),
                     e
                 );
@@ -172,7 +173,7 @@ async fn download_prefix(
             Err(e) => {
                 eprintln!(
                     "{} Failed to download {}: {}",
-                    style("✗").red(),
+                    style(symbols::CROSS).red(),
                     obj.key,
                     e
                 );

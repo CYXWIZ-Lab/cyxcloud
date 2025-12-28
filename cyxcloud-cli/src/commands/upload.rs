@@ -3,6 +3,7 @@
 //! Uploads files or directories to CyxCloud storage.
 
 use crate::client::GatewayClient;
+use crate::symbols;
 use anyhow::{Context, Result};
 use console::style;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -81,7 +82,7 @@ async fn upload_single_file(
 
     pb.finish_with_message(format!(
         "{} Uploaded {} ({} bytes)",
-        style("✓").green(),
+        style(symbols::CHECK).green(),
         key,
         uploaded_size
     ));
@@ -155,7 +156,7 @@ async fn upload_directory(
             Err(e) => {
                 eprintln!(
                     "{} Failed to upload {}: {}",
-                    style("✗").red(),
+                    style(symbols::CROSS).red(),
                     file_path.display(),
                     e
                 );

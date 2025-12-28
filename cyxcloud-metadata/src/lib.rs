@@ -258,6 +258,7 @@ impl MetadataService {
                 peer_id: peer_id.to_string(),
                 grpc_address: grpc_address.to_string(),
                 storage_total: 0,
+                storage_reserved: 0,
                 bandwidth_mbps: 0,
                 datacenter: None,
                 region: None,
@@ -302,6 +303,13 @@ impl MetadataService {
     /// - If node was offline/draining: enters 'recovering' quarantine state
     pub async fn heartbeat_with_recovery(&self, node_id: Uuid) -> Result<NodeStatus> {
         let status = self.db.update_node_heartbeat_with_recovery(node_id).await?;
+        Ok(status)
+    }
+
+    /// Update node heartbeat using peer_id (client-side node identifier)
+    /// This is used by heartbeat RPCs where the node sends its own ID
+    pub async fn heartbeat_by_peer_id(&self, peer_id: &str) -> Result<NodeStatus> {
+        let status = self.db.update_node_heartbeat_by_peer_id(peer_id).await?;
         Ok(status)
     }
 

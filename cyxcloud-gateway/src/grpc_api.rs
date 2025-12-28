@@ -108,10 +108,13 @@ impl NodeService for NodeServiceImpl {
         let capacity = info.capacity.unwrap_or_default();
 
         // Create the node in metadata service
+        // Gateway reserves 2GB for metadata, erasure coding, and rebalancing
+        const GATEWAY_RESERVED_BYTES: i64 = 2 * 1024 * 1024 * 1024; // 2 GB
         let create_node = CreateNode {
             peer_id: node_id.clone(),
             grpc_address: info.listen_addrs.first().cloned().unwrap_or_default(),
             storage_total: capacity.storage_total as i64,
+            storage_reserved: GATEWAY_RESERVED_BYTES,
             bandwidth_mbps: capacity.bandwidth_mbps as i32,
             datacenter: if location.datacenter.is_empty() {
                 None
@@ -170,13 +173,9 @@ impl NodeService for NodeServiceImpl {
             Status::unavailable("Metadata service not configured")
         })?;
 
-        // Parse node UUID
-        let node_uuid = Uuid::parse_str(&node_id_str).map_err(|e| {
-            Status::invalid_argument(format!("Invalid node_id format: {}", e))
-        })?;
-
+        // Use peer_id directly - the node sends its own ID which is stored as peer_id
         // Update heartbeat with recovery-aware logic
-        match metadata.heartbeat_with_recovery(node_uuid).await {
+        match metadata.heartbeat_by_peer_id(&node_id_str).await {
             Ok(status) => {
                 let status_str = status.to_string();
                 if status == cyxcloud_metadata::NodeStatus::Recovering {

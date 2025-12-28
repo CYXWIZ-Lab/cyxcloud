@@ -57,9 +57,13 @@ sysinfo = "0.31"
 reqwest = { version = "0.12", features = ["json"] }
 serde_json = "1"
 rpassword = "7"
+dirs = "5.0"
 
 # Local IP detection
 local-ip-address = "0.6"
+
+# TTY detection for non-interactive mode
+atty = "0.2"
 
 # Blockchain (optional, for Solana integration)
 solana-sdk = { workspace = true, optional = true }
