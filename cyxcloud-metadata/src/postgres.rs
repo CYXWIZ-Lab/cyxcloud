@@ -1104,6 +1104,404 @@ impl Database {
         .await?;
         Ok(())
     }
+
+    // =========================================================================
+    // UPTIME & PAYMENT OPERATIONS
+    // =========================================================================
+
+    /// Create or get existing epoch uptime record for a node
+    #[instrument(skip(self))]
+    pub async fn create_or_get_epoch_uptime(
+        &self,
+        node_id: Uuid,
+        epoch: i64,
+        epoch_start: chrono::DateTime<chrono::Utc>,
+    ) -> Result<NodeEpochUptime> {
+        let result = sqlx::query_as::<_, NodeEpochUptime>(
+            r#"
+            INSERT INTO node_epoch_uptime (node_id, epoch, epoch_start)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (node_id, epoch) DO UPDATE SET updated_at = NOW()
+            RETURNING *
+            "#,
+        )
+        .bind(node_id)
+        .bind(epoch)
+        .bind(epoch_start)
+        .fetch_one(&self.pool)
+        .await?;
+
+        debug!(node_id = %node_id, epoch = epoch, "Epoch uptime record created/retrieved");
+        Ok(result)
+    }
+
+    /// Add online time to a node's epoch uptime record
+    #[instrument(skip(self))]
+    pub async fn update_uptime_online(
+        &self,
+        node_id: Uuid,
+        epoch: i64,
+        seconds: i64,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE node_epoch_uptime
+            SET seconds_online = seconds_online + $1,
+                last_status_change = NOW(),
+                updated_at = NOW()
+            WHERE node_id = $2 AND epoch = $3
+            "#,
+        )
+        .bind(seconds)
+        .bind(node_id)
+        .bind(epoch)
+        .execute(&self.pool)
+        .await?;
+
+        debug!(node_id = %node_id, epoch = epoch, seconds = seconds, "Added online time");
+        Ok(())
+    }
+
+    /// Add offline time to a node's epoch uptime record
+    #[instrument(skip(self))]
+    pub async fn update_uptime_offline(
+        &self,
+        node_id: Uuid,
+        epoch: i64,
+        seconds: i64,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE node_epoch_uptime
+            SET seconds_offline = seconds_offline + $1,
+                last_status_change = NOW(),
+                updated_at = NOW()
+            WHERE node_id = $2 AND epoch = $3
+            "#,
+        )
+        .bind(seconds)
+        .bind(node_id)
+        .bind(epoch)
+        .execute(&self.pool)
+        .await?;
+
+        debug!(node_id = %node_id, epoch = epoch, seconds = seconds, "Added offline time");
+        Ok(())
+    }
+
+    /// Get all uptime records for an epoch (for payment calculation)
+    pub async fn get_epoch_uptime(&self, epoch: i64) -> Result<Vec<NodeEpochUptime>> {
+        let result = sqlx::query_as::<_, NodeEpochUptime>(
+            "SELECT * FROM node_epoch_uptime WHERE epoch = $1 ORDER BY seconds_online DESC",
+        )
+        .bind(epoch)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
+    /// Get uptime record for a specific node in an epoch
+    pub async fn get_node_epoch_uptime(
+        &self,
+        node_id: Uuid,
+        epoch: i64,
+    ) -> Result<Option<NodeEpochUptime>> {
+        let result = sqlx::query_as::<_, NodeEpochUptime>(
+            "SELECT * FROM node_epoch_uptime WHERE node_id = $1 AND epoch = $2",
+        )
+        .bind(node_id)
+        .bind(epoch)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
+    /// Get unpaid uptime records for an epoch
+    pub async fn get_unpaid_epoch_uptime(&self, epoch: i64) -> Result<Vec<NodeEpochUptime>> {
+        let result = sqlx::query_as::<_, NodeEpochUptime>(
+            r#"
+            SELECT * FROM node_epoch_uptime
+            WHERE epoch = $1 AND payment_allocated = FALSE
+            ORDER BY seconds_online DESC
+            "#,
+        )
+        .bind(epoch)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
+    /// Mark payment as allocated for a node's epoch uptime
+    #[instrument(skip(self))]
+    pub async fn mark_payment_allocated(
+        &self,
+        node_id: Uuid,
+        epoch: i64,
+        amount: i64,
+        tx_signature: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE node_epoch_uptime
+            SET payment_allocated = TRUE,
+                payment_amount = $1,
+                payment_tx_signature = $2,
+                updated_at = NOW()
+            WHERE node_id = $3 AND epoch = $4
+            "#,
+        )
+        .bind(amount)
+        .bind(tx_signature)
+        .bind(node_id)
+        .bind(epoch)
+        .execute(&self.pool)
+        .await?;
+
+        debug!(node_id = %node_id, epoch = epoch, amount = amount, "Payment allocated");
+        Ok(())
+    }
+
+    /// End epoch uptime tracking (set epoch_end timestamp)
+    pub async fn end_epoch_uptime(&self, epoch: i64) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE node_epoch_uptime
+            SET epoch_end = NOW(), updated_at = NOW()
+            WHERE epoch = $1
+            "#,
+        )
+        .bind(epoch)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    // =========================================================================
+    // SLASHING OPERATIONS
+    // =========================================================================
+
+    /// Record a slashing event
+    #[instrument(skip(self))]
+    pub async fn record_slashing_event(
+        &self,
+        node_id: Uuid,
+        epoch: i64,
+        reason: &str,
+        slash_percent: i16,
+        slash_amount: Option<i64>,
+        tx_signature: Option<&str>,
+        details: Option<serde_json::Value>,
+    ) -> Result<SlashingEvent> {
+        let result = sqlx::query_as::<_, SlashingEvent>(
+            r#"
+            INSERT INTO node_slashing_events (node_id, epoch, reason, slash_percent, slash_amount, tx_signature, details)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING *
+            "#,
+        )
+        .bind(node_id)
+        .bind(epoch)
+        .bind(reason)
+        .bind(slash_percent)
+        .bind(slash_amount)
+        .bind(tx_signature)
+        .bind(details)
+        .fetch_one(&self.pool)
+        .await?;
+
+        debug!(node_id = %node_id, epoch = epoch, reason = reason, "Slashing event recorded");
+        Ok(result)
+    }
+
+    /// Get slashing events for a node
+    pub async fn get_node_slashing_events(&self, node_id: Uuid) -> Result<Vec<SlashingEvent>> {
+        let result = sqlx::query_as::<_, SlashingEvent>(
+            "SELECT * FROM node_slashing_events WHERE node_id = $1 ORDER BY created_at DESC",
+        )
+        .bind(node_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
+    /// Get slashing events for an epoch
+    pub async fn get_epoch_slashing_events(&self, epoch: i64) -> Result<Vec<SlashingEvent>> {
+        let result = sqlx::query_as::<_, SlashingEvent>(
+            "SELECT * FROM node_slashing_events WHERE epoch = $1 ORDER BY created_at",
+        )
+        .bind(epoch)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
+    // =========================================================================
+    // PAYMENT EPOCH OPERATIONS
+    // =========================================================================
+
+    /// Create a new payment epoch
+    #[instrument(skip(self))]
+    pub async fn create_payment_epoch(&self, epoch: i64) -> Result<PaymentEpoch> {
+        let result = sqlx::query_as::<_, PaymentEpoch>(
+            r#"
+            INSERT INTO payment_epochs (epoch, started_at)
+            VALUES ($1, NOW())
+            RETURNING *
+            "#,
+        )
+        .bind(epoch)
+        .fetch_one(&self.pool)
+        .await?;
+
+        debug!(epoch = epoch, "Payment epoch created");
+        Ok(result)
+    }
+
+    /// Get payment epoch by number
+    pub async fn get_payment_epoch(&self, epoch: i64) -> Result<Option<PaymentEpoch>> {
+        let result = sqlx::query_as::<_, PaymentEpoch>(
+            "SELECT * FROM payment_epochs WHERE epoch = $1",
+        )
+        .bind(epoch)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
+    /// Get the current (latest non-finalized) payment epoch
+    pub async fn get_current_payment_epoch(&self) -> Result<Option<PaymentEpoch>> {
+        let result = sqlx::query_as::<_, PaymentEpoch>(
+            "SELECT * FROM payment_epochs WHERE finalized = FALSE ORDER BY epoch DESC LIMIT 1",
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
+    /// Finalize a payment epoch
+    #[instrument(skip(self))]
+    pub async fn finalize_payment_epoch(
+        &self,
+        epoch: i64,
+        total_pool_amount: i64,
+        nodes_share: i64,
+        platform_share: i64,
+        community_share: i64,
+        nodes_paid: i32,
+        tx_signature: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE payment_epochs
+            SET finalized = TRUE,
+                ended_at = NOW(),
+                total_pool_amount = $1,
+                nodes_share = $2,
+                platform_share = $3,
+                community_share = $4,
+                nodes_paid = $5,
+                finalize_tx_signature = $6
+            WHERE epoch = $7
+            "#,
+        )
+        .bind(total_pool_amount)
+        .bind(nodes_share)
+        .bind(platform_share)
+        .bind(community_share)
+        .bind(nodes_paid)
+        .bind(tx_signature)
+        .bind(epoch)
+        .execute(&self.pool)
+        .await?;
+
+        debug!(epoch = epoch, nodes_paid = nodes_paid, "Payment epoch finalized");
+        Ok(())
+    }
+
+    /// Mark platform share as claimed
+    pub async fn mark_platform_claimed(&self, epoch: i64) -> Result<()> {
+        sqlx::query("UPDATE payment_epochs SET platform_claimed = TRUE WHERE epoch = $1")
+            .bind(epoch)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Mark community share as claimed
+    pub async fn mark_community_claimed(&self, epoch: i64) -> Result<()> {
+        sqlx::query("UPDATE payment_epochs SET community_claimed = TRUE WHERE epoch = $1")
+            .bind(epoch)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Get nodes with extended downtime (>4 hours offline in an epoch)
+    /// These nodes should be slashed for extended downtime
+    pub async fn get_nodes_with_extended_downtime(
+        &self,
+        epoch: i64,
+        threshold_seconds: i64,
+    ) -> Result<Vec<NodeEpochUptime>> {
+        let result = sqlx::query_as::<_, NodeEpochUptime>(
+            r#"
+            SELECT * FROM node_epoch_uptime
+            WHERE epoch = $1 AND seconds_offline > $2
+            "#,
+        )
+        .bind(epoch)
+        .bind(threshold_seconds)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
+    /// Get payment history for a node
+    pub async fn get_node_payment_history(
+        &self,
+        node_id: Uuid,
+        limit: i64,
+    ) -> Result<Vec<NodeEpochUptime>> {
+        let result = sqlx::query_as::<_, NodeEpochUptime>(
+            r#"
+            SELECT * FROM node_epoch_uptime
+            WHERE node_id = $1 AND payment_allocated = TRUE
+            ORDER BY epoch DESC
+            LIMIT $2
+            "#,
+        )
+        .bind(node_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
+    /// Initialize epoch uptime records for all active nodes
+    /// Call this at the start of each epoch to ensure all nodes have records
+    #[instrument(skip(self))]
+    pub async fn initialize_epoch_for_all_nodes(
+        &self,
+        epoch: i64,
+        epoch_start: chrono::DateTime<chrono::Utc>,
+    ) -> Result<u64> {
+        let result = sqlx::query(
+            r#"
+            INSERT INTO node_epoch_uptime (node_id, epoch, epoch_start)
+            SELECT id, $1, $2 FROM nodes
+            WHERE status IN ('online', 'recovering', 'offline', 'draining')
+            ON CONFLICT (node_id, epoch) DO NOTHING
+            "#,
+        )
+        .bind(epoch)
+        .bind(epoch_start)
+        .execute(&self.pool)
+        .await?;
+
+        let count = result.rows_affected();
+        debug!(epoch = epoch, nodes_initialized = count, "Initialized epoch for all nodes");
+        Ok(count)
+    }
 }
 
 #[cfg(test)]

@@ -13,6 +13,7 @@ pub mod blockchain;
 mod grpc_api;
 mod node_client;
 mod node_monitor;
+mod payment_daemon;
 mod s3_api;
 mod state;
 mod websocket;
@@ -139,8 +140,14 @@ async fn main() -> anyhow::Result<()> {
         let monitor = Arc::new(node_monitor::NodeMonitor::new(monitor_config));
         let _monitor_handle = monitor.start(state.clone());
         info!("Node lifecycle monitor started");
+
+        // Start payment daemon (background task)
+        let payment_config = payment_daemon::PaymentDaemonConfig::from_env();
+        let payment_daemon = Arc::new(payment_daemon::PaymentDaemon::new(payment_config));
+        let _payment_handle = payment_daemon.start(state.clone());
+        info!("Payment daemon started");
     } else {
-        info!("Metadata service not configured, node monitor disabled");
+        info!("Metadata service not configured, node monitor and payment daemon disabled");
     }
 
     // Build CORS layer
