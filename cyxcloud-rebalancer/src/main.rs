@@ -6,19 +6,28 @@
 //! - Rebalancing (distribute data evenly)
 //! - Hot-swap support (drain nodes before shutdown)
 
+mod config;
 mod detector;
 mod executor;
+mod metadata_client;
+mod network_client;
 mod planner;
+mod transfer;
 
 use clap::Parser;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::signal;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn, Level};
 
+use config::RebalancerConfig;
 use detector::{Detector, DetectorConfig};
 use executor::{Executor, ExecutorConfig, ProgressUpdate};
+use metadata_client::PostgresMetadataClient;
+use network_client::GrpcNetworkClient;
 use planner::{NodeInfo, Planner, PlannerConfig};
+use transfer::create_transfer_fn;
 
 #[derive(Parser)]
 #[command(name = "cyxcloud-rebalancer")]
@@ -40,26 +49,38 @@ struct Cli {
     #[arg(long, default_value = "3")]
     replication_factor: usize,
 
-    /// Metadata service address
-    #[arg(long, default_value = "http://localhost:50051")]
-    metadata_addr: String,
+    /// PostgreSQL database URL (enables production mode)
+    #[arg(long, env = "DATABASE_URL")]
+    database_url: Option<String>,
 
     /// Dry run mode (don't actually repair)
     #[arg(long, default_value = "false")]
     dry_run: bool,
 }
 
+/// Client mode for the rebalancer
+enum ClientMode {
+    /// Use mock clients for development/testing
+    Mock,
+    /// Use real clients connected to PostgreSQL
+    Production {
+        db: Arc<cyxcloud_metadata::postgres::Database>,
+        metadata_client: Arc<PostgresMetadataClient>,
+        network_client: Arc<GrpcNetworkClient>,
+    },
+}
+
 struct RebalancerService {
     detector: Detector,
     planner: Planner,
     executor: Executor,
-    metadata_addr: String,
+    client_mode: ClientMode,
     dry_run: bool,
     scan_interval: Duration,
 }
 
 impl RebalancerService {
-    fn new(cli: &Cli) -> (Self, mpsc::Receiver<ProgressUpdate>) {
+    async fn new(cli: &Cli) -> anyhow::Result<(Self, mpsc::Receiver<ProgressUpdate>)> {
         let detector_config = DetectorConfig {
             replication_factor: cli.replication_factor,
             batch_size: 1000,
@@ -90,16 +111,46 @@ impl RebalancerService {
 
         let (executor, progress_rx) = Executor::with_progress(executor_config);
 
+        // Determine client mode based on database URL
+        let client_mode = if let Some(ref db_url) = cli.database_url {
+            info!("Production mode: connecting to PostgreSQL");
+
+            let db_config = cyxcloud_metadata::postgres::DbConfig {
+                url: db_url.clone(),
+                ..Default::default()
+            };
+
+            let db = Arc::new(
+                cyxcloud_metadata::postgres::Database::new(db_config)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to connect to database: {}", e))?,
+            );
+
+            let metadata_client = Arc::new(PostgresMetadataClient::new(db.clone()));
+            let network_client = Arc::new(GrpcNetworkClient::new(db.clone()));
+
+            info!("Connected to PostgreSQL database");
+
+            ClientMode::Production {
+                db,
+                metadata_client,
+                network_client,
+            }
+        } else {
+            info!("Development mode: using mock clients");
+            ClientMode::Mock
+        };
+
         let service = Self {
             detector: Detector::new(detector_config),
             planner: Planner::new(planner_config),
             executor,
-            metadata_addr: cli.metadata_addr.clone(),
+            client_mode,
             dry_run: cli.dry_run,
             scan_interval: Duration::from_secs(cli.scan_interval),
         };
 
-        (service, progress_rx)
+        Ok((service, progress_rx))
     }
 
     async fn run(&mut self) -> anyhow::Result<()> {
@@ -137,9 +188,73 @@ impl RebalancerService {
     async fn run_scan_cycle(&mut self) -> anyhow::Result<()> {
         info!("Starting scan cycle");
 
-        // Create mock clients for now
-        // TODO: Replace with real metadata and network clients
-        let metadata_client = MockMetadataClient::new(&self.metadata_addr);
+        match &self.client_mode {
+            ClientMode::Production { db, metadata_client, network_client } => {
+                self.run_production_cycle(db.clone(), metadata_client.clone(), network_client.clone()).await
+            }
+            ClientMode::Mock => {
+                self.run_mock_cycle().await
+            }
+        }
+    }
+
+    async fn run_production_cycle(
+        &mut self,
+        db: Arc<cyxcloud_metadata::postgres::Database>,
+        metadata_client: Arc<PostgresMetadataClient>,
+        network_client: Arc<GrpcNetworkClient>,
+    ) -> anyhow::Result<()> {
+        // Step 1: Detect issues
+        let scan_result = self
+            .detector
+            .scan(metadata_client.as_ref(), network_client.as_ref())
+            .await
+            .map_err(|e| anyhow::anyhow!("Scan failed: {}", e))?;
+
+        info!(summary = %scan_result.summary(), "Scan complete");
+
+        if scan_result.has_critical_issues() {
+            warn!("Critical issues detected!");
+        }
+
+        // Step 2: Create repair plan
+        let all_issues = scan_result.all_issues();
+        if all_issues.is_empty() {
+            info!("No issues found, skipping repair");
+            return Ok(());
+        }
+
+        // Get node info from network client
+        let nodes = network_client
+            .get_node_info()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to get nodes: {}", e))?;
+
+        let issues: Vec<_> = all_issues.into_iter().cloned().collect();
+        let plan = self
+            .planner
+            .create_plan(&issues, &nodes)
+            .map_err(|e| anyhow::anyhow!("Planning failed: {}", e))?;
+
+        info!(summary = %plan.summary(), "Repair plan created");
+
+        if self.dry_run {
+            info!("Dry run mode, skipping execution");
+            return Ok(());
+        }
+
+        // Step 3: Execute repairs with real transfer function
+        let transfer_fn = create_transfer_fn(db);
+        let result = self.executor.execute(plan, transfer_fn).await;
+
+        info!(summary = %result.summary(), "Repair execution complete");
+
+        Ok(())
+    }
+
+    async fn run_mock_cycle(&mut self) -> anyhow::Result<()> {
+        // Use mock clients for development/testing
+        let metadata_client = MockMetadataClient::new();
         let network_client = MockNetworkClient::new();
 
         // Step 1: Detect issues
@@ -181,16 +296,15 @@ impl RebalancerService {
             return Ok(());
         }
 
-        // Step 3: Execute repairs
+        // Step 3: Execute repairs (mock - just log)
         let result = self
             .executor
             .execute(plan, |source, _task_id, chunk_id, targets| async move {
-                // TODO: Replace with real network transfer
                 info!(
                     source = source,
                     chunk = hex::encode(&chunk_id),
                     targets = ?targets,
-                    "Would transfer chunk"
+                    "Would transfer chunk (mock mode)"
                 );
                 // Simulate success
                 Ok(targets)
@@ -207,15 +321,11 @@ impl RebalancerService {
 // MOCK CLIENTS (for development/testing)
 // =============================================================================
 
-struct MockMetadataClient {
-    _addr: String,
-}
+struct MockMetadataClient;
 
 impl MockMetadataClient {
-    fn new(addr: &str) -> Self {
-        Self {
-            _addr: addr.to_string(),
-        }
+    fn new() -> Self {
+        Self
     }
 }
 
@@ -316,16 +426,23 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
 
+    let mode = if cli.database_url.is_some() {
+        "production"
+    } else {
+        "development (mock)"
+    };
+
     info!(
         scan_interval = cli.scan_interval,
         parallelism = cli.parallelism,
         rate_limit_gb = cli.rate_limit_gb,
         replication_factor = cli.replication_factor,
         dry_run = cli.dry_run,
+        mode = mode,
         "Starting CyxCloud rebalancer"
     );
 
-    let (mut service, mut progress_rx) = RebalancerService::new(&cli);
+    let (mut service, mut progress_rx) = RebalancerService::new(&cli).await?;
 
     // Spawn progress reporter
     tokio::spawn(async move {
