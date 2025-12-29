@@ -272,6 +272,11 @@ async fn main() -> anyhow::Result<()> {
         heartbeat_service.set_jwt_token(token).await;
     }
 
+    // Set wallet address for Gateway registration (from CyxWiz login)
+    if let Some(wallet) = machine_service.get_credentials_wallet().await {
+        heartbeat_service.set_credentials_wallet(wallet).await;
+    }
+
     // Start Gateway heartbeat service
     if config.central.register {
         let heartbeat_clone = heartbeat_service.clone();

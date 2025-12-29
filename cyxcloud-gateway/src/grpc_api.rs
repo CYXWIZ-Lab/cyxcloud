@@ -58,8 +58,8 @@ impl NodeServiceImpl {
 
         NodeInfo {
             node_id: node.id.to_string(),
-            public_key: String::new(), // TODO: Add public key support
-            wallet_address: String::new(), // TODO: Add wallet support
+            public_key: node.public_key.clone().unwrap_or_default(),
+            wallet_address: node.wallet_address.clone().unwrap_or_default(),
             listen_addrs: vec![node.grpc_address.clone()],
             location: Some(NodeLocation {
                 datacenter: node.datacenter.clone().unwrap_or_default(),
@@ -127,7 +127,26 @@ impl NodeService for NodeServiceImpl {
                 Some(location.region)
             },
             version: None,
+            wallet_address: if info.wallet_address.is_empty() {
+                None
+            } else {
+                Some(info.wallet_address.clone())
+            },
+            public_key: if info.public_key.is_empty() {
+                None
+            } else {
+                Some(info.public_key.clone())
+            },
         };
+
+        // Log wallet if provided
+        if !info.wallet_address.is_empty() {
+            info!(
+                node_id = %node_id,
+                wallet = %info.wallet_address,
+                "Node registering with wallet address"
+            );
+        }
 
         match metadata.register_node(create_node).await {
             Ok(node) => {

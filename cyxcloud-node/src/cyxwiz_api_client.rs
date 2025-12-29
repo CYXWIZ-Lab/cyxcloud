@@ -182,6 +182,16 @@ pub struct UserInfo {
     pub external_wallet: Option<String>,
 }
 
+impl UserInfo {
+    /// Get the user's wallet address for storage payments.
+    /// Priority: external_wallet (linked Solana wallet) > cyx_wallet.public_key (custodial)
+    pub fn wallet_address(&self) -> Option<String> {
+        self.external_wallet
+            .clone()
+            .or_else(|| self.cyx_wallet.as_ref().map(|w| w.public_key.clone()))
+    }
+}
+
 /// CyxWallet info
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -202,6 +212,9 @@ pub struct SavedCredentials {
     /// Persistent node ID (survives restarts)
     #[serde(default)]
     pub node_id: Option<String>,
+    /// Wallet address from CyxWiz account (external_wallet or cyx_wallet.public_key)
+    #[serde(default)]
+    pub wallet_address: Option<String>,
 }
 
 // ============ API Client ============
@@ -296,7 +309,13 @@ impl CyxWizApiClient {
     }
 
     /// Get current credentials for saving
-    pub fn get_credentials(&self, email: &str, username: &str, node_id: Option<String>) -> Option<SavedCredentials> {
+    pub fn get_credentials(
+        &self,
+        email: &str,
+        username: &str,
+        node_id: Option<String>,
+        wallet_address: Option<String>,
+    ) -> Option<SavedCredentials> {
         Some(SavedCredentials {
             user_id: self.user_id.clone()?,
             email: email.to_string(),
@@ -305,6 +324,7 @@ impl CyxWizApiClient {
             machine_id: self.machine_id.clone(),
             api_key: self.api_key.clone(),
             node_id,
+            wallet_address,
         })
     }
 

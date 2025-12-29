@@ -119,6 +119,10 @@ pub struct Node {
     pub version: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+
+    // Identity/Payment
+    pub wallet_address: Option<String>,
+    pub public_key: Option<String>,
 }
 
 impl Node {
@@ -144,6 +148,9 @@ pub struct CreateNode {
     pub datacenter: Option<String>,
     pub region: Option<String>,
     pub version: Option<String>,
+    // Identity/Payment
+    pub wallet_address: Option<String>,
+    pub public_key: Option<String>,
 }
 
 /// File metadata

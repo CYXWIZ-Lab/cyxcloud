@@ -263,6 +263,8 @@ impl MetadataService {
                 datacenter: None,
                 region: None,
                 version: None,
+                wallet_address: None,
+                public_key: None,
             })
             .await?;
 

@@ -180,6 +180,8 @@ pub struct HeartbeatService {
     auth_token: RwLock<Option<String>>,
     /// JWT token from CyxWiz API for Gateway authentication
     jwt_token: RwLock<Option<String>>,
+    /// Wallet address from CyxWiz API login (takes priority over config)
+    credentials_wallet: RwLock<Option<String>>,
     system: RwLock<System>,
     command_executor: CommandExecutor,
 }
@@ -223,6 +225,7 @@ impl HeartbeatService {
             client: RwLock::new(None),
             auth_token: RwLock::new(None),
             jwt_token: RwLock::new(None),
+            credentials_wallet: RwLock::new(None),
             system: RwLock::new(system),
             command_executor,
         }
@@ -239,6 +242,25 @@ impl HeartbeatService {
     /// Check if JWT token is set
     pub async fn has_jwt_token(&self) -> bool {
         self.jwt_token.read().await.is_some()
+    }
+
+    /// Set the wallet address from CyxWiz API login
+    /// This takes priority over config.node.wallet_address
+    pub async fn set_credentials_wallet(&self, wallet: String) {
+        let mut w = self.credentials_wallet.write().await;
+        *w = Some(wallet.clone());
+        info!(wallet = %wallet, "Wallet address set from credentials");
+    }
+
+    /// Get the effective wallet address for registration
+    /// Priority: credentials wallet > config wallet
+    async fn get_wallet_address(&self) -> String {
+        // First try credentials wallet (from login)
+        if let Some(wallet) = self.credentials_wallet.read().await.clone() {
+            return wallet;
+        }
+        // Fall back to config wallet
+        self.config.node.wallet_address.clone().unwrap_or_default()
     }
 
     /// Start the heartbeat loop
@@ -346,13 +368,16 @@ impl HeartbeatService {
         // Get storage stats for capacity info
         let stats = self.storage.stats().unwrap_or_default();
 
+        // Get wallet address (credentials wallet takes priority over config)
+        let wallet_address = self.get_wallet_address().await;
+
         // Build registration request
         let register_req = RegisterNodeRequest {
             node_id: self.node_id.clone(),
             info: Some(NodeInfo {
                 node_id: self.node_id.clone(),
                 public_key: String::new(), // TODO: Add key support
-                wallet_address: self.config.node.wallet_address.clone().unwrap_or_default(),
+                wallet_address: wallet_address.clone(),
                 listen_addrs: vec![self.grpc_address.clone()],
                 location: Some(NodeLocation {
                     datacenter: String::new(),
@@ -371,6 +396,10 @@ impl HeartbeatService {
                 registered_at: chrono::Utc::now().timestamp(),
             }),
         };
+
+        if !wallet_address.is_empty() {
+            info!(wallet = %wallet_address, "Registering with wallet address");
+        }
 
         // Create request with JWT auth header
         let request = self.create_auth_request(register_req, jwt_token.as_deref());

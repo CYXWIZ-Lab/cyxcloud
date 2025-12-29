@@ -25,6 +25,8 @@ pub struct MachineService {
     username: RwLock<Option<String>>,
     /// JWT token for Gateway authentication (shared with HeartbeatService)
     jwt_token: RwLock<Option<String>>,
+    /// Wallet address from CyxWiz account (for storage payments)
+    wallet_address: RwLock<Option<String>>,
 }
 
 impl MachineService {
@@ -51,6 +53,7 @@ impl MachineService {
             email: RwLock::new(None),
             username: RwLock::new(None),
             jwt_token: RwLock::new(None),
+            wallet_address: RwLock::new(None),
         })
     }
 
@@ -82,6 +85,7 @@ impl MachineService {
                         email = %creds.email,
                         username = %creds.username,
                         node_id = ?creds.node_id,
+                        wallet = ?creds.wallet_address,
                         "Loaded saved credentials"
                     );
 
@@ -95,6 +99,9 @@ impl MachineService {
 
                     // Store JWT token for Gateway authentication
                     *self.jwt_token.write().await = Some(creds.auth_token.clone());
+
+                    // Store wallet address
+                    *self.wallet_address.write().await = creds.wallet_address.clone();
 
                     Some(creds)
                 }
@@ -110,16 +117,17 @@ impl MachineService {
         }
     }
 
-    /// Save credentials to file (includes persistent node_id)
+    /// Save credentials to file (includes persistent node_id and wallet_address)
     pub async fn save_credentials(&self) -> Result<(), std::io::Error> {
         let client = self.client.read().await;
         let email = self.email.read().await;
         let username = self.username.read().await;
+        let wallet_address = self.wallet_address.read().await;
 
         if let (Some(email), Some(username)) = (email.as_ref(), username.as_ref()) {
             // Include node_id from config for persistence across restarts
             let node_id = Some(self.config.node.id.clone());
-            if let Some(creds) = client.get_credentials(email, username, node_id) {
+            if let Some(creds) = client.get_credentials(email, username, node_id, wallet_address.clone()) {
                 let content = serde_json::to_string_pretty(&creds)?;
 
                 // Ensure ~/.cyxcloud/ directory exists
@@ -130,7 +138,8 @@ impl MachineService {
                 info!(
                     path = ?self.credentials_path,
                     node_id = %self.config.node.id,
-                    "Credentials saved (node ID persisted)"
+                    wallet = ?wallet_address,
+                    "Credentials saved (node ID and wallet persisted)"
                 );
             }
         }
@@ -165,11 +174,16 @@ impl MachineService {
         // Store JWT token for Gateway authentication
         *self.jwt_token.write().await = Some(result.token.clone());
 
+        // Store wallet address from user profile
+        let wallet = result.user.wallet_address();
+        *self.wallet_address.write().await = wallet.clone();
+
         drop(client);
 
         info!(
             email = %result.user.email,
             username = %result.user.username,
+            wallet = ?wallet,
             "Non-interactive login successful"
         );
 
@@ -216,11 +230,18 @@ impl MachineService {
         // Store JWT token for Gateway authentication
         *self.jwt_token.write().await = Some(result.token.clone());
 
+        // Store wallet address from user profile
+        let wallet = result.user.wallet_address();
+        *self.wallet_address.write().await = wallet.clone();
+
         drop(client);
 
         println!();
         println!("{} Login successful!", symbols::CHECK);
         println!("  Welcome, {}!", result.user.name.as_deref().unwrap_or(&result.user.username));
+        if let Some(ref wallet) = wallet {
+            println!("  Wallet: {}...", &wallet[..wallet.len().min(16)]);
+        }
         println!();
 
         // Save credentials
@@ -243,6 +264,7 @@ impl MachineService {
         *self.jwt_token.write().await = None;
         *self.email.write().await = None;
         *self.username.write().await = None;
+        *self.wallet_address.write().await = None;
 
         // Clear client state
         let mut client = self.client.write().await;
@@ -275,14 +297,29 @@ impl MachineService {
         self.username.read().await.clone()
     }
 
+    /// Get wallet address from CyxWiz account (from login)
+    pub async fn get_credentials_wallet(&self) -> Option<String> {
+        self.wallet_address.read().await.clone()
+    }
+
     /// Get node ID from config
     pub fn get_node_id(&self) -> &str {
         &self.config.node.id
     }
 
     /// Get wallet address from config (if set)
-    pub fn get_wallet_address(&self) -> Option<&str> {
+    pub fn get_config_wallet(&self) -> Option<&str> {
         self.config.node.wallet_address.as_deref()
+    }
+
+    /// Get the effective wallet address for node registration.
+    /// Priority: credentials wallet (from login) > config wallet
+    pub async fn get_wallet_address(&self) -> Option<String> {
+        let creds_wallet = self.wallet_address.read().await.clone();
+        if creds_wallet.is_some() {
+            return creds_wallet;
+        }
+        self.config.node.wallet_address.clone()
     }
 
     /// Get region from config (if set)
