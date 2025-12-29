@@ -818,7 +818,7 @@ impl AppState {
                                 shard_index: shard.index as i32,
                                 is_parity: shard.is_parity,
                                 size_bytes: shard.data.len() as i32,
-                                replication_factor: 1,
+                                replication_factor: 3, // Target replicas for rebalancer
                             };
                             if let Err(e) = meta.register_chunk(create_chunk).await {
                                 warn!(error = %e, "Failed to register chunk in database");
@@ -867,7 +867,7 @@ impl AppState {
                                         shard_index: shard.index as i32,
                                         is_parity: shard.is_parity,
                                         size_bytes: shard.data.len() as i32,
-                                        replication_factor: 1,
+                                        replication_factor: 3, // Target replicas for rebalancer
                                     };
                                     let _ = meta.register_chunk(create_chunk).await;
 

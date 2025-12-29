@@ -121,6 +121,7 @@ services:
       RUST_LOG: info,cyxcloud_node=debug
       NODE_ID: node-1
       NODE_NAME: storage-node-1
+      PUBLIC_ADDRESS: node1
       GRPC_HOST: 0.0.0.0
       GRPC_PORT: 50051
       LIBP2P_PORT: 4001
@@ -148,9 +149,7 @@ services:
   # Storage Node 2
   # ===========================================
   node2:
-    build:
-      context: .
-      dockerfile: Dockerfile.node
+    image: cyx_cloud-node1:latest
     container_name: cyxcloud-node2
     ports:
       - "50062:50051"
@@ -160,6 +159,7 @@ services:
       RUST_LOG: info,cyxcloud_node=debug
       NODE_ID: node-2
       NODE_NAME: storage-node-2
+      PUBLIC_ADDRESS: node2
       GRPC_HOST: 0.0.0.0
       GRPC_PORT: 50051
       LIBP2P_PORT: 4001
@@ -189,9 +189,7 @@ services:
   # Storage Node 3
   # ===========================================
   node3:
-    build:
-      context: .
-      dockerfile: Dockerfile.node
+    image: cyx_cloud-node1:latest
     container_name: cyxcloud-node3
     ports:
       - "50063:50051"
@@ -201,6 +199,7 @@ services:
       RUST_LOG: info,cyxcloud_node=debug
       NODE_ID: node-3
       NODE_NAME: storage-node-3
+      PUBLIC_ADDRESS: node3
       GRPC_HOST: 0.0.0.0
       GRPC_PORT: 50051
       LIBP2P_PORT: 4001

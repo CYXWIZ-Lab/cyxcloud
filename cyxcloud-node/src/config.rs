@@ -175,6 +175,11 @@ impl NodeConfig {
             self.node.region = Some(region);
         }
 
+        // Public address override (for Docker/cloud networking)
+        if let Ok(addr) = std::env::var("PUBLIC_ADDRESS") {
+            self.network.public_address = Some(addr);
+        }
+
         self
     }
 }

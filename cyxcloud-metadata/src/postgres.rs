@@ -837,8 +837,13 @@ impl Database {
         .fetch_one(&self.pool)
         .await?;
 
-        // Update chunk replica count
-        self.increment_chunk_replicas(chunk_id).await?;
+        // Update chunk replica count and activate chunk
+        let new_count = self.increment_chunk_replicas(chunk_id).await?;
+
+        // Mark chunk as active once it has at least one replica stored
+        if new_count == 1 {
+            self.update_chunk_status(chunk_id, "active").await?;
+        }
 
         Ok(result)
     }
