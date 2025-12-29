@@ -153,6 +153,28 @@ impl NodeConfig {
             self.central.address = addr;
         }
 
+        // Storage capacity override (in GB)
+        if let Ok(capacity) = std::env::var("STORAGE_CAPACITY_GB") {
+            if let Ok(gb) = capacity.parse::<u64>() {
+                self.storage.max_capacity_gb = gb;
+            }
+        }
+
+        // Node ID override
+        if let Ok(id) = std::env::var("NODE_ID") {
+            self.node.id = id;
+        }
+
+        // Node name override
+        if let Ok(name) = std::env::var("NODE_NAME") {
+            self.node.name = name;
+        }
+
+        // Node region override
+        if let Ok(region) = std::env::var("NODE_REGION") {
+            self.node.region = Some(region);
+        }
+
         self
     }
 }

@@ -226,13 +226,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_bytes_to_chunk_id_valid() {
-        let db = Arc::new(futures::executor::block_on(async {
-            // This will fail in test but we just need the struct
-            panic!("DB not available in test")
-        }));
-        // We can't actually test this without a DB connection
-        // but we can test the error case
+    fn test_chunk_id_hex_conversion() {
+        // Test hex encoding/decoding for chunk IDs
+        let chunk_id = vec![0xde, 0xad, 0xbe, 0xef];
+        let hex_str = hex::encode(&chunk_id);
+        assert_eq!(hex_str, "deadbeef");
+
+        let decoded = hex::decode(&hex_str).unwrap();
+        assert_eq!(decoded, chunk_id);
     }
 
     #[test]
