@@ -1,7 +1,5 @@
 # CyxCloud Docker Compose - Full Stack Testing
-# Includes: PostgreSQL, Redis, CyxWiz API, Gateway, 3 Storage Nodes, Rebalancer
-
-version: '3.8'
+# Includes: PostgreSQL, Redis, CyxWiz API, Gateway (with embedded rebalancer), 3 Storage Nodes
 
 services:
   # ===========================================
@@ -224,34 +222,6 @@ services:
       node1:
         condition: service_started
       node2:
-        condition: service_started
-    restart: unless-stopped
-
-  # ===========================================
-  # Rebalancer - Background chunk repair
-  # ===========================================
-  rebalancer:
-    build:
-      context: .
-      dockerfile: Dockerfile.rebalancer
-    container_name: cyxcloud-rebalancer
-    environment:
-      RUST_LOG: info,cyxcloud_rebalancer=debug
-      DATABASE_URL: postgres://cyxcloud:cyxcloud_secret@postgres:5432/cyxcloud
-      REDIS_URL: redis://redis:6379
-      SCAN_INTERVAL_SECS: 300
-      REPAIR_PARALLELISM: 4
-      MIN_REPLICAS: 3
-    networks:
-      - cyxcloud-net
-    depends_on:
-      postgres:
-        condition: service_healthy
-      node1:
-        condition: service_started
-      node2:
-        condition: service_started
-      node3:
         condition: service_started
     restart: unless-stopped
 
