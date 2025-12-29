@@ -495,3 +495,179 @@ impl NodeWeight {
         (total_nodes_share as u128 * self.weight as u128 / total_weight as u128) as u64
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const EPOCH_DURATION: i64 = 7 * 24 * 60 * 60; // 7 days in seconds
+    const TB: i64 = 1_000_000_000_000; // 1 TB in bytes
+
+    #[test]
+    fn test_node_weight_perfect_node() {
+        // Node A: 1TB storage, 100% uptime, perfect reputation (10000)
+        let weight = NodeWeight::calculate(
+            Uuid::new_v4(),
+            "peer_a".to_string(),
+            Some("wallet_a".to_string()),
+            TB,                    // 1 TB storage
+            EPOCH_DURATION,        // 100% uptime (full week online)
+            EPOCH_DURATION,
+            10000,                 // Perfect reputation
+        );
+
+        assert_eq!(weight.uptime_factor, 1.0);
+        assert_eq!(weight.reputation_factor, 1.5); // 0.5 + (10000/10000)
+        // weight = 1TB * 1.0 * 1.5 = 1.5TB
+        assert_eq!(weight.weight, (TB as f64 * 1.5) as u64);
+        println!("Perfect node weight: {}", weight.weight);
+    }
+
+    #[test]
+    fn test_node_weight_average_node() {
+        // Node B: 500GB storage, 50% uptime, average reputation (5000)
+        let weight = NodeWeight::calculate(
+            Uuid::new_v4(),
+            "peer_b".to_string(),
+            Some("wallet_b".to_string()),
+            TB / 2,                // 500 GB storage
+            EPOCH_DURATION / 2,    // 50% uptime (3.5 days online)
+            EPOCH_DURATION,
+            5000,                  // Average reputation
+        );
+
+        assert_eq!(weight.uptime_factor, 0.5);
+        assert_eq!(weight.reputation_factor, 1.0); // 0.5 + (5000/10000)
+        // weight = 500GB * 0.5 * 1.0 = 250GB
+        assert_eq!(weight.weight, (TB as f64 / 2.0 * 0.5 * 1.0) as u64);
+        println!("Average node weight: {}", weight.weight);
+    }
+
+    #[test]
+    fn test_node_weight_poor_reputation() {
+        // Node with poor reputation (0) - gets 50% weight penalty
+        let weight = NodeWeight::calculate(
+            Uuid::new_v4(),
+            "peer_c".to_string(),
+            None,
+            TB,
+            EPOCH_DURATION,
+            EPOCH_DURATION,
+            0, // Zero reputation
+        );
+
+        assert_eq!(weight.reputation_factor, 0.5); // 0.5 + (0/10000)
+        // weight = 1TB * 1.0 * 0.5 = 0.5TB
+        assert_eq!(weight.weight, (TB as f64 * 0.5) as u64);
+        println!("Poor reputation node weight: {}", weight.weight);
+    }
+
+    #[test]
+    fn test_payment_distribution() {
+        // Simulate payment distribution from docs/payment_system.md example
+        let node_a = NodeWeight::calculate(
+            Uuid::new_v4(),
+            "node_a".to_string(),
+            Some("wallet_a".to_string()),
+            TB,                    // 1 TB
+            EPOCH_DURATION,        // 100% uptime
+            EPOCH_DURATION,
+            10000,                 // Perfect reputation
+        );
+
+        let node_b = NodeWeight::calculate(
+            Uuid::new_v4(),
+            "node_b".to_string(),
+            Some("wallet_b".to_string()),
+            TB / 2,                // 500 GB
+            EPOCH_DURATION / 2,    // 50% uptime
+            EPOCH_DURATION,
+            5000,                  // Average reputation
+        );
+
+        let total_weight = node_a.weight + node_b.weight;
+        let nodes_share = 850_000_000_000u64; // 850 CYXWIZ (85% of 1000)
+
+        let reward_a = node_a.calculate_share(nodes_share, total_weight);
+        let reward_b = node_b.calculate_share(nodes_share, total_weight);
+
+        println!("\n=== Payment Distribution Test ===");
+        println!("Node A: {} weight, {} reward", node_a.weight, reward_a);
+        println!("Node B: {} weight, {} reward", node_b.weight, reward_b);
+        println!("Total weight: {}", total_weight);
+        println!("Total distributed: {}", reward_a + reward_b);
+
+        // Node A should get ~85.7% (6/7) of the rewards
+        // Node B should get ~14.3% (1/7) of the rewards
+        assert!(reward_a > reward_b * 5); // A should get at least 5x more than B
+        // Allow for small rounding error (integer division)
+        let total_distributed = reward_a + reward_b;
+        assert!(total_distributed >= nodes_share - 1 && total_distributed <= nodes_share);
+    }
+
+    #[test]
+    fn test_reputation_impact() {
+        // Same storage and uptime, different reputation
+        let low_rep = NodeWeight::calculate(
+            Uuid::new_v4(), "low".to_string(), None,
+            TB, EPOCH_DURATION, EPOCH_DURATION, 0,
+        );
+
+        let mid_rep = NodeWeight::calculate(
+            Uuid::new_v4(), "mid".to_string(), None,
+            TB, EPOCH_DURATION, EPOCH_DURATION, 5000,
+        );
+
+        let high_rep = NodeWeight::calculate(
+            Uuid::new_v4(), "high".to_string(), None,
+            TB, EPOCH_DURATION, EPOCH_DURATION, 10000,
+        );
+
+        println!("\n=== Reputation Impact Test ===");
+        println!("Low rep (0):     factor={:.2}, weight={}", low_rep.reputation_factor, low_rep.weight);
+        println!("Mid rep (5000):  factor={:.2}, weight={}", mid_rep.reputation_factor, mid_rep.weight);
+        println!("High rep (10000): factor={:.2}, weight={}", high_rep.reputation_factor, high_rep.weight);
+
+        // Reputation factors should be 0.5, 1.0, 1.5
+        assert_eq!(low_rep.reputation_factor, 0.5);
+        assert_eq!(mid_rep.reputation_factor, 1.0);
+        assert_eq!(high_rep.reputation_factor, 1.5);
+
+        // High rep node gets 3x weight of low rep node
+        assert_eq!(high_rep.weight, low_rep.weight * 3);
+    }
+
+    #[test]
+    fn test_uptime_epoch_tracking() {
+        let uptime = NodeEpochUptime {
+            id: Uuid::new_v4(),
+            node_id: Uuid::new_v4(),
+            epoch: 1,
+            epoch_start: chrono::Utc::now(),
+            epoch_end: None,
+            seconds_online: 302400,  // 3.5 days
+            seconds_offline: 302400, // 3.5 days
+            last_status_change: None,
+            payment_allocated: false,
+            payment_amount: None,
+            payment_tx_signature: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        assert_eq!(uptime.uptime_ratio(), 0.5);
+        assert_eq!(uptime.uptime_factor(EPOCH_DURATION), 0.5);
+    }
+
+    #[test]
+    fn test_slash_reasons() {
+        assert_eq!(SlashReason::ExtendedDowntime.slash_percent(), 5);
+        assert_eq!(SlashReason::DataLoss.slash_percent(), 10);
+        assert_eq!(SlashReason::FailedProofs.slash_percent(), 15);
+        assert_eq!(SlashReason::CorruptedData.slash_percent(), 50);
+
+        assert_eq!(SlashReason::from_str("extended_downtime"), Some(SlashReason::ExtendedDowntime));
+        assert_eq!(SlashReason::from_str("data_loss"), Some(SlashReason::DataLoss));
+        assert_eq!(SlashReason::from_str("invalid"), None);
+    }
+}
