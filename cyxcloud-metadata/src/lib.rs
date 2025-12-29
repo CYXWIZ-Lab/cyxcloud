@@ -216,6 +216,11 @@ impl MetadataService {
         &self.db
     }
 
+    /// Get database Arc (for sharing with other components)
+    pub fn database_arc(&self) -> Arc<Database> {
+        self.db.clone()
+    }
+
     /// Get health monitor reference
     pub fn health_monitor(&self) -> Arc<HealthMonitor> {
         self.health.clone()

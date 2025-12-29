@@ -14,6 +14,7 @@ mod grpc_api;
 mod node_client;
 mod node_monitor;
 mod payment_daemon;
+mod rebalancer_daemon;
 mod s3_api;
 mod state;
 mod websocket;
@@ -146,8 +147,14 @@ async fn main() -> anyhow::Result<()> {
         let payment_daemon = Arc::new(payment_daemon::PaymentDaemon::new(payment_config));
         let _payment_handle = payment_daemon.start(state.clone());
         info!("Payment daemon started");
+
+        // Start rebalancer daemon (background task)
+        let rebalancer_config = rebalancer_daemon::RebalancerDaemonConfig::from_env();
+        let rebalancer = Arc::new(rebalancer_daemon::RebalancerDaemon::new(rebalancer_config));
+        let _rebalancer_handle = rebalancer.start(state.clone());
+        info!("Rebalancer daemon started");
     } else {
-        info!("Metadata service not configured, node monitor and payment daemon disabled");
+        info!("Metadata service not configured, node monitor, payment daemon, and rebalancer disabled");
     }
 
     // Build CORS layer

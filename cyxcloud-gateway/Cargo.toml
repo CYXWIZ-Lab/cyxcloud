@@ -15,6 +15,7 @@ cyxcloud-storage = { path = "../cyxcloud-storage" }
 cyxcloud-metadata = { path = "../cyxcloud-metadata" }
 cyxcloud-network = { path = "../cyxcloud-network" }
 cyxcloud-protocol = { path = "../cyxcloud-protocol" }
+cyxcloud-rebalancer = { path = "../cyxcloud-rebalancer" }
 
 # HTTP/API
 axum = { workspace = true }

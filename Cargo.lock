@@ -1567,6 +1567,7 @@ dependencies = [
  "cyxcloud-metadata",
  "cyxcloud-network",
  "cyxcloud-protocol",
+ "cyxcloud-rebalancer",
  "cyxcloud-storage",
  "ed25519-dalek 2.2.0",
  "futures",
