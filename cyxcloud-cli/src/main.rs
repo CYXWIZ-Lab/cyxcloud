@@ -33,7 +33,7 @@ use cyxwiz_client::CyxWizClient;
 
 #[derive(Parser)]
 #[command(name = "cyxcloud")]
-#[command(about = "CyxCloud decentralized storage CLI")]
+#[command(about = "CyxCloud distributed storage CLI")]
 #[command(version)]
 struct Cli {
     /// Gateway HTTP URL (overrides config file)

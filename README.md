@@ -1,6 +1,6 @@
-# CyxCloud - Decentralized Storage Platform
+# CyxCloud - Distributed Storage Platform
 
-CyxCloud is a decentralized storage network built on Solana blockchain, providing secure, redundant, and cost-effective cloud storage through distributed nodes.
+CyxCloud is a distributed storage network for ML datasets, providing secure, redundant, and cost-effective storage through community-operated nodes. Designed for the CyxWiz ML ecosystem.
 
 ## Overview
 
@@ -37,7 +37,7 @@ CyxCloud distributes data across multiple storage nodes using Reed-Solomon erasu
 
 - **S3-Compatible API** - Drop-in replacement for Amazon S3
 - **Erasure Coding** - Reed-Solomon 10+4 redundancy (survives 4 node failures)
-- **Decentralized** - No single point of failure
+- **Distributed** - Fault-tolerant across multiple community nodes
 - **Blockchain Payments** - CYXWIZ token for subscriptions and rewards (fully implemented)
 - **Proof-of-Storage** - Cryptographic verification of stored data
 - **Automatic Rebalancing** - Self-healing network

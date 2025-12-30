@@ -1,6 +1,6 @@
 //! CyxCloud Storage Node Library
 //!
-//! Provides components for running a decentralized storage node:
+//! Provides components for running a distributed storage node:
 //! - Configuration management
 //! - Prometheus metrics and health checking
 //! - Heartbeat service for central server registration

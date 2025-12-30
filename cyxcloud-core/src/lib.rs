@@ -1,6 +1,6 @@
 //! CyxCloud Core Library
 //!
-//! Core abstractions for the CyxCloud decentralized storage platform.
+//! Core abstractions for the CyxCloud distributed storage platform.
 //! This crate provides:
 //! - Reed-Solomon erasure coding (10 data + 4 parity shards)
 //! - Cryptographic primitives (Blake3 hashing, AES-GCM encryption)

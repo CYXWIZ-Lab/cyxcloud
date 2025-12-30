@@ -25,7 +25,7 @@ This document outlines the strategy and steps to take CyxCloud from local develo
 
 ---
 
-## Architecture: Decentralized by Design
+## Architecture: Distributed by Design
 
 CyxCloud is designed to minimize central infrastructure costs:
 
@@ -34,7 +34,7 @@ CyxCloud is designed to minimize central infrastructure costs:
 │                        CyxCloud Production Architecture                      │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
-│   CENTRALIZED (We Host)              DECENTRALIZED (Community Hosts)        │
+│   CENTRALIZED (We Host)              DISTRIBUTED (Community Hosts)          │
 │   ─────────────────────              ──────────────────────────────         │
 │                                                                              │
 │   ┌─────────────────┐                ┌─────────────────────────────┐        │

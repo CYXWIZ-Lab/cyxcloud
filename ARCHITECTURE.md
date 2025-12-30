@@ -1,6 +1,6 @@
 # CyxCloud Technical Architecture
 
-This document provides a complete technical specification of the CyxCloud decentralized storage platform, including all APIs, protocols, data flows, and component designs.
+This document provides a complete technical specification of the CyxCloud distributed storage platform, including all APIs, protocols, data flows, and component designs.
 
 ## Table of Contents
 
@@ -26,7 +26,7 @@ This document provides a complete technical specification of the CyxCloud decent
 
 ## System Overview
 
-CyxCloud is a decentralized storage platform that integrates with the CyxWiz ecosystem. It provides private cloud storage for users, a marketplace for ML datasets, and a distributed network of storage providers.
+CyxCloud is a distributed storage platform that integrates with the CyxWiz ecosystem. It provides private cloud storage for users, a marketplace for ML datasets, and a network of community-operated storage nodes.
 
 ### High-Level Architecture
 
@@ -81,7 +81,7 @@ CyxCloud is a decentralized storage platform that integrates with the CyxWiz eco
 ### Key Design Principles
 
 1. **Gateway as Central Server**: The Gateway is the single entry point for all client requests
-2. **Decentralized Storage**: Data is distributed across multiple nodes using erasure coding
+2. **Distributed Storage**: Data is distributed across multiple nodes using erasure coding
 3. **Token-Based Payments**: CYXWIZ tokens for storage fees and miner rewards
 4. **Private by Default**: User data is encrypted and private unless explicitly shared
 5. **Hybrid Networking**: gRPC for data transfer, libp2p for peer discovery

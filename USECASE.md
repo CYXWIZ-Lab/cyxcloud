@@ -1,6 +1,6 @@
 # CyxCloud Use Cases Guide
 
-This guide covers real-world use cases for CyxCloud decentralized storage. Whether you're storing files, running ML workloads, or earning tokens as a node operator, this document shows you how.
+This guide covers real-world use cases for CyxCloud distributed storage. Whether you're storing files, running ML workloads, or earning tokens as a node operator, this document shows you how.
 
 ## Table of Contents
 
@@ -20,7 +20,7 @@ This guide covers real-world use cases for CyxCloud decentralized storage. Wheth
 
 | User Type | Use Case | Benefits |
 |-----------|----------|----------|
-| **Individuals** | Personal file storage, backups | Decentralized, censorship-resistant |
+| **Individuals** | Personal file storage, backups | Distributed, fault-tolerant |
 | **ML Engineers** | Dataset storage, model checkpoints | Optimized for large files, CyxWiz integration |
 | **Node Operators** | Earn CYXWIZ tokens | Passive income from spare storage |
 | **Developers** | S3-compatible storage backend | Drop-in replacement, no vendor lock-in |
@@ -30,7 +30,7 @@ This guide covers real-world use cases for CyxCloud decentralized storage. Wheth
 
 ## Use Case 1: Personal Cloud Storage
 
-Store your personal files on a decentralized network with end-to-end encryption.
+Store your personal files on a distributed network with end-to-end encryption.
 
 ### Step 1: Create Account and Subscribe
 

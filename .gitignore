@@ -25,3 +25,13 @@ logs/
 # Test artifacts
 *.profraw
 coverage/
+
+# Local test data
+/data/
+/temp-node-test/
+/test-node-data/
+/test-node-config.toml
+/config.toml
+*.bin
+/downloaded.bin
+/reflect.md

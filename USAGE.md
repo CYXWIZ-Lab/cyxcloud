@@ -1,6 +1,6 @@
 # CyxCloud Usage Guide
 
-This guide explains how to build, run, and use the CyxCloud decentralized storage platform.
+This guide explains how to build, run, and use the CyxCloud distributed storage platform.
 
 ## Table of Contents
 
@@ -19,7 +19,7 @@ This guide explains how to build, run, and use the CyxCloud decentralized storag
 
 ## Network Architecture
 
-CyxCloud is a decentralized storage platform that distributes data across multiple nodes using erasure coding for redundancy. This section explains the system architecture and data flow.
+CyxCloud is a distributed storage platform that spreads data across multiple nodes using erasure coding for redundancy. This section explains the system architecture and data flow.
 
 ### System Overview
 
@@ -85,7 +85,7 @@ CyxCloud uses a hybrid networking approach:
 
 **Why hybrid?**
 - **gRPC**: Optimized for large data transfers, streaming, connection pooling
-- **libp2p**: Decentralized peer discovery without central registry
+- **libp2p**: Distributed peer discovery and node-to-node communication
 
 ### Erasure Coding (Not RAID)
 
@@ -551,7 +551,7 @@ Orphaned chunks are cleaned up periodically:
 
 ## Blockchain Integration
 
-CyxCloud uses Solana blockchain for decentralized payments, subscriptions, and node staking. All programs are deployed and operational.
+CyxCloud uses Solana blockchain for on-chain payments, subscriptions, and node staking. All programs are deployed and operational.
 
 ### Deployed Solana Programs (Devnet)
 
@@ -772,7 +772,7 @@ export GATEWAY_PORT=8080       # HTTP port
 
 ### 2. Start Storage Nodes (cyxcloud-node)
 
-Storage nodes store and serve chunks for the CyxCloud network. They are the backbone of the decentralized storage system.
+Storage nodes store and serve chunks for the CyxCloud network. They are the backbone of the distributed storage system.
 
 #### Quick Start
 

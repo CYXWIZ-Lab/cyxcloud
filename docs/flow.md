@@ -4,7 +4,7 @@
 
 CyxCloud uses a **hybrid architecture**:
 - **Centralized coordination** for authentication, metadata, and node registry
-- **Decentralized data transfer** via libp2p for P2P chunk transfer between nodes
+- **Distributed data transfer** via libp2p for P2P chunk transfer between nodes
 
 This balances the benefits of both approaches:
 - Central server provides reliable user authentication, metadata consistency, and node discovery
@@ -247,7 +247,7 @@ Write to local file
 
 ---
 
-## libp2p Role (Decentralized Layer)
+## libp2p Role (P2P Layer)
 
 libp2p provides the **data plane** while the Gateway provides the **control plane**.
 

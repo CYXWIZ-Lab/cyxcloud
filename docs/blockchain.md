@@ -2,9 +2,9 @@
 
 ## Overview
 
-Integrate Solana blockchain with CYXWIZ tokens into CyxCloud decentralized storage system. This enables fully decentralized payments where the Gateway coordinates but never custodies funds.
+Integrate Solana blockchain with CYXWIZ tokens into CyxCloud distributed storage system. This enables on-chain payments where the Gateway coordinates but never custodies funds.
 
-**CyxCloud is part of the unified CyxWiz ecosystem**, sharing the same CYXWIZ token and blockchain infrastructure with the decentralized ML compute platform.
+**CyxCloud is part of the unified CyxWiz ecosystem**, sharing the same CYXWIZ token and blockchain infrastructure with the distributed ML compute platform.
 
 **Key Decisions:**
 - Minimum stake: **500 CYXWIZ**
@@ -15,7 +15,7 @@ Integrate Solana blockchain with CYXWIZ tokens into CyxCloud decentralized stora
 
 ## Ecosystem Configuration
 
-CyxCloud uses the same Solana keypair and token as the CyxWiz decentralized compute platform:
+CyxCloud uses the same Solana keypair and token as the CyxWiz distributed compute platform:
 
 | Setting | Value |
 |---------|-------|

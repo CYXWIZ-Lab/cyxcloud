@@ -1,6 +1,6 @@
 # CyxCloud Vision & Ecosystem Integration
 
-This document outlines how CyxCloud integrates with the CyxWiz ecosystem, its use cases, and considerations for building a decentralized storage platform.
+This document outlines how CyxCloud integrates with the CyxWiz ecosystem, its use cases, and considerations for building a distributed storage platform.
 
 ## Table of Contents
 
@@ -320,7 +320,7 @@ cyxcloud hub publish my-bucket \
 
 ## Public Dataset Library (CyxHub)
 
-### Vision: Decentralized Kaggle/HuggingFace
+### Vision: Distributed Kaggle/HuggingFace
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -576,7 +576,7 @@ cyxcloud browse datasets/images/medical --sort downloads
 │                                                              │
 │  🔒 Privacy Tension                                         │
 │  • Encrypted data = can't inspect content                   │
-│  • Decentralized = no single point of control               │
+│  • Distributed = fault-tolerant across community nodes      │
 │  • Anonymity = harder to enforce                            │
 │                                                              │
 └─────────────────────────────────────────────────────────────┘
@@ -1029,7 +1029,7 @@ cyxcloud browse datasets/images/medical --sort downloads
 
 CyxCloud can evolve from a simple storage layer into a comprehensive data platform:
 
-1. **Storage Layer**: Decentralized, erasure-coded, pay-per-use
+1. **Storage Layer**: Distributed, erasure-coded, pay-per-use
 2. **Access Control**: Private, shared, public, paid tiers
 3. **CyxHub**: Community dataset library (like HuggingFace + Kaggle)
 4. **Search**: Full-text + semantic search across all public data

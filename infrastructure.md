@@ -1,6 +1,6 @@
-# CyxCloud: Datacenter-Grade Decentralized Storage Architecture
+# CyxCloud: Datacenter-Grade Distributed Storage Architecture
 
-## 1. RAID Implementation Strategy for Decentralized Storage
+## 1. RAID Implementation Strategy for Distributed Storage
 
 ### Software RAID vs Hardware RAID in Distributed Systems
 
