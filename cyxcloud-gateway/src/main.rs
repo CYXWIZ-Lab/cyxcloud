@@ -1,10 +1,11 @@
 //! CyxCloud API Gateway
 //!
 //! Provides:
-//! - S3-compatible REST API
+//! - S3-compatible REST API (HTTP/HTTPS)
 //! - gRPC API for ecosystem integration (NodeService, DataService)
 //! - WebSocket for real-time sync
 //! - Authentication (JWT, wallet signatures)
+//! - mTLS support for secure node communication
 
 pub mod auth;
 mod auth_api;
@@ -26,16 +27,18 @@ pub use state::{AppState, GatewayConfig};
 
 use axum::{routing::get, Router};
 use clap::Parser;
+use cyxcloud_core::tls::{TlsServerConfig, create_tonic_server_tls};
 use cyxcloud_protocol::data::data_service_server::DataServiceServer;
 use cyxcloud_protocol::node::node_service_server::NodeServiceServer;
 use grpc_api::{AuthInterceptor, DataServiceImpl, NodeServiceImpl};
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::signal;
 use tonic::transport::Server as TonicServer;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
-use tracing::{error, info, Level};
+use tracing::{error, info, warn, Level};
 
 #[derive(Parser)]
 #[command(name = "cyxcloud-gateway")]
@@ -69,6 +72,23 @@ struct Cli {
     #[arg(long, default_value = "false")]
     grpc_auth: bool,
 
+    // ===== TLS Configuration =====
+    /// Path to server TLS certificate (PEM format)
+    #[arg(long, env = "TLS_CERT")]
+    tls_cert: Option<PathBuf>,
+
+    /// Path to server TLS private key (PEM format)
+    #[arg(long, env = "TLS_KEY")]
+    tls_key: Option<PathBuf>,
+
+    /// Path to CA certificate for client verification (mTLS)
+    #[arg(long, env = "TLS_CA_CERT")]
+    tls_ca_cert: Option<PathBuf>,
+
+    /// Require client certificates for mTLS (node authentication)
+    #[arg(long, default_value = "false", env = "TLS_REQUIRE_CLIENT_CERT")]
+    tls_require_client_cert: bool,
+
     /// Solana RPC URL for blockchain operations (requires 'blockchain' feature)
     #[cfg(feature = "blockchain")]
     #[arg(long, env = "SOLANA_RPC_URL", default_value = "https://api.devnet.solana.com")]
@@ -95,6 +115,12 @@ async fn version() -> &'static str {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Install rustls crypto provider (required for rustls 0.23+)
+    // This must be done before any TLS operations
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
+
     // Initialize tracing
     tracing_subscriber::fmt()
         .with_max_level(Level::DEBUG)
@@ -103,10 +129,20 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
 
+    // Check TLS configuration
+    let tls_enabled = cli.tls_cert.is_some() && cli.tls_key.is_some();
+    if cli.tls_cert.is_some() != cli.tls_key.is_some() {
+        anyhow::bail!("Both --tls-cert and --tls-key must be provided for TLS");
+    }
+    if cli.tls_require_client_cert && cli.tls_ca_cert.is_none() {
+        anyhow::bail!("--tls-ca-cert is required when --tls-require-client-cert is enabled");
+    }
+
     info!(
         http = %cli.http_addr,
         grpc = %cli.grpc_addr,
         database = ?cli.database_url,
+        tls = tls_enabled,
         "Starting CyxCloud gateway"
     );
 
@@ -187,13 +223,22 @@ async fn main() -> anyhow::Result<()> {
     let http_addr: SocketAddr = cli.http_addr.parse()?;
     let grpc_addr: SocketAddr = cli.grpc_addr.parse()?;
 
-    // Start HTTP server
-    let http_listener = tokio::net::TcpListener::bind(http_addr).await?;
-    info!("HTTP server listening on {}", http_addr);
+    // Build TLS config if enabled
+    let tls_server_config = if tls_enabled {
+        Some(TlsServerConfig {
+            cert_path: cli.tls_cert.clone().unwrap(),
+            key_path: cli.tls_key.clone().unwrap(),
+            ca_cert_path: cli.tls_ca_cert.clone(),
+            require_client_cert: cli.tls_require_client_cert,
+        })
+    } else {
+        None
+    };
 
     // Start gRPC server in separate task
     let grpc_state = state.clone();
     let enable_grpc_auth = cli.grpc_auth;
+    let grpc_tls_config = tls_server_config.clone();
     tokio::spawn(async move {
         // Node service for node registration and heartbeat
         let node_service = NodeServiceImpl::new(grpc_state.clone());
@@ -201,13 +246,29 @@ async fn main() -> anyhow::Result<()> {
         // Data service for ML training data streaming
         let data_service = DataServiceImpl::new(grpc_state.clone());
 
+        let tls_status = if grpc_tls_config.is_some() { "enabled" } else { "disabled" };
         info!(
-            "gRPC server listening on {} (auth: {})",
+            "gRPC server listening on {} (auth: {}, TLS: {})",
             grpc_addr,
-            if enable_grpc_auth { "enabled" } else { "disabled" }
+            if enable_grpc_auth { "enabled" } else { "disabled" },
+            tls_status
         );
 
         let mut builder = TonicServer::builder();
+
+        // Configure TLS if enabled
+        if let Some(ref tls_cfg) = grpc_tls_config {
+            match create_tonic_server_tls(tls_cfg) {
+                Ok(tls) => {
+                    builder = builder.tls_config(tls).expect("Failed to configure gRPC TLS");
+                    info!("gRPC TLS configured successfully");
+                }
+                Err(e) => {
+                    error!(error = %e, "Failed to load gRPC TLS config");
+                    return;
+                }
+            }
+        }
 
         if enable_grpc_auth {
             // Create auth interceptor
@@ -241,10 +302,30 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // Run HTTP server with graceful shutdown
-    axum::serve(http_listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    // Start HTTP/HTTPS server based on TLS configuration
+    if let Some(ref tls_cfg) = tls_server_config {
+        // HTTPS mode with axum-server
+        use axum_server::tls_rustls::RustlsConfig;
+
+        let rustls_config = RustlsConfig::from_pem_file(&tls_cfg.cert_path, &tls_cfg.key_path)
+            .await
+            .expect("Failed to load TLS certificates for HTTPS");
+
+        info!("HTTPS server listening on {} (TLS enabled)", http_addr);
+
+        axum_server::bind_rustls(http_addr, rustls_config)
+            .serve(app.into_make_service())
+            .await?;
+    } else {
+        // Plain HTTP mode
+        let http_listener = tokio::net::TcpListener::bind(http_addr).await?;
+        info!("HTTP server listening on {} (TLS disabled)", http_addr);
+        warn!("Running without TLS - use --tls-cert and --tls-key for production");
+
+        axum::serve(http_listener, app)
+            .with_graceful_shutdown(shutdown_signal())
+            .await?;
+    }
 
     info!("Gateway shutdown complete");
     Ok(())

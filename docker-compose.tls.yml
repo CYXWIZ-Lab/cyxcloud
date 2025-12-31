@@ -1,0 +1,74 @@
+# CyxCloud Docker Compose - TLS Override
+# Usage: docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d
+#
+# Prerequisites:
+#   1. Generate certificates: ./scripts/generate-dev-certs.sh
+#   2. Ensure certs/ directory contains: ca.crt, gateway.crt/key, node1-3.crt/key
+
+services:
+  # ===========================================
+  # Gateway - HTTPS + gRPC TLS
+  # ===========================================
+  gateway:
+    command: [
+      "--http-addr", "0.0.0.0:8080",
+      "--grpc-addr", "0.0.0.0:50052",
+      "--cors-permissive",
+      "--tls-cert", "/certs/gateway.crt",
+      "--tls-key", "/certs/gateway.key",
+      "--tls-ca-cert", "/certs/ca.crt"
+    ]
+    environment:
+      TLS_CERT: /certs/gateway.crt
+      TLS_KEY: /certs/gateway.key
+      TLS_CA_CERT: /certs/ca.crt
+    volumes:
+      - ./certs:/certs:ro
+    ports:
+      - "8443:8080"    # HTTPS (remap to 8443 externally)
+      - "50052:50052"  # gRPC TLS
+    healthcheck:
+      # Use --insecure for self-signed certs
+      test: ["CMD", "curl", "-k", "-f", "https://localhost:8080/health"]
+
+  # ===========================================
+  # Storage Node 1 - TLS Client
+  # ===========================================
+  node1:
+    environment:
+      TLS_ENABLED: "true"
+      TLS_CA_CERT: /certs/ca.crt
+      TLS_CLIENT_CERT: /certs/node1.crt
+      TLS_CLIENT_KEY: /certs/node1.key
+      CENTRAL_SERVER_ADDR: https://gateway:50052
+    volumes:
+      - node1-data:/data
+      - ./certs:/certs:ro
+
+  # ===========================================
+  # Storage Node 2 - TLS Client
+  # ===========================================
+  node2:
+    environment:
+      TLS_ENABLED: "true"
+      TLS_CA_CERT: /certs/ca.crt
+      TLS_CLIENT_CERT: /certs/node2.crt
+      TLS_CLIENT_KEY: /certs/node2.key
+      CENTRAL_SERVER_ADDR: https://gateway:50052
+    volumes:
+      - node2-data:/data
+      - ./certs:/certs:ro
+
+  # ===========================================
+  # Storage Node 3 - TLS Client
+  # ===========================================
+  node3:
+    environment:
+      TLS_ENABLED: "true"
+      TLS_CA_CERT: /certs/ca.crt
+      TLS_CLIENT_CERT: /certs/node3.crt
+      TLS_CLIENT_KEY: /certs/node3.key
+      CENTRAL_SERVER_ADDR: https://gateway:50052
+    volumes:
+      - node3-data:/data
+      - ./certs:/certs:ro

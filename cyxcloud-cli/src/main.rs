@@ -20,6 +20,7 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 
 mod client;
 mod commands;
@@ -27,7 +28,7 @@ mod config;
 mod cyxwiz_client;
 mod symbols;
 
-use client::GatewayClient;
+use client::{GatewayClient, TlsConfig};
 use commands::{auth, delete, download, list, status, upload};
 use cyxwiz_client::CyxWizClient;
 
@@ -43,6 +44,23 @@ struct Cli {
     /// CyxWiz API URL for authentication (overrides config file)
     #[arg(long, global = true)]
     api_url: Option<String>,
+
+    // ===== TLS Configuration =====
+    /// Path to CA certificate for verifying the gateway (PEM format)
+    #[arg(long, global = true, env = "CYXCLOUD_CA_CERT")]
+    ca_cert: Option<PathBuf>,
+
+    /// Path to client certificate for mTLS (PEM format)
+    #[arg(long, global = true, env = "CYXCLOUD_CLIENT_CERT")]
+    client_cert: Option<PathBuf>,
+
+    /// Path to client private key for mTLS (PEM format)
+    #[arg(long, global = true, env = "CYXCLOUD_CLIENT_KEY")]
+    client_key: Option<PathBuf>,
+
+    /// Skip server certificate verification (DANGEROUS - development only)
+    #[arg(long, global = true, default_value = "false")]
+    insecure: bool,
 
     #[command(subcommand)]
     command: Commands,
@@ -212,8 +230,20 @@ async fn main() -> Result<()> {
     // Get auth token for gateway commands
     let auth_token = config::get_valid_credentials().map(|c| c.access_token);
 
-    // Create gateway client with auth token
-    let client = GatewayClient::new(&gateway_url, auth_token.clone());
+    // Build TLS configuration from CLI args
+    let tls_config = if cli.ca_cert.is_some() || cli.client_cert.is_some() || cli.insecure {
+        Some(TlsConfig {
+            ca_cert: cli.ca_cert,
+            client_cert: cli.client_cert,
+            client_key: cli.client_key,
+            danger_accept_invalid_certs: cli.insecure,
+        })
+    } else {
+        None
+    };
+
+    // Create gateway client with auth token and optional TLS
+    let client = GatewayClient::with_tls(&gateway_url, auth_token.clone(), tls_config);
 
     match cli.command {
         // Auth commands

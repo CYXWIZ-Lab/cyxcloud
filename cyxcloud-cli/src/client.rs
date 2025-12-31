@@ -1,11 +1,12 @@
 //! Gateway Client
 //!
 //! HTTP client for communicating with the CyxCloud gateway.
+//! Supports HTTPS with custom CA certificates and client certificates (mTLS).
 
 use bytes::Bytes;
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::fs::File;
@@ -65,6 +66,39 @@ pub struct BucketInfo {
     pub total_size: u64,
 }
 
+/// TLS configuration for the gateway client
+#[derive(Debug, Clone, Default)]
+pub struct TlsConfig {
+    /// Path to CA certificate (PEM format) for verifying the gateway
+    pub ca_cert: Option<PathBuf>,
+    /// Path to client certificate (PEM format) for mTLS
+    pub client_cert: Option<PathBuf>,
+    /// Path to client private key (PEM format) for mTLS
+    pub client_key: Option<PathBuf>,
+    /// Skip server certificate verification (DANGEROUS - only for development)
+    pub danger_accept_invalid_certs: bool,
+}
+
+impl TlsConfig {
+    /// Create a new TLS config with only CA certificate
+    pub fn with_ca_cert(ca_cert: PathBuf) -> Self {
+        Self {
+            ca_cert: Some(ca_cert),
+            ..Default::default()
+        }
+    }
+
+    /// Create a full mTLS config
+    pub fn with_mtls(ca_cert: PathBuf, client_cert: PathBuf, client_key: PathBuf) -> Self {
+        Self {
+            ca_cert: Some(ca_cert),
+            client_cert: Some(client_cert),
+            client_key: Some(client_key),
+            danger_accept_invalid_certs: false,
+        }
+    }
+}
+
 /// Gateway client
 pub struct GatewayClient {
     client: Client,
@@ -73,12 +107,50 @@ pub struct GatewayClient {
 }
 
 impl GatewayClient {
-    /// Create a new gateway client
+    /// Create a new gateway client without TLS
     pub fn new(base_url: &str, auth_token: Option<String>) -> Self {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(300))
-            .build()
-            .expect("Failed to create HTTP client");
+        Self::with_tls(base_url, auth_token, None)
+    }
+
+    /// Create a new gateway client with optional TLS configuration
+    pub fn with_tls(base_url: &str, auth_token: Option<String>, tls: Option<TlsConfig>) -> Self {
+        let mut builder = Client::builder()
+            .timeout(Duration::from_secs(300));
+
+        if let Some(tls_config) = tls {
+            // Add CA certificate
+            if let Some(ref ca_path) = tls_config.ca_cert {
+                if let Ok(ca_cert_pem) = std::fs::read(ca_path) {
+                    if let Ok(cert) = reqwest::Certificate::from_pem(&ca_cert_pem) {
+                        builder = builder.add_root_certificate(cert);
+                    }
+                }
+            }
+
+            // Add client identity for mTLS
+            if let (Some(ref cert_path), Some(ref key_path)) =
+                (&tls_config.client_cert, &tls_config.client_key)
+            {
+                if let (Ok(cert_pem), Ok(key_pem)) =
+                    (std::fs::read(cert_path), std::fs::read(key_path))
+                {
+                    // Combine cert and key into a single PEM buffer
+                    let mut identity_pem = cert_pem;
+                    identity_pem.extend_from_slice(&key_pem);
+
+                    if let Ok(identity) = reqwest::Identity::from_pem(&identity_pem) {
+                        builder = builder.identity(identity);
+                    }
+                }
+            }
+
+            // Skip certificate verification (DANGEROUS)
+            if tls_config.danger_accept_invalid_certs {
+                builder = builder.danger_accept_invalid_certs(true);
+            }
+        }
+
+        let client = builder.build().expect("Failed to create HTTP client");
 
         Self {
             client,

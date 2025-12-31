@@ -5,12 +5,14 @@
 use bytes::Bytes;
 use cyxcloud_core::chunk::ChunkId;
 use cyxcloud_core::error::{CyxCloudError, Result};
+use cyxcloud_core::tls::{TlsClientConfig, create_tonic_client_tls};
 use cyxcloud_protocol::chunk::{
     chunk_service_client::ChunkServiceClient, DeleteChunkRequest, GetChunkRequest,
     StoreChunkRequest, StreamChunksRequest, VerifyChunkRequest,
 };
 use parking_lot::RwLock;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tonic::transport::Channel;
@@ -31,6 +33,14 @@ pub struct ChunkClientConfig {
     pub max_message_size: usize,
     /// Keep-alive interval
     pub keep_alive_interval: Duration,
+    /// Enable TLS for connections
+    pub enable_tls: bool,
+    /// CA certificate path for TLS
+    pub tls_ca_cert: Option<PathBuf>,
+    /// Client certificate path for mTLS
+    pub tls_client_cert: Option<PathBuf>,
+    /// Client key path for mTLS
+    pub tls_client_key: Option<PathBuf>,
 }
 
 impl Default for ChunkClientConfig {
@@ -42,6 +52,10 @@ impl Default for ChunkClientConfig {
             retry_delay: Duration::from_millis(100),
             max_message_size: 64 * 1024 * 1024, // 64 MB
             keep_alive_interval: Duration::from_secs(60),
+            enable_tls: false,
+            tls_ca_cert: None,
+            tls_client_cert: None,
+            tls_client_key: None,
         }
     }
 }
@@ -78,16 +92,44 @@ impl ChunkClient {
             }
         }
 
-        // Create new connection
-        let endpoint = format!("http://{}", addr);
-        debug!(addr = %addr, "Creating new gRPC connection");
+        // Determine endpoint scheme based on TLS config
+        let endpoint_url = if self.config.enable_tls {
+            format!("https://{}", addr)
+        } else {
+            format!("http://{}", addr)
+        };
+        debug!(addr = %addr, tls = self.config.enable_tls, "Creating new gRPC connection");
 
-        let channel = Channel::from_shared(endpoint.clone())
+        let mut endpoint = Channel::from_shared(endpoint_url.clone())
             .map_err(|e| CyxCloudError::Network(format!("Invalid endpoint: {}", e)))?
             .connect_timeout(self.config.connect_timeout)
             .timeout(self.config.request_timeout)
             .http2_keep_alive_interval(self.config.keep_alive_interval)
-            .keep_alive_timeout(Duration::from_secs(20))
+            .keep_alive_timeout(Duration::from_secs(20));
+
+        // Configure TLS if enabled
+        if self.config.enable_tls {
+            if let Some(ref ca_cert_path) = self.config.tls_ca_cert {
+                let tls_config = TlsClientConfig {
+                    ca_cert_path: ca_cert_path.clone(),
+                    client_cert_path: self.config.tls_client_cert.clone(),
+                    client_key_path: self.config.tls_client_key.clone(),
+                };
+
+                let tls = create_tonic_client_tls(&tls_config)
+                    .map_err(|e| CyxCloudError::Network(format!("Failed to load TLS config: {}", e)))?;
+                endpoint = endpoint.tls_config(tls)
+                    .map_err(|e| CyxCloudError::Network(format!("Failed to configure TLS: {}", e)))?;
+
+                debug!(
+                    addr = %addr,
+                    mtls = self.config.tls_client_cert.is_some(),
+                    "TLS configured for inter-node connection"
+                );
+            }
+        }
+
+        let channel = endpoint
             .connect()
             .await
             .map_err(|e| CyxCloudError::Network(format!("Connection failed to {}: {}", addr, e)))?;
@@ -102,7 +144,7 @@ impl ChunkClient {
             clients.insert(addr.to_string(), client.clone());
         }
 
-        info!(addr = %addr, "gRPC connection established");
+        info!(addr = %addr, tls = self.config.enable_tls, "gRPC connection established");
         Ok(client)
     }
 

@@ -5,6 +5,7 @@
 use crate::command_executor::{CommandBatchSummary, CommandExecutor};
 use crate::config::NodeConfig;
 use crate::metrics::{HealthState, NodeMetrics};
+use cyxcloud_core::tls::{TlsClientConfig, create_tonic_client_tls};
 use cyxcloud_protocol::node::{
     node_service_client::NodeServiceClient, HeartbeatRequest, NodeCapacity, NodeCommand, NodeInfo,
     NodeLocation, NodeMetrics as ProtoNodeMetrics, NodeStatus, RegisterNodeRequest,
@@ -320,9 +321,42 @@ impl HeartbeatService {
             }
         }
 
+        // Determine if TLS should be used (based on URL scheme or explicit config)
+        let use_tls = self.config.central.address.starts_with("https://")
+            || self.config.network.enable_tls;
+
         // Create new connection
-        let endpoint = tonic::transport::Endpoint::from_shared(self.config.central.address.clone())?
+        let mut endpoint = tonic::transport::Endpoint::from_shared(self.config.central.address.clone())?
             .connect_timeout(Duration::from_secs(self.config.central.connect_timeout_secs));
+
+        // Configure TLS if enabled
+        if use_tls {
+            if let Some(ref ca_cert_path) = self.config.network.tls_ca_cert {
+                let tls_config = TlsClientConfig {
+                    ca_cert_path: ca_cert_path.clone(),
+                    client_cert_path: self.config.network.tls_client_cert.clone(),
+                    client_key_path: self.config.network.tls_client_key.clone(),
+                };
+
+                match create_tonic_client_tls(&tls_config) {
+                    Ok(tls) => {
+                        endpoint = endpoint.tls_config(tls)?;
+                        info!(
+                            central_addr = %self.config.central.address,
+                            mtls = self.config.network.tls_client_cert.is_some(),
+                            "TLS configured for gateway connection"
+                        );
+                    }
+                    Err(e) => {
+                        error!(error = %e, "Failed to load TLS config for gateway connection");
+                        return Err(format!("Failed to load TLS config: {}", e).into());
+                    }
+                }
+            } else if self.config.central.address.starts_with("https://") {
+                // HTTPS URL but no CA cert - try system roots
+                warn!("Using HTTPS without explicit CA cert - using system roots");
+            }
+        }
 
         let channel = endpoint.connect().await?;
         let client = NodeServiceClient::new(channel);
@@ -333,7 +367,11 @@ impl HeartbeatService {
             *stored_client = Some(client.clone());
         }
 
-        info!(central_addr = %self.config.central.address, "Connected to central server");
+        info!(
+            central_addr = %self.config.central.address,
+            tls = use_tls,
+            "Connected to central server"
+        );
         Ok(client)
     }
 

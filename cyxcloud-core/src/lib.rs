@@ -11,6 +11,7 @@ pub mod chunk;
 pub mod crypto;
 pub mod erasure;
 pub mod error;
+pub mod tls;
 
 pub use chunk::{Chunk, ChunkId, ChunkMetadata, split_into_chunks, reassemble_chunks};
 pub use crypto::{ContentHash, EncryptedData, EncryptionKey, encrypt, decrypt};

@@ -180,6 +180,26 @@ impl NodeConfig {
             self.network.public_address = Some(addr);
         }
 
+        // TLS configuration overrides
+        if let Ok(enabled) = std::env::var("TLS_ENABLED") {
+            self.network.enable_tls = enabled.to_lowercase() == "true" || enabled == "1";
+        }
+        if let Ok(cert) = std::env::var("TLS_CERT") {
+            self.network.tls_cert = Some(PathBuf::from(cert));
+        }
+        if let Ok(key) = std::env::var("TLS_KEY") {
+            self.network.tls_key = Some(PathBuf::from(key));
+        }
+        if let Ok(ca) = std::env::var("TLS_CA_CERT") {
+            self.network.tls_ca_cert = Some(PathBuf::from(ca));
+        }
+        if let Ok(cert) = std::env::var("TLS_CLIENT_CERT") {
+            self.network.tls_client_cert = Some(PathBuf::from(cert));
+        }
+        if let Ok(key) = std::env::var("TLS_CLIENT_KEY") {
+            self.network.tls_client_key = Some(PathBuf::from(key));
+        }
+
         self
     }
 }
@@ -339,17 +359,29 @@ pub struct NetworkSettings {
     #[serde(default = "default_max_message_size")]
     pub max_message_size_mb: usize,
 
-    /// Enable TLS for gRPC
+    /// Enable TLS for gRPC server
     #[serde(default)]
     pub enable_tls: bool,
 
-    /// TLS certificate path
+    /// TLS server certificate path (for incoming connections)
     #[serde(default)]
     pub tls_cert: Option<PathBuf>,
 
-    /// TLS key path
+    /// TLS server key path (for incoming connections)
     #[serde(default)]
     pub tls_key: Option<PathBuf>,
+
+    /// CA certificate path (for verifying clients and gateway)
+    #[serde(default)]
+    pub tls_ca_cert: Option<PathBuf>,
+
+    /// Client certificate path (for connecting to gateway with mTLS)
+    #[serde(default)]
+    pub tls_client_cert: Option<PathBuf>,
+
+    /// Client key path (for connecting to gateway with mTLS)
+    #[serde(default)]
+    pub tls_client_key: Option<PathBuf>,
 
     /// Bootstrap peers for P2P discovery
     #[serde(default)]
@@ -367,6 +399,9 @@ impl Default for NetworkSettings {
             enable_tls: false,
             tls_cert: None,
             tls_key: None,
+            tls_ca_cert: None,
+            tls_client_cert: None,
+            tls_client_key: None,
             bootstrap_peers: Vec::new(),
         }
     }

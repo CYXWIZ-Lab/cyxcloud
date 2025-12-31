@@ -30,6 +30,18 @@ bs58 = { workspace = true }
 # Performance
 rayon = { workspace = true }
 
+# TLS
+rustls = { workspace = true }
+rustls-pemfile = { workspace = true }
+tokio-rustls = { workspace = true }
+webpki-roots = { workspace = true }
+
+# gRPC (for TLS config helpers)
+tonic = { workspace = true }
+
+# Async (for TLS)
+tokio = { workspace = true }
+
 [dev-dependencies]
 criterion = { workspace = true }
 proptest = { workspace = true }

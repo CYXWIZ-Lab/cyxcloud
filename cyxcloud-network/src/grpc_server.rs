@@ -6,6 +6,7 @@
 
 use bytes::Bytes;
 use cyxcloud_core::chunk::ChunkId;
+use cyxcloud_core::tls::{TlsServerConfig, create_tonic_server_tls};
 use cyxcloud_protocol::chunk::{
     chunk_service_server::ChunkService, ChunkData, DeleteChunkRequest, DeleteChunkResponse,
     GetChunkRequest, GetChunkResponse, StoreChunkRequest, StoreChunkResponse,
@@ -14,6 +15,7 @@ use cyxcloud_protocol::chunk::{
 use cyxcloud_storage::backend::StorageBackendSync;
 use cyxcloud_storage::RocksDbBackend;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -29,6 +31,14 @@ pub struct GrpcServerConfig {
     pub max_message_size: usize,
     /// Enable TLS
     pub enable_tls: bool,
+    /// Server certificate path
+    pub tls_cert: Option<PathBuf>,
+    /// Server private key path
+    pub tls_key: Option<PathBuf>,
+    /// CA certificate path for client verification (mTLS)
+    pub tls_ca_cert: Option<PathBuf>,
+    /// Require client certificates (mTLS)
+    pub tls_require_client_cert: bool,
 }
 
 impl Default for GrpcServerConfig {
@@ -37,6 +47,10 @@ impl Default for GrpcServerConfig {
             listen_addr: "0.0.0.0:50051".parse().unwrap(),
             max_message_size: 64 * 1024 * 1024, // 64 MB
             enable_tls: false,
+            tls_cert: None,
+            tls_key: None,
+            tls_ca_cert: None,
+            tls_require_client_cert: false,
         }
     }
 }
@@ -59,6 +73,22 @@ impl GrpcServerConfig {
     /// Enable or disable TLS
     pub fn with_tls(mut self, enable: bool) -> Self {
         self.enable_tls = enable;
+        self
+    }
+
+    /// Set TLS certificate and key paths
+    pub fn with_tls_config(
+        mut self,
+        cert: PathBuf,
+        key: PathBuf,
+        ca_cert: Option<PathBuf>,
+        require_client_cert: bool,
+    ) -> Self {
+        self.enable_tls = true;
+        self.tls_cert = Some(cert);
+        self.tls_key = Some(key);
+        self.tls_ca_cert = ca_cert;
+        self.tls_require_client_cert = require_client_cert;
         self
     }
 }
@@ -315,9 +345,39 @@ pub async fn start_server(
         .max_decoding_message_size(config.max_message_size)
         .max_encoding_message_size(config.max_message_size);
 
-    info!(addr = %config.listen_addr, node_id = %node_id, "Starting gRPC server");
+    let mut builder = tonic::transport::Server::builder();
 
-    tonic::transport::Server::builder()
+    // Configure TLS if enabled
+    if config.enable_tls {
+        if let (Some(cert_path), Some(key_path)) = (&config.tls_cert, &config.tls_key) {
+            let tls_config = TlsServerConfig {
+                cert_path: cert_path.clone(),
+                key_path: key_path.clone(),
+                ca_cert_path: config.tls_ca_cert.clone(),
+                require_client_cert: config.tls_require_client_cert,
+            };
+
+            let tls = create_tonic_server_tls(&tls_config)?;
+            builder = builder.tls_config(tls)?;
+
+            info!(
+                addr = %config.listen_addr,
+                node_id = %node_id,
+                mtls = config.tls_require_client_cert,
+                "Starting gRPC server with TLS"
+            );
+        } else {
+            return Err("TLS enabled but certificate/key paths not provided".into());
+        }
+    } else {
+        info!(
+            addr = %config.listen_addr,
+            node_id = %node_id,
+            "Starting gRPC server (no TLS)"
+        );
+    }
+
+    builder
         .add_service(server)
         .serve(config.listen_addr)
         .await?;
