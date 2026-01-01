@@ -132,14 +132,12 @@ impl EncryptionKey {
 
     /// Derive key from password using Argon2
     pub fn derive_from_password(password: &[u8], salt: &[u8]) -> Result<Self> {
-        use argon2::{Argon2, PasswordHasher};
         use argon2::password_hash::SaltString;
+        use argon2::{Argon2, PasswordHasher};
 
         // Create salt string (must be base64-encoded)
-        let salt_b64 = base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD_NO_PAD,
-            salt,
-        );
+        let salt_b64 =
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD_NO_PAD, salt);
         let salt_string = SaltString::from_b64(&salt_b64)
             .map_err(|e| CyxCloudError::Encryption(e.to_string()))?;
 
@@ -148,7 +146,8 @@ impl EncryptionKey {
             .hash_password(password, &salt_string)
             .map_err(|e| CyxCloudError::Encryption(e.to_string()))?;
 
-        let hash_bytes = password_hash.hash
+        let hash_bytes = password_hash
+            .hash
             .ok_or_else(|| CyxCloudError::Encryption("No hash output".to_string()))?;
 
         Self::from_slice(hash_bytes.as_bytes())

@@ -6,8 +6,8 @@
 use crate::state::AppState;
 use cyxcloud_metadata::postgres::Database;
 use cyxcloud_rebalancer::{
-    Detector, DetectorConfig, Executor, ExecutorConfig, GrpcNetworkClient,
-    Planner, PlannerConfig, PostgresMetadataClient,
+    Detector, DetectorConfig, Executor, ExecutorConfig, GrpcNetworkClient, Planner, PlannerConfig,
+    PostgresMetadataClient,
 };
 use std::sync::Arc;
 use std::time::Duration;

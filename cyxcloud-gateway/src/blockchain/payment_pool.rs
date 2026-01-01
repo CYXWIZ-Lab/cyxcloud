@@ -3,8 +3,8 @@
 //! Handles StoragePaymentPool program interactions for epoch management and rewards.
 
 use anyhow::Result;
-use solana_client::rpc_client::RpcClient;
 use sha2::{Digest, Sha256};
+use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
@@ -68,10 +68,7 @@ impl PaymentPoolOps {
 
     /// Get epoch rewards PDA
     pub fn get_epoch_rewards_pda(&self, epoch: u64) -> (Pubkey, u8) {
-        Pubkey::find_program_address(
-            &[b"epoch_rewards", &epoch.to_le_bytes()],
-            &self.program_id,
-        )
+        Pubkey::find_program_address(&[b"epoch_rewards", &epoch.to_le_bytes()], &self.program_id)
     }
 
     /// Get node claim PDA
@@ -190,7 +187,10 @@ impl PaymentPoolOps {
         let (pool_pda, _) = self.get_pool_pda();
 
         // Get current epoch
-        let pool = self.get_pool().await?.ok_or_else(|| anyhow::anyhow!("Pool not found"))?;
+        let pool = self
+            .get_pool()
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Pool not found"))?;
         let current_epoch = pool.current_epoch;
 
         let (epoch_rewards_pda, _) = self.get_epoch_rewards_pda(current_epoch);
@@ -469,8 +469,8 @@ impl PaymentPoolOps {
             .iter()
             .map(|(owner, id, storage, uptime, reputation)| {
                 // Uptime factor: based on seconds online in epoch
-                let uptime_factor = (*uptime as f64 / constants::EPOCH_DURATION_SECONDS as f64)
-                    .min(1.0);
+                let uptime_factor =
+                    (*uptime as f64 / constants::EPOCH_DURATION_SECONDS as f64).min(1.0);
 
                 // Reputation factor: 0.5 to 1.5 based on score
                 let reputation_factor = 0.5 + (*reputation as f64 / 10000.0);

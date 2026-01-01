@@ -129,11 +129,7 @@ impl NodeConfig {
     }
 
     /// Override config with CLI arguments
-    pub fn with_overrides(
-        mut self,
-        data_dir: Option<PathBuf>,
-        port: Option<u16>,
-    ) -> Self {
+    pub fn with_overrides(mut self, data_dir: Option<PathBuf>, port: Option<u16>) -> Self {
         if let Some(dir) = data_dir {
             self.storage.data_dir = dir;
         }
@@ -804,8 +800,8 @@ mod tests {
 
     #[test]
     fn test_config_overrides() {
-        let config = NodeConfig::default()
-            .with_overrides(Some(PathBuf::from("/custom/path")), Some(8000));
+        let config =
+            NodeConfig::default().with_overrides(Some(PathBuf::from("/custom/path")), Some(8000));
 
         assert_eq!(config.storage.data_dir, PathBuf::from("/custom/path"));
         assert_eq!(config.network.grpc_port, 8000);

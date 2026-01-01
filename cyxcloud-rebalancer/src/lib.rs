@@ -18,8 +18,13 @@ pub mod transfer;
 
 // Re-export main types
 pub use config::RebalancerConfig;
-pub use detector::{ChunkHealth, ChunkInfo, ChunkIssue, Detector, DetectorConfig, MetadataClient, NetworkClient, NodeAvailability, ScanResult};
-pub use executor::{Executor, ExecutorConfig, ExecutorError, ProgressStatus, ProgressUpdate, TaskResult};
+pub use detector::{
+    ChunkHealth, ChunkInfo, ChunkIssue, Detector, DetectorConfig, MetadataClient, NetworkClient,
+    NodeAvailability, ScanResult,
+};
+pub use executor::{
+    Executor, ExecutorConfig, ExecutorError, ProgressStatus, ProgressUpdate, TaskResult,
+};
 pub use metadata_client::PostgresMetadataClient;
 pub use network_client::GrpcNetworkClient;
 pub use planner::{NodeInfo, Planner, PlannerConfig, RepairPlan, RepairTask};

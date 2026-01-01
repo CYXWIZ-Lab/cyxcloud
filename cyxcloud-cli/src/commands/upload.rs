@@ -50,10 +50,7 @@ async fn upload_single_file(
     path: &Path,
     prefix: Option<&str>,
 ) -> Result<()> {
-    let file_name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("file");
+    let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
 
     let key = match prefix {
         Some(p) => format!("{}/{}", p.trim_matches('/'), file_name),
@@ -114,18 +111,16 @@ async fn upload_directory(
         return Ok(());
     }
 
-    println!(
-        "{} {} files to upload",
-        style("Found").cyan(),
-        files.len()
-    );
+    println!("{} {} files to upload", style("Found").cyan(), files.len());
 
     // Create multi-progress bar
     let multi = MultiProgress::new();
     let overall_pb = multi.add(ProgressBar::new(files.len() as u64));
     overall_pb.set_style(
         ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.green/white}] {pos}/{len} files")
+            .template(
+                "{spinner:.green} [{elapsed_precise}] [{bar:40.green/white}] {pos}/{len} files",
+            )
             .unwrap()
             .progress_chars("█▓░"),
     );
@@ -136,9 +131,7 @@ async fn upload_directory(
 
     for file_path in &files {
         // Calculate key from relative path
-        let relative = file_path
-            .strip_prefix(dir_path)
-            .unwrap_or(file_path);
+        let relative = file_path.strip_prefix(dir_path).unwrap_or(file_path);
 
         let key = match prefix {
             Some(p) => format!("{}/{}", p.trim_matches('/'), relative.display()),
@@ -171,7 +164,10 @@ async fn upload_directory(
 
     // Print summary
     println!("\n{}", style("Upload Summary:").bold());
-    println!("  {} files uploaded successfully", style(success_count).green());
+    println!(
+        "  {} files uploaded successfully",
+        style(success_count).green()
+    );
     if error_count > 0 {
         println!("  {} files failed", style(error_count).red());
     }

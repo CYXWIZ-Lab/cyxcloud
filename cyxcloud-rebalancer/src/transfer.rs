@@ -99,10 +99,7 @@ impl ChunkTransferService {
             .map_err(|e| TransferError::Network(e.to_string()))?
             .ok_or_else(|| TransferError::ChunkNotFound(hex::encode(chunk_id)))?;
 
-        debug!(
-            size = chunk_data.len(),
-            "Retrieved chunk from source node"
-        );
+        debug!(size = chunk_data.len(), "Retrieved chunk from source node");
 
         // Step 2: Store chunk on target
         self.chunk_client
@@ -194,17 +191,20 @@ impl ChunkTransferService {
 /// This returns a closure that can be used with Executor::execute()
 pub fn create_transfer_fn(
     db: Arc<Database>,
-) -> impl Fn(String, String, Vec<u8>, Vec<String>) -> std::pin::Pin<Box<dyn std::future::Future<Output = std::result::Result<Vec<String>, String>> + Send>>
-       + Clone
+) -> impl Fn(
+    String,
+    String,
+    Vec<u8>,
+    Vec<String>,
+) -> std::pin::Pin<
+    Box<dyn std::future::Future<Output = std::result::Result<Vec<String>, String>> + Send>,
+> + Clone
        + Send
        + Sync
        + 'static {
     let service = Arc::new(ChunkTransferService::new(db));
 
-    move |source_node: String,
-          _task_id: String,
-          chunk_id: Vec<u8>,
-          target_nodes: Vec<String>| {
+    move |source_node: String, _task_id: String, chunk_id: Vec<u8>, target_nodes: Vec<String>| {
         let service = service.clone();
 
         Box::pin(async move {

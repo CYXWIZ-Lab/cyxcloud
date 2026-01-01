@@ -248,9 +248,7 @@ impl CyxWizApiClient {
 
     /// Create a new API client with just base URL
     pub fn with_base_url(base_url: &str) -> Result<Self, ApiError> {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()?;
+        let client = Client::builder().timeout(Duration::from_secs(30)).build()?;
 
         Ok(Self {
             client,
@@ -290,7 +288,9 @@ impl CyxWizApiClient {
 
             Ok(result)
         } else if response.status().as_u16() == 401 {
-            Err(ApiError::AuthFailed("Invalid email or password".to_string()))
+            Err(ApiError::AuthFailed(
+                "Invalid email or password".to_string(),
+            ))
         } else {
             let error: ErrorResponse = response.json().await.unwrap_or(ErrorResponse {
                 error: "Unknown error".to_string(),

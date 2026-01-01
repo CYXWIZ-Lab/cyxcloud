@@ -365,11 +365,7 @@ fn handle_config_command(command: Option<ConfigCommands>) -> Result<()> {
 
             // Show config file path
             if let Ok(path) = config::config_file_path() {
-                println!(
-                    "{} {}",
-                    style("Config file:").dim(),
-                    path.display()
-                );
+                println!("{} {}", style("Config file:").dim(), path.display());
                 if !path.exists() {
                     println!(
                         "{} Run '{}' to create it",
@@ -434,9 +430,7 @@ fn handle_config_command(command: Option<ConfigCommands>) -> Result<()> {
 /// Check if user is authenticated, return error if not
 fn require_auth(token: &Option<String>) -> Result<()> {
     if token.is_none() {
-        anyhow::bail!(
-            "Not logged in. Run 'cyxcloud login' first."
-        );
+        anyhow::bail!("Not logged in. Run 'cyxcloud login' first.");
     }
     Ok(())
 }

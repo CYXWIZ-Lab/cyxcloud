@@ -93,9 +93,9 @@ impl TokenType {
     /// Get token lifetime in seconds
     pub fn lifetime_secs(&self) -> i64 {
         match self {
-            Self::Access => 3600,           // 1 hour
-            Self::Refresh => 7 * 24 * 3600, // 7 days
-            Self::Node => 24 * 3600,        // 24 hours
+            Self::Access => 3600,            // 1 hour
+            Self::Refresh => 7 * 24 * 3600,  // 7 days
+            Self::Node => 24 * 3600,         // 24 hours
             Self::ApiKey => 365 * 24 * 3600, // 1 year (effectively no expiration)
         }
     }
@@ -270,7 +270,9 @@ impl AuthService {
         {
             let revoked = self.revoked_tokens.read().await;
             if revoked.contains(&token_data.claims.jti) {
-                return Err(AuthError::InvalidToken("Token has been revoked".to_string()));
+                return Err(AuthError::InvalidToken(
+                    "Token has been revoked".to_string(),
+                ));
             }
         }
 
@@ -308,8 +310,8 @@ impl AuthService {
             .try_into()
             .map_err(|_| AuthError::InvalidWalletAddress)?;
 
-        let verifying_key = VerifyingKey::from_bytes(&pubkey_array)
-            .map_err(|_| AuthError::InvalidWalletAddress)?;
+        let verifying_key =
+            VerifyingKey::from_bytes(&pubkey_array).map_err(|_| AuthError::InvalidWalletAddress)?;
 
         // Decode the signature (base58)
         let sig_bytes = bs58::decode(signature_b58)

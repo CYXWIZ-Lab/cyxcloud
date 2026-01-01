@@ -398,9 +398,7 @@ async fn handle_client_message(text: &str, state: &AppState) -> Result<(), Strin
     let cmd: serde_json::Value =
         serde_json::from_str(text).map_err(|e| format!("Invalid JSON: {}", e))?;
 
-    let action = cmd["action"]
-        .as_str()
-        .ok_or("Missing 'action' field")?;
+    let action = cmd["action"].as_str().ok_or("Missing 'action' field")?;
 
     match action {
         "subscribe" => {

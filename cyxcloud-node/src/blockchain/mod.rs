@@ -42,8 +42,7 @@ pub use client::StorageNodeBlockchainClient;
 
 // Re-export types
 pub use types::{
-    DiskType, NodeBlockchainConfig, ProofChallenge, ProofOfStorage, StorageNodeStatus,
-    StorageSpec,
+    DiskType, NodeBlockchainConfig, ProofChallenge, ProofOfStorage, StorageNodeStatus, StorageSpec,
 };
 
 // Re-export operations for advanced use

@@ -13,8 +13,8 @@ pub mod erasure;
 pub mod error;
 pub mod tls;
 
-pub use chunk::{Chunk, ChunkId, ChunkMetadata, split_into_chunks, reassemble_chunks};
-pub use crypto::{ContentHash, EncryptedData, EncryptionKey, encrypt, decrypt};
+pub use chunk::{reassemble_chunks, split_into_chunks, Chunk, ChunkId, ChunkMetadata};
+pub use crypto::{decrypt, encrypt, ContentHash, EncryptedData, EncryptionKey};
 pub use erasure::{ErasureConfig, ErasureEncoder, ShardData};
 pub use error::{CyxCloudError, Result};
 
@@ -27,6 +27,6 @@ pub const PARITY_SHARDS: usize = 4;
 pub const TOTAL_SHARDS: usize = DATA_SHARDS + PARITY_SHARDS;
 
 /// Chunk size constants
-pub const MIN_CHUNK_SIZE: usize = 256 * 1024;        // 256 KB
+pub const MIN_CHUNK_SIZE: usize = 256 * 1024; // 256 KB
 pub const DEFAULT_CHUNK_SIZE: usize = 4 * 1024 * 1024; // 4 MB
-pub const MAX_CHUNK_SIZE: usize = 64 * 1024 * 1024;   // 64 MB
+pub const MAX_CHUNK_SIZE: usize = 64 * 1024 * 1024; // 64 MB

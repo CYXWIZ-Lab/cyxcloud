@@ -90,8 +90,7 @@ impl Default for AuthConfig {
 }
 
 fn default_auth_api_url() -> String {
-    std::env::var("CYXCLOUD_AUTH_API_URL")
-        .unwrap_or_else(|_| "http://localhost:3002".to_string())
+    std::env::var("CYXCLOUD_AUTH_API_URL").unwrap_or_else(|_| "http://localhost:3002".to_string())
 }
 
 /// CLI-specific settings
@@ -181,23 +180,19 @@ pub fn credentials_file_path() -> Result<PathBuf> {
 /// Falls back to defaults if file doesn't exist
 pub fn load_config() -> CyxCloudConfig {
     match config_file_path() {
-        Ok(path) if path.exists() => {
-            match fs::read_to_string(&path) {
-                Ok(content) => {
-                    match toml::from_str(&content) {
-                        Ok(config) => config,
-                        Err(e) => {
-                            eprintln!("Warning: Failed to parse config file: {}", e);
-                            CyxCloudConfig::default()
-                        }
-                    }
-                }
+        Ok(path) if path.exists() => match fs::read_to_string(&path) {
+            Ok(content) => match toml::from_str(&content) {
+                Ok(config) => config,
                 Err(e) => {
-                    eprintln!("Warning: Failed to read config file: {}", e);
+                    eprintln!("Warning: Failed to parse config file: {}", e);
                     CyxCloudConfig::default()
                 }
+            },
+            Err(e) => {
+                eprintln!("Warning: Failed to read config file: {}", e);
+                CyxCloudConfig::default()
             }
-        }
+        },
         _ => CyxCloudConfig::default(),
     }
 }
@@ -205,10 +200,8 @@ pub fn load_config() -> CyxCloudConfig {
 /// Save configuration to file
 pub fn save_config(config: &CyxCloudConfig) -> Result<()> {
     let path = config_file_path()?;
-    let content = toml::to_string_pretty(config)
-        .context("Failed to serialize config")?;
-    fs::write(&path, content)
-        .context("Failed to write config file")?;
+    let content = toml::to_string_pretty(config).context("Failed to serialize config")?;
+    fs::write(&path, content).context("Failed to write config file")?;
     Ok(())
 }
 
@@ -226,10 +219,9 @@ pub fn load_credentials() -> Result<Option<Credentials>> {
     let path = credentials_file_path()?;
 
     if path.exists() {
-        let content = fs::read_to_string(&path)
-            .context("Failed to read credentials file")?;
-        let creds: Credentials = serde_json::from_str(&content)
-            .context("Failed to parse credentials file")?;
+        let content = fs::read_to_string(&path).context("Failed to read credentials file")?;
+        let creds: Credentials =
+            serde_json::from_str(&content).context("Failed to parse credentials file")?;
         Ok(Some(creds))
     } else {
         Ok(None)
@@ -239,8 +231,8 @@ pub fn load_credentials() -> Result<Option<Credentials>> {
 /// Save user credentials to file
 pub fn save_credentials(credentials: &Credentials) -> Result<()> {
     let path = credentials_file_path()?;
-    let content = serde_json::to_string_pretty(credentials)
-        .context("Failed to serialize credentials")?;
+    let content =
+        serde_json::to_string_pretty(credentials).context("Failed to serialize credentials")?;
 
     // Set restrictive permissions on Unix
     #[cfg(unix)]
@@ -263,8 +255,7 @@ pub fn delete_credentials() -> Result<()> {
     let path = credentials_file_path()?;
 
     if path.exists() {
-        fs::remove_file(&path)
-            .context("Failed to delete credentials file")?;
+        fs::remove_file(&path).context("Failed to delete credentials file")?;
     }
 
     Ok(())

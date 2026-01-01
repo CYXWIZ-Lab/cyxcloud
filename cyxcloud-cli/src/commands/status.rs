@@ -69,10 +69,7 @@ async fn show_bucket_status(client: &GatewayClient, bucket: &str, verbose: bool)
             println!("  Total Size:   {}", style(format_bytes(total_size)).cyan());
 
             if list.is_truncated {
-                println!(
-                    "  {}",
-                    style("(showing first 1000 objects)").dim()
-                );
+                println!("  {}", style("(showing first 1000 objects)").dim());
             }
 
             if verbose && !list.objects.is_empty() {

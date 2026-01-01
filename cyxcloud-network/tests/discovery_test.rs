@@ -124,8 +124,14 @@ fn test_node_announcement_serialization() {
     let decoded = NodeAnnouncement::from_bytes(&bytes).unwrap();
     assert_eq!(decoded.node_id, announcement.node_id);
     assert_eq!(decoded.grpc_address, announcement.grpc_address);
-    assert_eq!(decoded.capacity.storage_total, announcement.capacity.storage_total);
-    assert_eq!(decoded.location.datacenter, announcement.location.datacenter);
+    assert_eq!(
+        decoded.capacity.storage_total,
+        announcement.capacity.storage_total
+    );
+    assert_eq!(
+        decoded.location.datacenter,
+        announcement.location.datacenter
+    );
     assert!(matches!(decoded.status, NodeStatus::Online));
     assert_eq!(decoded.timestamp, announcement.timestamp);
     assert_eq!(decoded.version, announcement.version);
@@ -142,8 +148,7 @@ fn test_node_status_variants() {
     ];
 
     for status in statuses {
-        let announcement = NodeAnnouncement::new("test", "127.0.0.1:50051")
-            .with_status(status);
+        let announcement = NodeAnnouncement::new("test", "127.0.0.1:50051").with_status(status);
 
         let bytes = announcement.to_bytes().unwrap();
         let decoded = NodeAnnouncement::from_bytes(&bytes).unwrap();

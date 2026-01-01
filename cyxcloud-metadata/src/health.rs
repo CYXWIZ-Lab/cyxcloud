@@ -158,12 +158,7 @@ impl HealthChecker for DefaultHealthChecker {
         let start = Instant::now();
 
         // Try TCP connection
-        match tokio::time::timeout(
-            self.timeout,
-            tokio::net::TcpStream::connect(address),
-        )
-        .await
-        {
+        match tokio::time::timeout(self.timeout, tokio::net::TcpStream::connect(address)).await {
             Ok(Ok(_)) => {
                 let latency = start.elapsed().as_millis() as u64;
                 (true, Some(latency))
@@ -283,7 +278,10 @@ impl HealthMonitor {
             })
             .collect();
 
-        futures::future::join_all(futures).await.into_iter().collect()
+        futures::future::join_all(futures)
+            .await
+            .into_iter()
+            .collect()
     }
 
     /// Get current health status for a node

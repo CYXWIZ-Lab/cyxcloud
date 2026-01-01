@@ -187,11 +187,7 @@ impl Executor {
 
     /// Execute a repair plan
     #[instrument(skip(self, plan, transfer_fn))]
-    pub async fn execute<F, Fut>(
-        &self,
-        plan: RepairPlan,
-        transfer_fn: F,
-    ) -> ExecutionResult
+    pub async fn execute<F, Fut>(&self, plan: RepairPlan, transfer_fn: F) -> ExecutionResult
     where
         F: Fn(String, String, Vec<u8>, Vec<String>) -> Fut + Clone + Send + Sync + 'static,
         Fut: std::future::Future<Output = std::result::Result<Vec<String>, String>> + Send,
@@ -219,9 +215,7 @@ impl Executor {
             let executor = self.clone_for_task();
             let transfer = transfer_fn.clone();
 
-            let handle = tokio::spawn(async move {
-                executor.execute_task(task, transfer).await
-            });
+            let handle = tokio::spawn(async move { executor.execute_task(task, transfer).await });
 
             handles.push(handle);
         }

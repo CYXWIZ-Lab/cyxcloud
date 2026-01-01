@@ -17,10 +17,10 @@ fn bench_encode(c: &mut Criterion) {
     let mut group = c.benchmark_group("erasure_encode");
 
     for size in [
-        1024 * 1024,           // 1 MB
-        4 * 1024 * 1024,       // 4 MB
-        10 * 1024 * 1024,      // 10 MB
-        64 * 1024 * 1024,      // 64 MB
+        1024 * 1024,      // 1 MB
+        4 * 1024 * 1024,  // 4 MB
+        10 * 1024 * 1024, // 10 MB
+        64 * 1024 * 1024, // 64 MB
     ] {
         let data = generate_data(size);
 
@@ -28,9 +28,7 @@ fn bench_encode(c: &mut Criterion) {
         group.bench_with_input(
             BenchmarkId::new("sequential", format!("{}MB", size / (1024 * 1024))),
             &data,
-            |b, data| {
-                b.iter(|| encoder.encode(black_box(data)))
-            },
+            |b, data| b.iter(|| encoder.encode(black_box(data))),
         );
     }
 
@@ -44,10 +42,10 @@ fn bench_encode_parallel(c: &mut Criterion) {
     let mut group = c.benchmark_group("erasure_encode_parallel");
 
     for size in [
-        4 * 1024 * 1024,       // 4 MB
-        10 * 1024 * 1024,      // 10 MB
-        64 * 1024 * 1024,      // 64 MB
-        100 * 1024 * 1024,     // 100 MB
+        4 * 1024 * 1024,   // 4 MB
+        10 * 1024 * 1024,  // 10 MB
+        64 * 1024 * 1024,  // 64 MB
+        100 * 1024 * 1024, // 100 MB
     ] {
         let data = generate_data(size);
 
@@ -55,9 +53,7 @@ fn bench_encode_parallel(c: &mut Criterion) {
         group.bench_with_input(
             BenchmarkId::new("parallel", format!("{}MB", size / (1024 * 1024))),
             &data,
-            |b, data| {
-                b.iter(|| encoder.encode_parallel(black_box(data)))
-            },
+            |b, data| b.iter(|| encoder.encode_parallel(black_box(data))),
         );
     }
 

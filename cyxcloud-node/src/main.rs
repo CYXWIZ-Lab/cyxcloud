@@ -72,7 +72,10 @@ async fn main() -> anyhow::Result<()> {
         let creds_path = cyxcloud_node::config::node_credentials_path();
         if creds_path.exists() {
             std::fs::remove_file(&creds_path)?;
-            println!("Logged out successfully. Credentials removed from {:?}", creds_path);
+            println!(
+                "Logged out successfully. Credentials removed from {:?}",
+                creds_path
+            );
         } else {
             println!("No saved credentials found.");
         }
@@ -95,7 +98,7 @@ async fn main() -> anyhow::Result<()> {
     // Load configuration
     // Priority: CLI args > node config.toml > shared config (~/.cyxcloud/config.toml) > defaults
     let mut config = NodeConfig::load_or_default(&cli.config)
-        .with_shared_config()  // Apply shared config from ~/.cyxcloud/config.toml
+        .with_shared_config() // Apply shared config from ~/.cyxcloud/config.toml
         .with_overrides(cli.data_dir, cli.port)
         .with_env_overrides();
 
@@ -108,7 +111,11 @@ async fn main() -> anyhow::Result<()> {
 
             println!();
             println!("{}", symbols::BOX_TOP);
-            println!("{}  Storage Capacity Not Configured                        {}", symbols::BOX_SIDE, symbols::BOX_SIDE);
+            println!(
+                "{}  Storage Capacity Not Configured                        {}",
+                symbols::BOX_SIDE,
+                symbols::BOX_SIDE
+            );
             println!("{}", symbols::BOX_BOTTOM);
             println!();
             println!("Your storage capacity (max_capacity_gb) is not set in config.toml.");
@@ -133,7 +140,11 @@ async fn main() -> anyhow::Result<()> {
 
                         // Calculate reserved and available
                         let reserved_gb = 2;
-                        let available_gb = if gb > reserved_gb { gb - reserved_gb } else { 0 };
+                        let available_gb = if gb > reserved_gb {
+                            gb - reserved_gb
+                        } else {
+                            0
+                        };
                         println!("  System reserved: {} GB", reserved_gb);
                         println!("  Available for storage: {} GB", available_gb);
                         println!();
@@ -150,7 +161,10 @@ async fn main() -> anyhow::Result<()> {
                         println!("{} Please enter at least 1 GB", symbols::CROSS);
                     }
                     Err(_) => {
-                        println!("{} Invalid input. Please enter a number (e.g., 100)", symbols::CROSS);
+                        println!(
+                            "{} Invalid input. Please enter a number (e.g., 100)",
+                            symbols::CROSS
+                        );
                     }
                 }
             }
@@ -263,7 +277,9 @@ async fn main() -> anyhow::Result<()> {
     let jwt_token = machine_service.get_jwt_token().await;
     if jwt_token.is_none() && config.central.register {
         error!("No JWT token available for Gateway authentication");
-        return Err(anyhow::anyhow!("JWT token required for Gateway registration"));
+        return Err(anyhow::anyhow!(
+            "JWT token required for Gateway registration"
+        ));
     }
 
     // Create heartbeat service for Gateway registration
@@ -416,7 +432,12 @@ async fn start_grpc_server(
 #[cfg(feature = "blockchain")]
 async fn initialize_blockchain_service(
     config: &NodeConfig,
-) -> anyhow::Result<Option<(Arc<StorageNodeBlockchainClient>, tokio::task::JoinHandle<()>)>> {
+) -> anyhow::Result<
+    Option<(
+        Arc<StorageNodeBlockchainClient>,
+        tokio::task::JoinHandle<()>,
+    )>,
+> {
     use cyxcloud_node::blockchain::heartbeat::HeartbeatOps;
     use solana_sdk::signature::Keypair;
     use std::path::Path;
@@ -474,7 +495,11 @@ async fn initialize_blockchain_service(
         let spec = StorageSpec::new(
             config.storage.max_capacity_gb * 1024 * 1024 * 1024,
             DiskType::SSD, // Default to SSD, could be configurable
-            config.node.region.clone().unwrap_or_else(|| "unknown".to_string()),
+            config
+                .node
+                .region
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string()),
             1000, // Default bandwidth, could be configurable
         );
 

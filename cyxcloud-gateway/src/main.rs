@@ -27,7 +27,7 @@ pub use state::{AppState, GatewayConfig};
 
 use axum::{routing::get, Router};
 use clap::Parser;
-use cyxcloud_core::tls::{TlsServerConfig, create_tonic_server_tls};
+use cyxcloud_core::tls::{create_tonic_server_tls, TlsServerConfig};
 use cyxcloud_protocol::data::data_service_server::DataServiceServer;
 use cyxcloud_protocol::node::node_service_server::NodeServiceServer;
 use grpc_api::{AuthInterceptor, DataServiceImpl, NodeServiceImpl};
@@ -91,7 +91,11 @@ struct Cli {
 
     /// Solana RPC URL for blockchain operations (requires 'blockchain' feature)
     #[cfg(feature = "blockchain")]
-    #[arg(long, env = "SOLANA_RPC_URL", default_value = "https://api.devnet.solana.com")]
+    #[arg(
+        long,
+        env = "SOLANA_RPC_URL",
+        default_value = "https://api.devnet.solana.com"
+    )]
     solana_rpc_url: String,
 
     /// Path to gateway authority keypair file (requires 'blockchain' feature)
@@ -246,11 +250,19 @@ async fn main() -> anyhow::Result<()> {
         // Data service for ML training data streaming
         let data_service = DataServiceImpl::new(grpc_state.clone());
 
-        let tls_status = if grpc_tls_config.is_some() { "enabled" } else { "disabled" };
+        let tls_status = if grpc_tls_config.is_some() {
+            "enabled"
+        } else {
+            "disabled"
+        };
         info!(
             "gRPC server listening on {} (auth: {}, TLS: {})",
             grpc_addr,
-            if enable_grpc_auth { "enabled" } else { "disabled" },
+            if enable_grpc_auth {
+                "enabled"
+            } else {
+                "disabled"
+            },
             tls_status
         );
 
@@ -260,7 +272,9 @@ async fn main() -> anyhow::Result<()> {
         if let Some(ref tls_cfg) = grpc_tls_config {
             match create_tonic_server_tls(tls_cfg) {
                 Ok(tls) => {
-                    builder = builder.tls_config(tls).expect("Failed to configure gRPC TLS");
+                    builder = builder
+                        .tls_config(tls)
+                        .expect("Failed to configure gRPC TLS");
                     info!("gRPC TLS configured successfully");
                 }
                 Err(e) => {
@@ -275,7 +289,8 @@ async fn main() -> anyhow::Result<()> {
             let auth_interceptor = AuthInterceptor::new(grpc_state.auth_service_arc());
 
             // Wrap services with authentication
-            let node_server = NodeServiceServer::with_interceptor(node_service, auth_interceptor.clone());
+            let node_server =
+                NodeServiceServer::with_interceptor(node_service, auth_interceptor.clone());
             let data_server = DataServiceServer::with_interceptor(data_service, auth_interceptor);
 
             if let Err(e) = builder

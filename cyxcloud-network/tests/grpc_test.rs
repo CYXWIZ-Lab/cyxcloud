@@ -174,7 +174,10 @@ async fn test_stream_chunks() {
     }
 
     // Stream all chunks
-    let results = client.stream_chunks(&addr, chunk_ids.clone()).await.unwrap();
+    let results = client
+        .stream_chunks(&addr, chunk_ids.clone())
+        .await
+        .unwrap();
 
     assert_eq!(results.len(), 3, "Expected 3 chunks from stream");
 

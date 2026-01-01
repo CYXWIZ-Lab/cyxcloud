@@ -79,31 +79,22 @@ pub trait StorageBackend: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = Result<Option<Bytes>>> + Send + 'a>>;
 
     /// Delete a chunk
-    fn delete<'a>(
-        &'a self,
-        id: ChunkId,
-    ) -> Pin<Box<dyn Future<Output = Result<bool>> + Send + 'a>>;
+    fn delete<'a>(&'a self, id: ChunkId)
+        -> Pin<Box<dyn Future<Output = Result<bool>> + Send + 'a>>;
 
     /// Check if a chunk exists
-    fn exists<'a>(
-        &'a self,
-        id: ChunkId,
-    ) -> Pin<Box<dyn Future<Output = Result<bool>> + Send + 'a>>;
+    fn exists<'a>(&'a self, id: ChunkId)
+        -> Pin<Box<dyn Future<Output = Result<bool>> + Send + 'a>>;
 
     /// Get storage statistics
-    fn stats<'a>(
-        &'a self,
-    ) -> Pin<Box<dyn Future<Output = Result<StorageStats>> + Send + 'a>>;
+    fn stats<'a>(&'a self) -> Pin<Box<dyn Future<Output = Result<StorageStats>> + Send + 'a>>;
 
     /// List all chunk IDs
-    fn list_chunks<'a>(
-        &'a self,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<ChunkId>>> + Send + 'a>>;
+    fn list_chunks<'a>(&'a self)
+        -> Pin<Box<dyn Future<Output = Result<Vec<ChunkId>>> + Send + 'a>>;
 
     /// Flush any pending writes to disk
-    fn flush<'a>(
-        &'a self,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>;
+    fn flush<'a>(&'a self) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>;
 }
 
 /// Synchronous storage backend trait (for simpler implementations)
@@ -150,50 +141,34 @@ impl<T: StorageBackendSync + 'static> StorageBackend for AsyncWrapper<T> {
         &'a self,
         id: ChunkId,
     ) -> Pin<Box<dyn Future<Output = Result<Option<Bytes>>> + Send + 'a>> {
-        Box::pin(async move {
-            self.0.get(id)
-        })
+        Box::pin(async move { self.0.get(id) })
     }
 
     fn delete<'a>(
         &'a self,
         id: ChunkId,
     ) -> Pin<Box<dyn Future<Output = Result<bool>> + Send + 'a>> {
-        Box::pin(async move {
-            self.0.delete(id)
-        })
+        Box::pin(async move { self.0.delete(id) })
     }
 
     fn exists<'a>(
         &'a self,
         id: ChunkId,
     ) -> Pin<Box<dyn Future<Output = Result<bool>> + Send + 'a>> {
-        Box::pin(async move {
-            self.0.exists(id)
-        })
+        Box::pin(async move { self.0.exists(id) })
     }
 
-    fn stats<'a>(
-        &'a self,
-    ) -> Pin<Box<dyn Future<Output = Result<StorageStats>> + Send + 'a>> {
-        Box::pin(async move {
-            self.0.stats()
-        })
+    fn stats<'a>(&'a self) -> Pin<Box<dyn Future<Output = Result<StorageStats>> + Send + 'a>> {
+        Box::pin(async move { self.0.stats() })
     }
 
     fn list_chunks<'a>(
         &'a self,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<ChunkId>>> + Send + 'a>> {
-        Box::pin(async move {
-            self.0.list_chunks()
-        })
+        Box::pin(async move { self.0.list_chunks() })
     }
 
-    fn flush<'a>(
-        &'a self,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
-        Box::pin(async move {
-            self.0.flush()
-        })
+    fn flush<'a>(&'a self) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+        Box::pin(async move { self.0.flush() })
     }
 }

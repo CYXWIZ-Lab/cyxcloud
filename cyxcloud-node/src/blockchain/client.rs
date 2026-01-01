@@ -172,7 +172,9 @@ impl StorageNodeBlockchainClient {
 
     /// Complete stake withdrawal (after lockup period)
     pub async fn complete_withdraw(&self, node_id: &str) -> Result<Signature> {
-        self.registration.complete_withdraw(&self.owner, node_id).await
+        self.registration
+            .complete_withdraw(&self.owner, node_id)
+            .await
     }
 
     // =========================================================================
@@ -186,7 +188,9 @@ impl StorageNodeBlockchainClient {
 
     /// Submit proof-of-storage response
     pub async fn submit_proof(&self, node_id: &str, proof: &ProofOfStorage) -> Result<Signature> {
-        self.heartbeat.submit_proof(&self.owner, node_id, proof).await
+        self.heartbeat
+            .submit_proof(&self.owner, node_id, proof)
+            .await
     }
 
     /// Generate proof-of-storage from chunk data
@@ -244,7 +248,9 @@ impl StorageNodeBlockchainClient {
 
     /// Claim rewards for an epoch
     pub async fn claim_rewards(&self, node_id: &str, epoch: u64) -> Result<Signature> {
-        self.rewards.claim_rewards(&self.owner, node_id, epoch).await
+        self.rewards
+            .claim_rewards(&self.owner, node_id, epoch)
+            .await
     }
 
     /// Get all pending rewards
@@ -270,7 +276,8 @@ impl StorageNodeBlockchainClient {
 
     /// Get CYXWIZ token balance of the node owner
     pub async fn get_token_balance(&self) -> Result<u64> {
-        let token_account = Self::get_associated_token_address(&self.owner.pubkey(), &self.config.token_mint);
+        let token_account =
+            Self::get_associated_token_address(&self.owner.pubkey(), &self.config.token_mint);
 
         match self.rpc_client.get_token_account_balance(&token_account) {
             Ok(balance) => Ok(balance.amount.parse::<u64>().unwrap_or(0)),

@@ -172,7 +172,12 @@ impl NodeLocation {
 
     /// Calculate distance to another location (haversine formula)
     pub fn distance_km(&self, other: &NodeLocation) -> Option<f64> {
-        match (self.latitude, self.longitude, other.latitude, other.longitude) {
+        match (
+            self.latitude,
+            self.longitude,
+            other.latitude,
+            other.longitude,
+        ) {
             (Some(lat1), Some(lon1), Some(lat2), Some(lon2)) => {
                 let r = 6371.0; // Earth's radius in km
                 let lat1_rad = lat1.to_radians();
@@ -295,10 +300,8 @@ mod tests {
     #[test]
     fn test_node_location_distance() {
         // New York to London
-        let ny = NodeLocation::new("us-east-1", "us-east")
-            .with_coordinates(40.7128, -74.0060);
-        let london = NodeLocation::new("eu-west-1", "europe")
-            .with_coordinates(51.5074, -0.1278);
+        let ny = NodeLocation::new("us-east-1", "us-east").with_coordinates(40.7128, -74.0060);
+        let london = NodeLocation::new("eu-west-1", "europe").with_coordinates(51.5074, -0.1278);
 
         let distance = ny.distance_km(&london).unwrap();
         // Should be approximately 5570 km

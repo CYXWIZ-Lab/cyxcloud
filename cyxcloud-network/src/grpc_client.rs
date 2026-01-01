@@ -5,7 +5,7 @@
 use bytes::Bytes;
 use cyxcloud_core::chunk::ChunkId;
 use cyxcloud_core::error::{CyxCloudError, Result};
-use cyxcloud_core::tls::{TlsClientConfig, create_tonic_client_tls};
+use cyxcloud_core::tls::{create_tonic_client_tls, TlsClientConfig};
 use cyxcloud_protocol::chunk::{
     chunk_service_client::ChunkServiceClient, DeleteChunkRequest, GetChunkRequest,
     StoreChunkRequest, StreamChunksRequest, VerifyChunkRequest,
@@ -116,10 +116,12 @@ impl ChunkClient {
                     client_key_path: self.config.tls_client_key.clone(),
                 };
 
-                let tls = create_tonic_client_tls(&tls_config)
-                    .map_err(|e| CyxCloudError::Network(format!("Failed to load TLS config: {}", e)))?;
-                endpoint = endpoint.tls_config(tls)
-                    .map_err(|e| CyxCloudError::Network(format!("Failed to configure TLS: {}", e)))?;
+                let tls = create_tonic_client_tls(&tls_config).map_err(|e| {
+                    CyxCloudError::Network(format!("Failed to load TLS config: {}", e))
+                })?;
+                endpoint = endpoint.tls_config(tls).map_err(|e| {
+                    CyxCloudError::Network(format!("Failed to configure TLS: {}", e))
+                })?;
 
                 debug!(
                     addr = %addr,
@@ -214,9 +216,10 @@ impl ChunkClient {
                     metadata: None,
                 });
 
-                let response = client.store_chunk(request).await.map_err(|e| {
-                    CyxCloudError::Network(format!("StoreChunk RPC failed: {}", e))
-                })?;
+                let response = client
+                    .store_chunk(request)
+                    .await
+                    .map_err(|e| CyxCloudError::Network(format!("StoreChunk RPC failed: {}", e)))?;
 
                 let inner = response.into_inner();
                 if inner.success {
@@ -244,9 +247,10 @@ impl ChunkClient {
                     chunk_id: chunk_id.as_bytes().to_vec(),
                 });
 
-                let response = client.get_chunk(request).await.map_err(|e| {
-                    CyxCloudError::Network(format!("GetChunk RPC failed: {}", e))
-                })?;
+                let response = client
+                    .get_chunk(request)
+                    .await
+                    .map_err(|e| CyxCloudError::Network(format!("GetChunk RPC failed: {}", e)))?;
 
                 let inner = response.into_inner();
                 if inner.found {
@@ -320,15 +324,19 @@ impl ChunkClient {
                     chunk_ids: chunk_ids.iter().map(|id| id.as_bytes().to_vec()).collect(),
                 });
 
-                let mut stream = client.stream_chunks(request).await.map_err(|e| {
-                    CyxCloudError::Network(format!("StreamChunks RPC failed: {}", e))
-                })?.into_inner();
+                let mut stream = client
+                    .stream_chunks(request)
+                    .await
+                    .map_err(|e| CyxCloudError::Network(format!("StreamChunks RPC failed: {}", e)))?
+                    .into_inner();
 
                 let mut results = Vec::new();
 
-                while let Some(chunk_data) = stream.message().await.map_err(|e| {
-                    CyxCloudError::Network(format!("Stream error: {}", e))
-                })? {
+                while let Some(chunk_data) = stream
+                    .message()
+                    .await
+                    .map_err(|e| CyxCloudError::Network(format!("Stream error: {}", e)))?
+                {
                     if chunk_data.chunk_id.len() == 32 {
                         let mut arr = [0u8; 32];
                         arr.copy_from_slice(&chunk_data.chunk_id);
@@ -391,7 +399,12 @@ pub async fn store_to_multiple_nodes(
             let client = client;
             let addr = addr.clone();
             let data = data.clone();
-            async move { (addr.clone(), client.store_chunk(&addr, chunk_id, data).await) }
+            async move {
+                (
+                    addr.clone(),
+                    client.store_chunk(&addr, chunk_id, data).await,
+                )
+            }
         })
         .collect();
 
@@ -410,7 +423,10 @@ pub async fn store_to_multiple_nodes(
     if successful.is_empty() && !errors.is_empty() {
         return Err(CyxCloudError::Network(format!(
             "Failed to store chunk to any node: {:?}",
-            errors.iter().map(|(a, e)| format!("{}: {}", a, e)).collect::<Vec<_>>()
+            errors
+                .iter()
+                .map(|(a, e)| format!("{}: {}", a, e))
+                .collect::<Vec<_>>()
         )));
     }
 

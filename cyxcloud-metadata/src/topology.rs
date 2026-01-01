@@ -88,7 +88,12 @@ impl PlacementNode {
 
     /// Calculate distance to another node (haversine formula)
     pub fn distance_km(&self, other: &PlacementNode) -> Option<f64> {
-        match (self.latitude, self.longitude, other.latitude, other.longitude) {
+        match (
+            self.latitude,
+            self.longitude,
+            other.latitude,
+            other.longitude,
+        ) {
             (Some(lat1), Some(lon1), Some(lat2), Some(lon2)) => {
                 let r = 6371.0; // Earth's radius in km
                 let lat1_rad = lat1.to_radians();
@@ -241,7 +246,10 @@ impl PlacementEngine {
 
             // Check rack constraint
             if let (Some(dc), Some(rack)) = (&node.datacenter, node.rack) {
-                let rack_count = selected_racks.get(&(dc.clone(), rack)).copied().unwrap_or(0);
+                let rack_count = selected_racks
+                    .get(&(dc.clone(), rack))
+                    .copied()
+                    .unwrap_or(0);
                 if rack_count >= self.config.max_shards_per_rack {
                     continue;
                 }
@@ -339,10 +347,7 @@ impl PlacementEngine {
 
         // Average proximity to origin
         if let Some(origin) = origin {
-            let distances: Vec<f64> = nodes
-                .iter()
-                .filter_map(|n| n.distance_km(origin))
-                .collect();
+            let distances: Vec<f64> = nodes.iter().filter_map(|n| n.distance_km(origin)).collect();
             if !distances.is_empty() {
                 let avg_distance = distances.iter().sum::<f64>() / distances.len() as f64;
                 score += (1.0 - (avg_distance / 20000.0).min(1.0)) * 30.0;
@@ -388,7 +393,11 @@ impl PlacementEngine {
         }
 
         // Sort by priority descending
-        suggestions.sort_by(|a, b| b.priority.partial_cmp(&a.priority).unwrap_or(std::cmp::Ordering::Equal));
+        suggestions.sort_by(|a, b| {
+            b.priority
+                .partial_cmp(&a.priority)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         suggestions
     }
@@ -440,14 +449,16 @@ impl RegionGrouper {
 
         let mut with_distance: Vec<_> = nodes
             .iter()
-            .filter_map(|n| {
-                n.distance_km(&reference).map(|d| (d, n.clone()))
-            })
+            .filter_map(|n| n.distance_km(&reference).map(|d| (d, n.clone())))
             .collect();
 
         with_distance.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
-        with_distance.into_iter().take(count).map(|(_, n)| n).collect()
+        with_distance
+            .into_iter()
+            .take(count)
+            .map(|(_, n)| n)
+            .collect()
     }
 }
 

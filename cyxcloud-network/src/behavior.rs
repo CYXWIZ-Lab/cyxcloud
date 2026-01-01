@@ -6,9 +6,7 @@
 //! - Ping for liveness checking
 
 use libp2p::{
-    identify, kad,
-    kad::store::MemoryStore,
-    ping, swarm::NetworkBehaviour, Multiaddr, PeerId,
+    identify, kad, kad::store::MemoryStore, ping, swarm::NetworkBehaviour, Multiaddr, PeerId,
 };
 use std::time::Duration;
 use tracing::{debug, info};
@@ -43,18 +41,11 @@ pub enum CyxCloudEvent {
         addresses: Vec<Multiaddr>,
     },
     /// A peer has expired (not seen for a while)
-    PeerExpired {
-        peer_id: PeerId,
-    },
+    PeerExpired { peer_id: PeerId },
     /// Ping result received
-    PingResult {
-        peer_id: PeerId,
-        rtt: Duration,
-    },
+    PingResult { peer_id: PeerId, rtt: Duration },
     /// Ping failed
-    PingFailed {
-        peer_id: PeerId,
-    },
+    PingFailed { peer_id: PeerId },
     /// Identify info received
     IdentifyReceived {
         peer_id: PeerId,
@@ -126,7 +117,9 @@ impl From<ping::Event> for CyxCloudEvent {
             }
             Err(e) => {
                 debug!(peer = %event.peer, error = %e, "Ping failed");
-                CyxCloudEvent::PingFailed { peer_id: event.peer }
+                CyxCloudEvent::PingFailed {
+                    peer_id: event.peer,
+                }
             }
         }
     }
@@ -183,13 +176,19 @@ impl CyxCloudBehaviour {
         let mut kad_config = kad::Config::default();
         kad_config.set_query_timeout(config.kademlia_query_timeout);
         kad_config.set_replication_interval(Some(config.kademlia_replication_interval));
-        kad_config.set_protocol_names(vec![libp2p::StreamProtocol::try_from_owned(KAD_PROTOCOL.to_string()).unwrap()]);
+        kad_config.set_protocol_names(vec![libp2p::StreamProtocol::try_from_owned(
+            KAD_PROTOCOL.to_string(),
+        )
+        .unwrap()]);
 
         let kademlia = kad::Behaviour::with_config(config.local_peer_id, store, kad_config);
 
         // Create Identify behaviour
-        let identify_config = identify::Config::new(IDENTIFY_PROTOCOL.to_string(), config.local_public_key.clone())
-            .with_agent_version(AGENT_VERSION.to_string());
+        let identify_config = identify::Config::new(
+            IDENTIFY_PROTOCOL.to_string(),
+            config.local_public_key.clone(),
+        )
+        .with_agent_version(AGENT_VERSION.to_string());
         let identify = identify::Behaviour::new(identify_config);
 
         // Create Ping behaviour
@@ -224,7 +223,11 @@ impl CyxCloudBehaviour {
     }
 
     /// Put a record into the DHT
-    pub fn put_record(&mut self, key: Vec<u8>, value: Vec<u8>) -> Result<kad::QueryId, kad::store::Error> {
+    pub fn put_record(
+        &mut self,
+        key: Vec<u8>,
+        value: Vec<u8>,
+    ) -> Result<kad::QueryId, kad::store::Error> {
         let record = kad::Record {
             key: kad::RecordKey::new(&key),
             value,

@@ -50,11 +50,11 @@ pub struct QuorumConfig {
 impl Default for QuorumConfig {
     fn default() -> Self {
         Self {
-            read_quorum: 2,                              // Read from 2 nodes
-            write_quorum: 2,                             // Write must succeed on 2 nodes
-            replication_factor: 3,                       // Store on 3 nodes total
-            node_timeout: Duration::from_secs(10),       // 10s per node
-            quorum_timeout: Duration::from_secs(30),     // 30s total
+            read_quorum: 2,                          // Read from 2 nodes
+            write_quorum: 2,                         // Write must succeed on 2 nodes
+            replication_factor: 3,                   // Store on 3 nodes total
+            node_timeout: Duration::from_secs(10),   // 10s per node
+            quorum_timeout: Duration::from_secs(30), // 30s total
         }
     }
 }
@@ -133,7 +133,10 @@ impl<T> QuorumResult<T> {
 
     /// Get the first successful result
     pub fn first_success(&self) -> Option<&T> {
-        self.successes.first().map(|r| r.result.as_ref().ok()).flatten()
+        self.successes
+            .first()
+            .map(|r| r.result.as_ref().ok())
+            .flatten()
     }
 }
 
@@ -168,11 +171,7 @@ impl QuorumCoordinator {
         let needed = self.config.read_quorum.min(nodes.len());
         let start = std::time::Instant::now();
 
-        debug!(
-            nodes = nodes.len(),
-            quorum = needed,
-            "Starting quorum read"
-        );
+        debug!(nodes = nodes.len(), quorum = needed, "Starting quorum read");
 
         // Launch reads to all nodes concurrently
         let futures: Vec<_> = nodes
@@ -405,11 +404,7 @@ impl ReadRepair {
             })
             .await?;
 
-        let repaired: Vec<String> = result
-            .successes
-            .into_iter()
-            .map(|r| r.node_id)
-            .collect();
+        let repaired: Vec<String> = result.successes.into_iter().map(|r| r.node_id).collect();
 
         Ok(repaired)
     }

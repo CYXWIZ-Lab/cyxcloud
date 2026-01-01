@@ -43,9 +43,9 @@ impl Default for CacheConfig {
     fn default() -> Self {
         Self {
             url: "redis://localhost:6379".to_string(),
-            default_ttl: Duration::from_secs(300),        // 5 minutes
-            chunk_location_ttl: Duration::from_secs(60),  // 1 minute
-            node_info_ttl: Duration::from_secs(120),      // 2 minutes
+            default_ttl: Duration::from_secs(300), // 5 minutes
+            chunk_location_ttl: Duration::from_secs(60), // 1 minute
+            node_info_ttl: Duration::from_secs(120), // 2 minutes
             prefix: "cyxcloud".to_string(),
         }
     }

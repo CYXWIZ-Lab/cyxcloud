@@ -69,9 +69,10 @@ async fn test_multi_node_replication() {
     let chunk_id = ChunkId::from_data(data);
 
     // Store to all nodes
-    let successful = store_to_multiple_nodes(&client, chunk_id, Bytes::from_static(data), &target_addrs)
-        .await
-        .unwrap();
+    let successful =
+        store_to_multiple_nodes(&client, chunk_id, Bytes::from_static(data), &target_addrs)
+            .await
+            .unwrap();
 
     // All 3 nodes should have received the chunk
     assert_eq!(successful.len(), 3, "Expected 3 successful stores");
@@ -127,10 +128,7 @@ async fn test_get_from_any_node() {
 #[tokio::test]
 async fn test_get_from_any_node_failure() {
     // Start 2 nodes but don't store the chunk on any
-    let nodes = vec![
-        TestNode::start(50220).await,
-        TestNode::start(50221).await,
-    ];
+    let nodes = vec![TestNode::start(50220).await, TestNode::start(50221).await];
 
     let client = ChunkClient::new();
     let target_addrs: Vec<String> = nodes.iter().map(|n| n.addr.clone()).collect();
@@ -150,10 +148,7 @@ async fn test_get_from_any_node_failure() {
 #[tokio::test]
 async fn test_partial_replication_failure() {
     // Start only 2 nodes but try to replicate to 3 (one address will fail)
-    let nodes = vec![
-        TestNode::start(50230).await,
-        TestNode::start(50231).await,
-    ];
+    let nodes = vec![TestNode::start(50230).await, TestNode::start(50231).await];
 
     let client = ChunkClient::new();
 
@@ -168,9 +163,10 @@ async fn test_partial_replication_failure() {
     let chunk_id = ChunkId::from_data(data);
 
     // Store should succeed for 2 nodes, fail for 1
-    let successful = store_to_multiple_nodes(&client, chunk_id, Bytes::from_static(data), &target_addrs)
-        .await
-        .unwrap();
+    let successful =
+        store_to_multiple_nodes(&client, chunk_id, Bytes::from_static(data), &target_addrs)
+            .await
+            .unwrap();
 
     // Only 2 nodes should have received the chunk
     assert_eq!(successful.len(), 2, "Expected 2 successful stores");
@@ -256,9 +252,7 @@ async fn test_concurrent_operations() {
         let handle = tokio::spawn(async move {
             let data = format!("concurrent data {}", i);
             let chunk_id = ChunkId::from_data(data.as_bytes());
-            client
-                .store_chunk(&addr, chunk_id, Bytes::from(data))
-                .await
+            client.store_chunk(&addr, chunk_id, Bytes::from(data)).await
         });
         handles.push(handle);
     }

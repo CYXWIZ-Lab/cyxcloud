@@ -189,12 +189,19 @@ impl RebalancerService {
         info!("Starting scan cycle");
 
         match &self.client_mode {
-            ClientMode::Production { db, metadata_client, network_client } => {
-                self.run_production_cycle(db.clone(), metadata_client.clone(), network_client.clone()).await
+            ClientMode::Production {
+                db,
+                metadata_client,
+                network_client,
+            } => {
+                self.run_production_cycle(
+                    db.clone(),
+                    metadata_client.clone(),
+                    network_client.clone(),
+                )
+                .await
             }
-            ClientMode::Mock => {
-                self.run_mock_cycle().await
-            }
+            ClientMode::Mock => self.run_mock_cycle().await,
         }
     }
 
@@ -389,9 +396,7 @@ impl MockNetworkClient {
 
 #[async_trait::async_trait]
 impl detector::NetworkClient for MockNetworkClient {
-    async fn get_all_nodes(
-        &self,
-    ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn get_all_nodes(&self) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
         Ok(vec![
             "node1".to_string(),
             "node2".to_string(),

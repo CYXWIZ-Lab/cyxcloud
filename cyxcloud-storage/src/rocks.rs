@@ -9,9 +9,7 @@ use bytes::Bytes;
 use cyxcloud_core::chunk::ChunkId;
 use cyxcloud_core::error::{CyxCloudError, Result};
 use parking_lot::RwLock;
-use rocksdb::{
-    BlockBasedOptions, Cache, DBCompressionType, Options, WriteOptions, DB,
-};
+use rocksdb::{BlockBasedOptions, Cache, DBCompressionType, Options, WriteOptions, DB};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
@@ -129,11 +127,8 @@ impl RocksDbBackend {
     /// Compact the database (call periodically for performance)
     pub fn compact(&self) {
         info!("Starting database compaction");
-        self.db.compact_range_cf(
-            &self.cf_chunks(),
-            None::<&[u8]>,
-            None::<&[u8]>,
-        );
+        self.db
+            .compact_range_cf(&self.cf_chunks(), None::<&[u8]>, None::<&[u8]>);
         info!("Database compaction complete");
     }
 
@@ -174,7 +169,8 @@ impl StorageBackendSync for RocksDbBackend {
 
         // Track latency and count
         let elapsed_us = start.elapsed().as_micros() as u64;
-        self.write_latency_total_us.fetch_add(elapsed_us, Ordering::Relaxed);
+        self.write_latency_total_us
+            .fetch_add(elapsed_us, Ordering::Relaxed);
         self.writes.fetch_add(1, Ordering::Relaxed);
         debug!(chunk_id = %id, size = data.len(), latency_us = elapsed_us, "Stored chunk");
 
@@ -192,7 +188,8 @@ impl StorageBackendSync for RocksDbBackend {
 
         // Track latency and count
         let elapsed_us = start.elapsed().as_micros() as u64;
-        self.read_latency_total_us.fetch_add(elapsed_us, Ordering::Relaxed);
+        self.read_latency_total_us
+            .fetch_add(elapsed_us, Ordering::Relaxed);
         self.reads.fetch_add(1, Ordering::Relaxed);
 
         Ok(result.map(Bytes::from))
@@ -239,10 +236,9 @@ impl StorageBackendSync for RocksDbBackend {
         let mut chunk_count = 0u64;
         let mut bytes_used = 0u64;
 
-        let iter = self.db.iterator_cf(
-            &self.cf_chunks(),
-            rocksdb::IteratorMode::Start,
-        );
+        let iter = self
+            .db
+            .iterator_cf(&self.cf_chunks(), rocksdb::IteratorMode::Start);
 
         for item in iter {
             if let Ok((_, value)) = item {
@@ -289,10 +285,9 @@ impl StorageBackendSync for RocksDbBackend {
     fn list_chunks(&self) -> Result<Vec<ChunkId>> {
         let mut chunks = Vec::new();
 
-        let iter = self.db.iterator_cf(
-            &self.cf_chunks(),
-            rocksdb::IteratorMode::Start,
-        );
+        let iter = self
+            .db
+            .iterator_cf(&self.cf_chunks(), rocksdb::IteratorMode::Start);
 
         for item in iter {
             if let Ok((key, _)) = item {
@@ -397,9 +392,7 @@ mod tests {
     fn test_list_chunks() {
         let (backend, _dir) = create_test_backend();
 
-        let ids: Vec<ChunkId> = (0..10)
-            .map(|i| ChunkId::from_data(&[i]))
-            .collect();
+        let ids: Vec<ChunkId> = (0..10).map(|i| ChunkId::from_data(&[i])).collect();
 
         for id in &ids {
             backend.put(*id, Bytes::from_static(b"data")).unwrap();

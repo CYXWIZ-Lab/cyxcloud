@@ -283,10 +283,15 @@ impl Detector {
 
             // Update both caches for backwards compatibility
             self.node_availability.insert(node_id.clone(), availability);
-            self.node_health.insert(node_id.clone(), availability != NodeAvailability::Unavailable);
+            self.node_health.insert(
+                node_id.clone(),
+                availability != NodeAvailability::Unavailable,
+            );
 
             // For reading chunks, both online and recovering nodes are acceptable
-            if availability == NodeAvailability::Online || availability == NodeAvailability::Recovering {
+            if availability == NodeAvailability::Online
+                || availability == NodeAvailability::Recovering
+            {
                 healthy.push(node_id);
             }
         }
@@ -374,7 +379,10 @@ pub trait NetworkClient: Send + Sync {
     ) -> std::result::Result<Vec<(String, String)>, Box<dyn std::error::Error + Send + Sync>> {
         // Default implementation: all nodes are online
         let nodes = self.get_all_nodes().await?;
-        Ok(nodes.into_iter().map(|n| (n, "online".to_string())).collect())
+        Ok(nodes
+            .into_iter()
+            .map(|n| (n, "online".to_string()))
+            .collect())
     }
 
     async fn check_node_health(

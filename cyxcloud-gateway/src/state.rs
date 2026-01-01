@@ -7,25 +7,23 @@
 
 use bytes::Bytes;
 use cyxcloud_core::{
-    split_into_chunks, reassemble_chunks, DEFAULT_CHUNK_SIZE,
-    ErasureEncoder, ShardData, TOTAL_SHARDS, DATA_SHARDS, PARITY_SHARDS,
-    crypto::ContentHash,
+    crypto::ContentHash, reassemble_chunks, split_into_chunks, ErasureEncoder, ShardData,
+    DATA_SHARDS, DEFAULT_CHUNK_SIZE, PARITY_SHARDS, TOTAL_SHARDS,
 };
 use cyxcloud_metadata::{
-    MetadataConfig, MetadataService, MetadataError,
-    PlacementConfig, PlacementEngine, PlacementNode,
-    CreateChunk,
+    CreateChunk, MetadataConfig, MetadataError, MetadataService, PlacementConfig, PlacementEngine,
+    PlacementNode,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn, error};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::auth::{AuthConfig, AuthService};
 #[cfg(feature = "blockchain")]
 use crate::blockchain::{BlockchainConfig, CyxCloudBlockchainClient};
-use crate::node_client::{NodeClient, NodeClientConfig, ChunkMeta};
+use crate::node_client::{ChunkMeta, NodeClient, NodeClientConfig};
 use crate::s3_api::{ObjectInfo, ObjectMetadata, S3Error, S3Result};
 use crate::websocket::EventHub;
 
@@ -249,7 +247,9 @@ impl AppState {
 
         // Build blockchain config
         let bc_config = BlockchainConfig {
-            rpc_url: config.solana_rpc_url.clone()
+            rpc_url: config
+                .solana_rpc_url
+                .clone()
                 .unwrap_or_else(|| "https://api.devnet.solana.com".to_string()),
             keypair_path: config.keypair_path.clone(),
             ..Default::default()
@@ -378,16 +378,25 @@ impl AppState {
 
         // Calculate new storage used (handle negative delta for deletions)
         let new_storage_used = if storage_delta >= 0 {
-            subscription.storage_used_bytes.saturating_add(storage_delta as u64)
+            subscription
+                .storage_used_bytes
+                .saturating_add(storage_delta as u64)
         } else {
-            subscription.storage_used_bytes.saturating_sub((-storage_delta) as u64)
+            subscription
+                .storage_used_bytes
+                .saturating_sub((-storage_delta) as u64)
         };
 
         // Calculate new bandwidth used (always additive)
-        let new_bandwidth_used = subscription.bandwidth_used_bytes.saturating_add(bandwidth_used);
+        let new_bandwidth_used = subscription
+            .bandwidth_used_bytes
+            .saturating_add(bandwidth_used);
 
         // Update on-chain
-        match blockchain.update_usage(&user_pubkey, new_storage_used, new_bandwidth_used).await {
+        match blockchain
+            .update_usage(&user_pubkey, new_storage_used, new_bandwidth_used)
+            .await
+        {
             Ok(sig) => {
                 info!(
                     wallet = wallet_address,
@@ -541,7 +550,9 @@ impl AppState {
             info!(bucket = name, "Bucket created (database)");
             Ok(())
         } else {
-            Err(S3Error::Internal("No storage backend available".to_string()))
+            Err(S3Error::Internal(
+                "No storage backend available".to_string(),
+            ))
         }
     }
 
@@ -585,7 +596,9 @@ impl AppState {
             return Ok(());
         }
 
-        Err(S3Error::Internal("No storage backend available".to_string()))
+        Err(S3Error::Internal(
+            "No storage backend available".to_string(),
+        ))
     }
 
     /// Check if bucket is empty
@@ -675,18 +688,17 @@ impl AppState {
             let placement_engine = PlacementEngine::new(placement_config);
 
             // Convert nodes to PlacementNodes for the engine
-            let placement_nodes: Vec<PlacementNode> = nodes
-                .iter()
-                .map(PlacementNode::from_node)
-                .collect();
+            let placement_nodes: Vec<PlacementNode> =
+                nodes.iter().map(PlacementNode::from_node).collect();
 
             // Create file record
             let file_id = Uuid::new_v4();
             let content_hash = cyxcloud_core::ContentHash::compute(&data);
 
             // Create erasure encoder (10 data + 4 parity = 14 shards)
-            let erasure_encoder = ErasureEncoder::new()
-                .map_err(|e| S3Error::Internal(format!("Failed to create erasure encoder: {}", e)))?;
+            let erasure_encoder = ErasureEncoder::new().map_err(|e| {
+                S3Error::Internal(format!("Failed to create erasure encoder: {}", e))
+            })?;
 
             // Split data into chunks
             let chunks = split_into_chunks(&data, DEFAULT_CHUNK_SIZE, Some(file_id))
@@ -702,7 +714,10 @@ impl AppState {
                 chunks = chunk_count,
                 total_shards = total_shards,
                 "Storing object with {} chunks ({} total shards using {}/{} erasure coding)",
-                chunk_count, total_shards, DATA_SHARDS, PARITY_SHARDS
+                chunk_count,
+                total_shards,
+                DATA_SHARDS,
+                PARITY_SHARDS
             );
 
             // Create file record FIRST so chunks can reference it (foreign key)
@@ -742,7 +757,8 @@ impl AppState {
                     erasure_encoder.encode_parallel(&chunk.data)
                 } else {
                     erasure_encoder.encode(&chunk.data)
-                }.map_err(|e| S3Error::Internal(format!("Erasure encoding failed: {}", e)))?;
+                }
+                .map_err(|e| S3Error::Internal(format!("Erasure encoding failed: {}", e)))?;
 
                 debug!(
                     chunk_index = chunk.metadata.index,
@@ -756,9 +772,9 @@ impl AppState {
                 // Each shard needs 1 replica (erasure coding provides redundancy)
                 let placement_decisions = placement_engine.select_nodes(
                     &placement_nodes,
-                    shards.len(),  // Number of shards to place
-                    1,             // 1 replica per shard (erasure coding handles redundancy)
-                    None,          // No origin preference
+                    shards.len(), // Number of shards to place
+                    1,            // 1 replica per shard (erasure coding handles redundancy)
+                    None,         // No origin preference
                 );
 
                 // Distribute shards to selected nodes
@@ -825,10 +841,11 @@ impl AppState {
                             }
 
                             // Record shard location in metadata
-                            if let Some(node) = nodes.iter().find(|n| n.grpc_address == target_node.grpc_address) {
-                                if let Err(e) = meta
-                                    .record_chunk_location(&shard_id, node.id)
-                                    .await
+                            if let Some(node) = nodes
+                                .iter()
+                                .find(|n| n.grpc_address == target_node.grpc_address)
+                            {
+                                if let Err(e) = meta.record_chunk_location(&shard_id, node.id).await
                                 {
                                     warn!(error = %e, "Failed to record shard location");
                                 }
@@ -871,8 +888,12 @@ impl AppState {
                                     };
                                     let _ = meta.register_chunk(create_chunk).await;
 
-                                    if let Some(node) = nodes.iter().find(|n| n.grpc_address == backup_node.grpc_address) {
-                                        let _ = meta.record_chunk_location(&shard_id, node.id).await;
+                                    if let Some(node) = nodes
+                                        .iter()
+                                        .find(|n| n.grpc_address == backup_node.grpc_address)
+                                    {
+                                        let _ =
+                                            meta.record_chunk_location(&shard_id, node.id).await;
                                     }
                                     shards_stored += 1;
                                     stored = true;
@@ -917,12 +938,15 @@ impl AppState {
             );
 
             // Publish event
-            self.publish_file_created(bucket, key, data.len() as u64).await;
+            self.publish_file_created(bucket, key, data.len() as u64)
+                .await;
 
             return Ok(etag);
         }
 
-        Err(S3Error::Internal("No storage backend available".to_string()))
+        Err(S3Error::Internal(
+            "No storage backend available".to_string(),
+        ))
     }
 
     /// Get an object
@@ -990,7 +1014,11 @@ impl AppState {
                 }
 
                 // Retrieve chunk from any available node
-                match self.node_client.get_chunk_from_any(&addresses, chunk_id).await {
+                match self
+                    .node_client
+                    .get_chunk_from_any(&addresses, chunk_id)
+                    .await
+                {
                     Ok(data) => {
                         debug!(
                             chunk_id = %hex::encode(chunk_id),
@@ -1001,7 +1029,10 @@ impl AppState {
                     }
                     Err(e) => {
                         error!(error = %e, chunk_id = %hex::encode(chunk_id), "Failed to retrieve chunk");
-                        return Err(S3Error::Internal(format!("Failed to retrieve chunk: {}", e)));
+                        return Err(S3Error::Internal(format!(
+                            "Failed to retrieve chunk: {}",
+                            e
+                        )));
                     }
                 }
             }
@@ -1103,7 +1134,9 @@ impl AppState {
             return Ok(());
         }
 
-        Err(S3Error::Internal("No storage backend available".to_string()))
+        Err(S3Error::Internal(
+            "No storage backend available".to_string(),
+        ))
     }
 
     /// Get object metadata
@@ -1145,7 +1178,9 @@ impl AppState {
                 return Ok(Some(ObjectMetadata {
                     key: key.to_string(),
                     size: file.size_bytes as u64,
-                    content_type: file.content_type.unwrap_or_else(|| "application/octet-stream".to_string()),
+                    content_type: file
+                        .content_type
+                        .unwrap_or_else(|| "application/octet-stream".to_string()),
                     etag: hex::encode(&file.content_hash),
                     last_modified: file.updated_at.to_rfc3339(),
                 }));
@@ -1227,8 +1262,10 @@ impl AppState {
     pub async fn get_dataset(
         &self,
         dataset_id: &str,
-    ) -> Result<Option<crate::grpc_api::data_service::DatasetInfo>, Box<dyn std::error::Error + Send + Sync>>
-    {
+    ) -> Result<
+        Option<crate::grpc_api::data_service::DatasetInfo>,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
         if let Some(ref meta) = self.metadata {
             // Try to parse as UUID
             if let Ok(uuid) = Uuid::parse_str(dataset_id) {
@@ -1291,9 +1328,17 @@ impl AppState {
             debug!(chunk_id = chunk_id, nodes = ?locations, "Fetching chunk from storage nodes");
 
             // Retrieve chunk from any available node
-            match self.node_client.get_chunk_from_any(&locations, &chunk_bytes).await {
+            match self
+                .node_client
+                .get_chunk_from_any(&locations, &chunk_bytes)
+                .await
+            {
                 Ok(data) => {
-                    debug!(chunk_id = chunk_id, size = data.len(), "Chunk retrieved successfully");
+                    debug!(
+                        chunk_id = chunk_id,
+                        size = data.len(),
+                        "Chunk retrieved successfully"
+                    );
                     return Ok(data);
                 }
                 Err(e) => {
@@ -1315,7 +1360,6 @@ impl AppState {
         // TODO: Implement caching/prefetching
         Ok(())
     }
-
 }
 
 impl Default for AppState {

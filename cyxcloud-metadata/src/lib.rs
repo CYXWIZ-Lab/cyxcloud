@@ -248,11 +248,7 @@ impl MetadataService {
     }
 
     /// Get or create node by peer ID
-    pub async fn get_or_register_node(
-        &self,
-        peer_id: &str,
-        grpc_address: &str,
-    ) -> Result<Node> {
+    pub async fn get_or_register_node(&self, peer_id: &str, grpc_address: &str) -> Result<Node> {
         if let Some(node) = self.db.get_node_by_peer_id(peer_id).await? {
             return Ok(node);
         }
@@ -291,7 +287,10 @@ impl MetadataService {
             .try_set(
                 "nodes:online",
                 &nodes,
-                self.cache.is_available().then(|| std::time::Duration::from_secs(60)).unwrap_or_default(),
+                self.cache
+                    .is_available()
+                    .then(|| std::time::Duration::from_secs(60))
+                    .unwrap_or_default(),
             )
             .await;
 
@@ -327,11 +326,12 @@ impl MetadataService {
         replicas_per_shard: usize,
     ) -> Result<Vec<Vec<String>>> {
         let nodes = self.get_online_nodes().await?;
-        let placement_nodes: Vec<PlacementNode> = nodes.iter().map(PlacementNode::from_node).collect();
+        let placement_nodes: Vec<PlacementNode> =
+            nodes.iter().map(PlacementNode::from_node).collect();
 
-        let decisions = self
-            .placement
-            .select_nodes(&placement_nodes, num_shards, replicas_per_shard, None);
+        let decisions =
+            self.placement
+                .select_nodes(&placement_nodes, num_shards, replicas_per_shard, None);
 
         Ok(decisions
             .into_iter()
@@ -409,11 +409,7 @@ impl MetadataService {
     }
 
     /// Record chunk location
-    pub async fn record_chunk_location(
-        &self,
-        chunk_id: &[u8],
-        node_id: Uuid,
-    ) -> Result<()> {
+    pub async fn record_chunk_location(&self, chunk_id: &[u8], node_id: Uuid) -> Result<()> {
         self.db.add_chunk_location(chunk_id, node_id).await?;
 
         // Invalidate cache
@@ -448,7 +444,10 @@ impl MetadataService {
     }
 
     /// Get under-replicated chunks
-    pub async fn get_under_replicated_chunks(&self, limit: i64) -> Result<Vec<ChunkReplicationStatus>> {
+    pub async fn get_under_replicated_chunks(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<ChunkReplicationStatus>> {
         let chunks = self.db.get_under_replicated_chunks(limit).await?;
         Ok(chunks)
     }

@@ -35,10 +35,7 @@ impl SubscriptionOps {
 
     /// Get subscription PDA for a user
     pub fn get_subscription_pda(&self, user: &Pubkey) -> (Pubkey, u8) {
-        Pubkey::find_program_address(
-            &[b"subscription", user.as_ref()],
-            &self.program_id,
-        )
+        Pubkey::find_program_address(&[b"subscription", user.as_ref()], &self.program_id)
     }
 
     /// Get subscription info for a user

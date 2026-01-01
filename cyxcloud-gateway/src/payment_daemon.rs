@@ -120,7 +120,8 @@ impl PaymentDaemon {
             info!(
                 interval_secs = accumulate_interval.as_secs(),
                 epoch_duration_days = EPOCH_DURATION_SECONDS / 86400,
-                extended_downtime_threshold_hours = daemon.config.extended_downtime_threshold.as_secs() / 3600,
+                extended_downtime_threshold_hours =
+                    daemon.config.extended_downtime_threshold.as_secs() / 3600,
                 blockchain_enabled = daemon.config.enable_blockchain,
                 "Payment daemon started"
             );
@@ -219,16 +220,19 @@ impl PaymentDaemon {
                 let metrics = self.metrics.read().await;
                 metrics.epoch_start.unwrap_or_else(Utc::now)
             };
-            db.create_or_get_epoch_uptime(node.id, current_epoch, epoch_start).await?;
+            db.create_or_get_epoch_uptime(node.id, current_epoch, epoch_start)
+                .await?;
 
             // Update uptime based on status
             match node.status.as_str() {
                 "online" | "recovering" => {
-                    db.update_uptime_online(node.id, current_epoch, seconds).await?;
+                    db.update_uptime_online(node.id, current_epoch, seconds)
+                        .await?;
                     online_count += 1;
                 }
                 _ => {
-                    db.update_uptime_offline(node.id, current_epoch, seconds).await?;
+                    db.update_uptime_offline(node.id, current_epoch, seconds)
+                        .await?;
                     offline_count += 1;
                 }
             }
@@ -293,10 +297,12 @@ impl PaymentDaemon {
         db.end_epoch_uptime(current_epoch).await?;
 
         // Step 2: Check for slashing conditions
-        self.check_and_slash_nodes(metadata, blockchain, current_epoch).await?;
+        self.check_and_slash_nodes(metadata, blockchain, current_epoch)
+            .await?;
 
         // Step 3: Calculate weights and distribute payments
-        self.finalize_and_pay_epoch(metadata, blockchain, current_epoch).await?;
+        self.finalize_and_pay_epoch(metadata, blockchain, current_epoch)
+            .await?;
 
         // Step 4: Start new epoch
         let new_epoch = current_epoch + 1;
@@ -511,7 +517,10 @@ impl PaymentDaemon {
         let uptimes = db.get_epoch_uptime(epoch).await?;
 
         if uptimes.is_empty() {
-            warn!(epoch = epoch, "No uptime records for epoch, skipping payment");
+            warn!(
+                epoch = epoch,
+                "No uptime records for epoch, skipping payment"
+            );
             return Ok(());
         }
 
@@ -594,12 +603,26 @@ impl PaymentDaemon {
                                     None
                                 }
                             }
-                        } else { None }
-                    } else { None }
-                } else { None }
-            } else { None };
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
 
-            db.mark_payment_allocated(weight.node_id, epoch, reward as i64, tx_signature.as_deref()).await?;
+            db.mark_payment_allocated(
+                weight.node_id,
+                epoch,
+                reward as i64,
+                tx_signature.as_deref(),
+            )
+            .await?;
             nodes_paid += 1;
             total_paid += reward;
 
@@ -615,16 +638,26 @@ impl PaymentDaemon {
         let finalize_tx = if self.config.enable_blockchain {
             if let Some(blockchain) = blockchain {
                 blockchain.finalize_epoch(epoch as u64).await.ok()
-            } else { None }
-        } else { None };
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
         let platform_share = (total_pool_amount as f64 * 0.10) as i64;
         let community_share = (total_pool_amount as f64 * 0.05) as i64;
 
         db.finalize_payment_epoch(
-            epoch, total_pool_amount as i64, nodes_share as i64,
-            platform_share, community_share, nodes_paid, finalize_tx.as_deref(),
-        ).await?;
+            epoch,
+            total_pool_amount as i64,
+            nodes_share as i64,
+            platform_share,
+            community_share,
+            nodes_paid,
+            finalize_tx.as_deref(),
+        )
+        .await?;
 
         {
             let mut metrics = self.metrics.write().await;
@@ -632,7 +665,12 @@ impl PaymentDaemon {
             metrics.total_paid_amount += total_paid;
         }
 
-        info!(epoch = epoch, nodes_paid = nodes_paid, total_paid = total_paid, "Epoch payment complete");
+        info!(
+            epoch = epoch,
+            nodes_paid = nodes_paid,
+            total_paid = total_paid,
+            "Epoch payment complete"
+        );
         Ok(())
     }
 
@@ -648,7 +686,10 @@ impl PaymentDaemon {
 
         let uptimes = db.get_epoch_uptime(epoch).await?;
         if uptimes.is_empty() {
-            warn!(epoch = epoch, "No uptime records for epoch, skipping payment");
+            warn!(
+                epoch = epoch,
+                "No uptime records for epoch, skipping payment"
+            );
             return Ok(());
         }
 
@@ -657,8 +698,13 @@ impl PaymentDaemon {
             if let Some(node) = db.get_node(uptime.node_id).await? {
                 let reputation = 5000u16;
                 let weight = NodeWeight::calculate(
-                    uptime.node_id, node.peer_id.clone(), node.wallet_address.clone(),
-                    node.storage_total, uptime.seconds_online, EPOCH_DURATION_SECONDS, reputation,
+                    uptime.node_id,
+                    node.peer_id.clone(),
+                    node.wallet_address.clone(),
+                    node.storage_total,
+                    uptime.seconds_online,
+                    EPOCH_DURATION_SECONDS,
+                    reputation,
                 );
                 weights.push(weight);
             }
@@ -689,9 +735,12 @@ impl PaymentDaemon {
 
         for weight in &weights {
             let reward = weight.calculate_share(nodes_share, total_weight);
-            if reward == 0 { continue; }
+            if reward == 0 {
+                continue;
+            }
 
-            db.mark_payment_allocated(weight.node_id, epoch, reward as i64, None).await?;
+            db.mark_payment_allocated(weight.node_id, epoch, reward as i64, None)
+                .await?;
             nodes_paid += 1;
             total_paid += reward;
 
@@ -707,9 +756,15 @@ impl PaymentDaemon {
         let community_share = (total_pool_amount as f64 * 0.05) as i64;
 
         db.finalize_payment_epoch(
-            epoch, total_pool_amount as i64, nodes_share as i64,
-            platform_share, community_share, nodes_paid, None,
-        ).await?;
+            epoch,
+            total_pool_amount as i64,
+            nodes_share as i64,
+            platform_share,
+            community_share,
+            nodes_paid,
+            None,
+        )
+        .await?;
 
         {
             let mut metrics = self.metrics.write().await;
@@ -717,7 +772,12 @@ impl PaymentDaemon {
             metrics.total_paid_amount += total_paid;
         }
 
-        info!(epoch = epoch, nodes_paid = nodes_paid, total_paid = total_paid, "Epoch payment complete (dry-run)");
+        info!(
+            epoch = epoch,
+            nodes_paid = nodes_paid,
+            total_paid = total_paid,
+            "Epoch payment complete (dry-run)"
+        );
         Ok(())
     }
 

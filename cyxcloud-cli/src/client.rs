@@ -114,8 +114,7 @@ impl GatewayClient {
 
     /// Create a new gateway client with optional TLS configuration
     pub fn with_tls(base_url: &str, auth_token: Option<String>, tls: Option<TlsConfig>) -> Self {
-        let mut builder = Client::builder()
-            .timeout(Duration::from_secs(300));
+        let mut builder = Client::builder().timeout(Duration::from_secs(300));
 
         if let Some(tls_config) = tls {
             // Add CA certificate
@@ -283,12 +282,7 @@ impl GatewayClient {
     }
 
     /// Download to a local file
-    pub async fn download_to_file(
-        &self,
-        bucket: &str,
-        key: &str,
-        path: &Path,
-    ) -> Result<u64> {
+    pub async fn download_to_file(&self, bucket: &str, key: &str, path: &Path) -> Result<u64> {
         let data = self.download_file(bucket, key).await?;
         let size = data.len() as u64;
 
@@ -459,9 +453,10 @@ fn parse_list_response(xml: &str) -> Result<ListResponse> {
         if let Some(end_pos) = xml[block_start..].find("</Contents>") {
             let block = &xml[block_start..block_start + end_pos + 11];
 
-            if let (Some(key), Some(size_str)) =
-                (extract_xml_value(block, "Key"), extract_xml_value(block, "Size"))
-            {
+            if let (Some(key), Some(size_str)) = (
+                extract_xml_value(block, "Key"),
+                extract_xml_value(block, "Size"),
+            ) {
                 let size = size_str.parse().unwrap_or(0);
                 let last_modified = extract_xml_value(block, "LastModified").unwrap_or_default();
                 let etag = extract_xml_value(block, "ETag")
@@ -511,7 +506,10 @@ mod tests {
     #[test]
     fn test_extract_xml_value() {
         let xml = "<Key>test/file.txt</Key>";
-        assert_eq!(extract_xml_value(xml, "Key"), Some("test/file.txt".to_string()));
+        assert_eq!(
+            extract_xml_value(xml, "Key"),
+            Some("test/file.txt".to_string())
+        );
     }
 
     #[test]

@@ -4,8 +4,7 @@
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use cyxcloud_core::crypto::{
-    encrypt, decrypt, encrypt_to_bytes, decrypt_from_bytes,
-    ContentHash, EncryptionKey,
+    decrypt, decrypt_from_bytes, encrypt, encrypt_to_bytes, ContentHash, EncryptionKey,
 };
 
 /// Generate test data of specified size
@@ -18,11 +17,11 @@ fn bench_blake3_hash(c: &mut Criterion) {
     let mut group = c.benchmark_group("blake3_hash");
 
     for size in [
-        1024,                  // 1 KB
-        64 * 1024,             // 64 KB
-        1024 * 1024,           // 1 MB
-        10 * 1024 * 1024,      // 10 MB
-        100 * 1024 * 1024,     // 100 MB
+        1024,              // 1 KB
+        64 * 1024,         // 64 KB
+        1024 * 1024,       // 1 MB
+        10 * 1024 * 1024,  // 10 MB
+        100 * 1024 * 1024, // 100 MB
     ] {
         let data = generate_data(size);
 
@@ -30,9 +29,7 @@ fn bench_blake3_hash(c: &mut Criterion) {
         group.bench_with_input(
             BenchmarkId::new("sequential", format_size(size)),
             &data,
-            |b, data| {
-                b.iter(|| ContentHash::compute(black_box(data)))
-            },
+            |b, data| b.iter(|| ContentHash::compute(black_box(data))),
         );
     }
 
@@ -44,9 +41,9 @@ fn bench_blake3_parallel(c: &mut Criterion) {
     let mut group = c.benchmark_group("blake3_parallel");
 
     for size in [
-        10 * 1024 * 1024,      // 10 MB
-        50 * 1024 * 1024,      // 50 MB
-        100 * 1024 * 1024,     // 100 MB
+        10 * 1024 * 1024,  // 10 MB
+        50 * 1024 * 1024,  // 50 MB
+        100 * 1024 * 1024, // 100 MB
     ] {
         let data = generate_data(size);
 
@@ -54,9 +51,7 @@ fn bench_blake3_parallel(c: &mut Criterion) {
         group.bench_with_input(
             BenchmarkId::new("parallel", format_size(size)),
             &data,
-            |b, data| {
-                b.iter(|| ContentHash::compute_parallel(black_box(data)))
-            },
+            |b, data| b.iter(|| ContentHash::compute_parallel(black_box(data))),
         );
     }
 
@@ -88,10 +83,10 @@ fn bench_aes_encrypt(c: &mut Criterion) {
     let mut group = c.benchmark_group("aes_gcm_encrypt");
 
     for size in [
-        1024,                  // 1 KB
-        64 * 1024,             // 64 KB
-        1024 * 1024,           // 1 MB
-        4 * 1024 * 1024,       // 4 MB (typical chunk size)
+        1024,            // 1 KB
+        64 * 1024,       // 64 KB
+        1024 * 1024,     // 1 MB
+        4 * 1024 * 1024, // 4 MB (typical chunk size)
     ] {
         let data = generate_data(size);
 
@@ -99,9 +94,7 @@ fn bench_aes_encrypt(c: &mut Criterion) {
         group.bench_with_input(
             BenchmarkId::new("encrypt", format_size(size)),
             &data,
-            |b, data| {
-                b.iter(|| encrypt(black_box(data), &key))
-            },
+            |b, data| b.iter(|| encrypt(black_box(data), &key)),
         );
     }
 
@@ -115,10 +108,10 @@ fn bench_aes_decrypt(c: &mut Criterion) {
     let mut group = c.benchmark_group("aes_gcm_decrypt");
 
     for size in [
-        1024,                  // 1 KB
-        64 * 1024,             // 64 KB
-        1024 * 1024,           // 1 MB
-        4 * 1024 * 1024,       // 4 MB
+        1024,            // 1 KB
+        64 * 1024,       // 64 KB
+        1024 * 1024,     // 1 MB
+        4 * 1024 * 1024, // 4 MB
     ] {
         let data = generate_data(size);
         let encrypted = encrypt(&data, &key).unwrap();
@@ -127,9 +120,7 @@ fn bench_aes_decrypt(c: &mut Criterion) {
         group.bench_with_input(
             BenchmarkId::new("decrypt", format_size(size)),
             &encrypted,
-            |b, encrypted| {
-                b.iter(|| decrypt(black_box(encrypted), &key))
-            },
+            |b, encrypted| b.iter(|| decrypt(black_box(encrypted), &key)),
         );
     }
 
@@ -163,9 +154,7 @@ fn bench_encrypt_roundtrip(c: &mut Criterion) {
 
 /// Benchmark key generation
 fn bench_key_generation(c: &mut Criterion) {
-    c.bench_function("key_generate", |b| {
-        b.iter(|| EncryptionKey::generate())
-    });
+    c.bench_function("key_generate", |b| b.iter(|| EncryptionKey::generate()));
 }
 
 /// Benchmark hash verification

@@ -94,7 +94,7 @@ pub struct Node {
 
     // Capacity
     pub storage_total: i64,
-    pub storage_reserved: i64,  // Gateway-reserved storage (2GB default)
+    pub storage_reserved: i64, // Gateway-reserved storage (2GB default)
     pub storage_used: i64,
     pub bandwidth_mbps: i32,
     pub max_connections: i32,
@@ -143,7 +143,7 @@ pub struct CreateNode {
     pub peer_id: String,
     pub grpc_address: String,
     pub storage_total: i64,
-    pub storage_reserved: i64,  // Gateway-reserved storage
+    pub storage_reserved: i64, // Gateway-reserved storage
     pub bandwidth_mbps: i32,
     pub datacenter: Option<String>,
     pub region: Option<String>,
@@ -365,10 +365,10 @@ impl NodeEpochUptime {
 /// Slashing reason enumeration
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SlashReason {
-    DataLoss,          // 10% slash
-    ExtendedDowntime,  // 5% slash
-    CorruptedData,     // 50% slash
-    FailedProofs,      // 15% slash
+    DataLoss,         // 10% slash
+    ExtendedDowntime, // 5% slash
+    CorruptedData,    // 50% slash
+    FailedProofs,     // 15% slash
 }
 
 impl SlashReason {
@@ -510,15 +510,15 @@ mod tests {
             Uuid::new_v4(),
             "peer_a".to_string(),
             Some("wallet_a".to_string()),
-            TB,                    // 1 TB storage
-            EPOCH_DURATION,        // 100% uptime (full week online)
+            TB,             // 1 TB storage
+            EPOCH_DURATION, // 100% uptime (full week online)
             EPOCH_DURATION,
-            10000,                 // Perfect reputation
+            10000, // Perfect reputation
         );
 
         assert_eq!(weight.uptime_factor, 1.0);
         assert_eq!(weight.reputation_factor, 1.5); // 0.5 + (10000/10000)
-        // weight = 1TB * 1.0 * 1.5 = 1.5TB
+                                                   // weight = 1TB * 1.0 * 1.5 = 1.5TB
         assert_eq!(weight.weight, (TB as f64 * 1.5) as u64);
         println!("Perfect node weight: {}", weight.weight);
     }
@@ -530,15 +530,15 @@ mod tests {
             Uuid::new_v4(),
             "peer_b".to_string(),
             Some("wallet_b".to_string()),
-            TB / 2,                // 500 GB storage
-            EPOCH_DURATION / 2,    // 50% uptime (3.5 days online)
+            TB / 2,             // 500 GB storage
+            EPOCH_DURATION / 2, // 50% uptime (3.5 days online)
             EPOCH_DURATION,
-            5000,                  // Average reputation
+            5000, // Average reputation
         );
 
         assert_eq!(weight.uptime_factor, 0.5);
         assert_eq!(weight.reputation_factor, 1.0); // 0.5 + (5000/10000)
-        // weight = 500GB * 0.5 * 1.0 = 250GB
+                                                   // weight = 500GB * 0.5 * 1.0 = 250GB
         assert_eq!(weight.weight, (TB as f64 / 2.0 * 0.5 * 1.0) as u64);
         println!("Average node weight: {}", weight.weight);
     }
@@ -557,7 +557,7 @@ mod tests {
         );
 
         assert_eq!(weight.reputation_factor, 0.5); // 0.5 + (0/10000)
-        // weight = 1TB * 1.0 * 0.5 = 0.5TB
+                                                   // weight = 1TB * 1.0 * 0.5 = 0.5TB
         assert_eq!(weight.weight, (TB as f64 * 0.5) as u64);
         println!("Poor reputation node weight: {}", weight.weight);
     }
@@ -569,20 +569,20 @@ mod tests {
             Uuid::new_v4(),
             "node_a".to_string(),
             Some("wallet_a".to_string()),
-            TB,                    // 1 TB
-            EPOCH_DURATION,        // 100% uptime
+            TB,             // 1 TB
+            EPOCH_DURATION, // 100% uptime
             EPOCH_DURATION,
-            10000,                 // Perfect reputation
+            10000, // Perfect reputation
         );
 
         let node_b = NodeWeight::calculate(
             Uuid::new_v4(),
             "node_b".to_string(),
             Some("wallet_b".to_string()),
-            TB / 2,                // 500 GB
-            EPOCH_DURATION / 2,    // 50% uptime
+            TB / 2,             // 500 GB
+            EPOCH_DURATION / 2, // 50% uptime
             EPOCH_DURATION,
-            5000,                  // Average reputation
+            5000, // Average reputation
         );
 
         let total_weight = node_a.weight + node_b.weight;
@@ -600,7 +600,7 @@ mod tests {
         // Node A should get ~85.7% (6/7) of the rewards
         // Node B should get ~14.3% (1/7) of the rewards
         assert!(reward_a > reward_b * 5); // A should get at least 5x more than B
-        // Allow for small rounding error (integer division)
+                                          // Allow for small rounding error (integer division)
         let total_distributed = reward_a + reward_b;
         assert!(total_distributed >= nodes_share - 1 && total_distributed <= nodes_share);
     }
@@ -609,24 +609,48 @@ mod tests {
     fn test_reputation_impact() {
         // Same storage and uptime, different reputation
         let low_rep = NodeWeight::calculate(
-            Uuid::new_v4(), "low".to_string(), None,
-            TB, EPOCH_DURATION, EPOCH_DURATION, 0,
+            Uuid::new_v4(),
+            "low".to_string(),
+            None,
+            TB,
+            EPOCH_DURATION,
+            EPOCH_DURATION,
+            0,
         );
 
         let mid_rep = NodeWeight::calculate(
-            Uuid::new_v4(), "mid".to_string(), None,
-            TB, EPOCH_DURATION, EPOCH_DURATION, 5000,
+            Uuid::new_v4(),
+            "mid".to_string(),
+            None,
+            TB,
+            EPOCH_DURATION,
+            EPOCH_DURATION,
+            5000,
         );
 
         let high_rep = NodeWeight::calculate(
-            Uuid::new_v4(), "high".to_string(), None,
-            TB, EPOCH_DURATION, EPOCH_DURATION, 10000,
+            Uuid::new_v4(),
+            "high".to_string(),
+            None,
+            TB,
+            EPOCH_DURATION,
+            EPOCH_DURATION,
+            10000,
         );
 
         println!("\n=== Reputation Impact Test ===");
-        println!("Low rep (0):     factor={:.2}, weight={}", low_rep.reputation_factor, low_rep.weight);
-        println!("Mid rep (5000):  factor={:.2}, weight={}", mid_rep.reputation_factor, mid_rep.weight);
-        println!("High rep (10000): factor={:.2}, weight={}", high_rep.reputation_factor, high_rep.weight);
+        println!(
+            "Low rep (0):     factor={:.2}, weight={}",
+            low_rep.reputation_factor, low_rep.weight
+        );
+        println!(
+            "Mid rep (5000):  factor={:.2}, weight={}",
+            mid_rep.reputation_factor, mid_rep.weight
+        );
+        println!(
+            "High rep (10000): factor={:.2}, weight={}",
+            high_rep.reputation_factor, high_rep.weight
+        );
 
         // Reputation factors should be 0.5, 1.0, 1.5
         assert_eq!(low_rep.reputation_factor, 0.5);
@@ -666,8 +690,14 @@ mod tests {
         assert_eq!(SlashReason::FailedProofs.slash_percent(), 15);
         assert_eq!(SlashReason::CorruptedData.slash_percent(), 50);
 
-        assert_eq!(SlashReason::from_str("extended_downtime"), Some(SlashReason::ExtendedDowntime));
-        assert_eq!(SlashReason::from_str("data_loss"), Some(SlashReason::DataLoss));
+        assert_eq!(
+            SlashReason::from_str("extended_downtime"),
+            Some(SlashReason::ExtendedDowntime)
+        );
+        assert_eq!(
+            SlashReason::from_str("data_loss"),
+            Some(SlashReason::DataLoss)
+        );
         assert_eq!(SlashReason::from_str("invalid"), None);
     }
 }

@@ -237,7 +237,8 @@ impl BlockchainHeartbeatService {
             "Starting blockchain heartbeat service"
         );
 
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(self.interval_secs));
+        let mut interval =
+            tokio::time::interval(std::time::Duration::from_secs(self.interval_secs));
 
         loop {
             interval.tick().await;

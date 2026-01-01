@@ -237,10 +237,7 @@ impl NetworkManager {
 /// Create and run a standalone network node
 ///
 /// This is a convenience function for running a complete CyxCloud node.
-pub async fn run_node(
-    config: NetworkConfig,
-    storage: Arc<RocksDbBackend>,
-) -> Result<()> {
+pub async fn run_node(config: NetworkConfig, storage: Arc<RocksDbBackend>) -> Result<()> {
     let mut manager = NetworkManager::new(config, storage);
     manager.start().await
 }

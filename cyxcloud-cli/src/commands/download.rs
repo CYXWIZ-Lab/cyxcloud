@@ -27,7 +27,13 @@ pub async fn run(client: &GatewayClient, config: DownloadConfig) -> Result<()> {
         download_single_file(client, &config.bucket, key, output_path).await?;
     } else {
         // Download all objects with prefix
-        download_prefix(client, &config.bucket, config.prefix.as_deref(), output_path).await?;
+        download_prefix(
+            client,
+            &config.bucket,
+            config.prefix.as_deref(),
+            output_path,
+        )
+        .await?;
     }
 
     Ok(())
@@ -131,7 +137,9 @@ async fn download_prefix(
     let overall_pb = multi.add(ProgressBar::new(response.objects.len() as u64));
     overall_pb.set_style(
         ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.green/white}] {pos}/{len} files")
+            .template(
+                "{spinner:.green} [{elapsed_precise}] [{bar:40.green/white}] {pos}/{len} files",
+            )
             .unwrap()
             .progress_chars("█▓░"),
     );
@@ -143,7 +151,10 @@ async fn download_prefix(
     for obj in &response.objects {
         // Calculate local file path
         let relative_path = if let Some(p) = prefix {
-            obj.key.strip_prefix(p).unwrap_or(&obj.key).trim_start_matches('/')
+            obj.key
+                .strip_prefix(p)
+                .unwrap_or(&obj.key)
+                .trim_start_matches('/')
         } else {
             &obj.key
         };
@@ -188,7 +199,10 @@ async fn download_prefix(
 
     // Print summary
     println!("\n{}", style("Download Summary:").bold());
-    println!("  {} files downloaded successfully", style(success_count).green());
+    println!(
+        "  {} files downloaded successfully",
+        style(success_count).green()
+    );
     if error_count > 0 {
         println!("  {} files failed", style(error_count).red());
     }

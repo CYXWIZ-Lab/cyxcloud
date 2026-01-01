@@ -5,7 +5,7 @@
 use crate::command_executor::{CommandBatchSummary, CommandExecutor};
 use crate::config::NodeConfig;
 use crate::metrics::{HealthState, NodeMetrics};
-use cyxcloud_core::tls::{TlsClientConfig, create_tonic_client_tls};
+use cyxcloud_core::tls::{create_tonic_client_tls, TlsClientConfig};
 use cyxcloud_protocol::node::{
     node_service_client::NodeServiceClient, HeartbeatRequest, NodeCapacity, NodeCommand, NodeInfo,
     NodeLocation, NodeMetrics as ProtoNodeMetrics, NodeStatus, RegisterNodeRequest,
@@ -123,11 +123,8 @@ impl HealthChecker {
     async fn check_dns(&self, host: &str) -> bool {
         use tokio::net::lookup_host;
 
-        match tokio::time::timeout(
-            Duration::from_secs(5),
-            lookup_host(format!("{}:443", host)),
-        )
-        .await
+        match tokio::time::timeout(Duration::from_secs(5), lookup_host(format!("{}:443", host)))
+            .await
         {
             Ok(Ok(mut addrs)) => {
                 if addrs.next().is_some() {
@@ -189,15 +186,13 @@ pub struct HeartbeatService {
 
 impl HeartbeatService {
     /// Create a new heartbeat service
-    pub fn new(
-        config: NodeConfig,
-        metrics: NodeMetrics,
-        storage: Arc<RocksDbBackend>,
-    ) -> Self {
+    pub fn new(config: NodeConfig, metrics: NodeMetrics, storage: Arc<RocksDbBackend>) -> Self {
         let node_id = config.node.id.clone();
         let grpc_address = format!(
             "{}:{}",
-            config.network.public_address
+            config
+                .network
+                .public_address
                 .clone()
                 .unwrap_or_else(|| config.network.bind_address.clone()),
             config.network.grpc_port
@@ -211,11 +206,8 @@ impl HeartbeatService {
         );
 
         // Initialize command executor
-        let command_executor = CommandExecutor::new(
-            node_id.clone(),
-            storage.clone(),
-            metrics.clone(),
-        );
+        let command_executor =
+            CommandExecutor::new(node_id.clone(), storage.clone(), metrics.clone());
 
         Self {
             node_id,
@@ -278,8 +270,9 @@ impl HeartbeatService {
             "Starting heartbeat service"
         );
 
-        let mut interval =
-            tokio::time::interval(Duration::from_secs(self.config.central.heartbeat_interval_secs));
+        let mut interval = tokio::time::interval(Duration::from_secs(
+            self.config.central.heartbeat_interval_secs,
+        ));
 
         // Initial registration
         match self.register().await {
@@ -312,7 +305,9 @@ impl HeartbeatService {
     }
 
     /// Connect to the central server
-    async fn connect(&self) -> Result<NodeServiceClient<Channel>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn connect(
+        &self,
+    ) -> Result<NodeServiceClient<Channel>, Box<dyn std::error::Error + Send + Sync>> {
         // Check if we already have a connection
         {
             let client = self.client.read().await;
@@ -322,12 +317,15 @@ impl HeartbeatService {
         }
 
         // Determine if TLS should be used (based on URL scheme or explicit config)
-        let use_tls = self.config.central.address.starts_with("https://")
-            || self.config.network.enable_tls;
+        let use_tls =
+            self.config.central.address.starts_with("https://") || self.config.network.enable_tls;
 
         // Create new connection
-        let mut endpoint = tonic::transport::Endpoint::from_shared(self.config.central.address.clone())?
-            .connect_timeout(Duration::from_secs(self.config.central.connect_timeout_secs));
+        let mut endpoint =
+            tonic::transport::Endpoint::from_shared(self.config.central.address.clone())?
+                .connect_timeout(Duration::from_secs(
+                    self.config.central.connect_timeout_secs,
+                ));
 
         // Configure TLS if enabled
         if use_tls {

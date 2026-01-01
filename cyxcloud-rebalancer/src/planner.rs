@@ -179,11 +179,7 @@ impl Planner {
 
     /// Create a repair plan from issues
     #[instrument(skip(self, issues, nodes))]
-    pub fn create_plan(
-        &mut self,
-        issues: &[ChunkIssue],
-        nodes: &[NodeInfo],
-    ) -> Result<RepairPlan> {
+    pub fn create_plan(&mut self, issues: &[ChunkIssue], nodes: &[NodeInfo]) -> Result<RepairPlan> {
         let mut plan = RepairPlan::default();
 
         // Filter to only healthy nodes
@@ -221,8 +217,10 @@ impl Planner {
             match self.plan_repair(issue, &healthy_nodes) {
                 Ok(task) => {
                     // Update pending load
-                    *self.pending_load.entry(task.source_node.clone()).or_default() +=
-                        task.chunk_size;
+                    *self
+                        .pending_load
+                        .entry(task.source_node.clone())
+                        .or_default() += task.chunk_size;
                     for target in &task.target_nodes {
                         *self.pending_load.entry(target.clone()).or_default() += task.chunk_size;
                     }
@@ -248,11 +246,7 @@ impl Planner {
     }
 
     /// Plan repair for a single chunk
-    fn plan_repair(
-        &mut self,
-        issue: &ChunkIssue,
-        nodes: &[&NodeInfo],
-    ) -> Result<RepairTask> {
+    fn plan_repair(&mut self, issue: &ChunkIssue, nodes: &[&NodeInfo]) -> Result<RepairTask> {
         match &issue.health {
             ChunkHealth::UnderReplicated { current, target } => {
                 self.plan_under_replicated(issue, nodes, *current, *target)
@@ -264,7 +258,10 @@ impl Planner {
                 }
                 self.plan_under_replicated(issue, nodes, 0, self.config.replication_factor)
             }
-            ChunkHealth::OverReplicated { current: _, target: _ } => {
+            ChunkHealth::OverReplicated {
+                current: _,
+                target: _,
+            } => {
                 // For over-replicated, we don't need repair, just cleanup
                 // This would be handled differently (delete extra copies)
                 Err(PlannerError::Internal(
@@ -314,11 +311,7 @@ impl Planner {
     }
 
     /// Select best source node for reading
-    fn select_source_node(
-        &self,
-        issue: &ChunkIssue,
-        nodes: &[&NodeInfo],
-    ) -> Result<String> {
+    fn select_source_node(&self, issue: &ChunkIssue, nodes: &[&NodeInfo]) -> Result<String> {
         let healthy_sources: Vec<_> = nodes
             .iter()
             .filter(|n| issue.current_nodes.contains(&n.id))
@@ -383,7 +376,11 @@ impl Planner {
         });
 
         // Take top N
-        let targets: Vec<String> = candidates.iter().take(count).map(|n| n.id.clone()).collect();
+        let targets: Vec<String> = candidates
+            .iter()
+            .take(count)
+            .map(|n| n.id.clone())
+            .collect();
 
         Ok(targets)
     }
@@ -402,8 +399,8 @@ impl Planner {
         }
 
         // Prefer nodes with more free space
-        let storage_score = (node.available_storage as f64 / (100u64 * 1024 * 1024 * 1024) as f64)
-            .min(1.0);
+        let storage_score =
+            (node.available_storage as f64 / (100u64 * 1024 * 1024 * 1024) as f64).min(1.0);
         score += storage_score * 0.3;
 
         // Prefer nodes with lower load

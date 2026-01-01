@@ -111,18 +111,12 @@ mod tests {
             available: 8,
             required: 10,
         };
-        assert_eq!(
-            err.to_string(),
-            "Insufficient shards: have 8, need 10"
-        );
+        assert_eq!(err.to_string(), "Insufficient shards: have 8, need 10");
     }
 
     #[test]
     fn test_error_from_io() {
-        let io_err = std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "file not found",
-        );
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
         let err: CyxCloudError = io_err.into();
         assert!(matches!(err, CyxCloudError::Io(_)));
     }

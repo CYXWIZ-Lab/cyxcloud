@@ -18,9 +18,9 @@ impl StoragePlanType {
     /// Get storage quota in bytes
     pub fn storage_quota_bytes(&self) -> u64 {
         match self {
-            StoragePlanType::Free => 5 * 1024 * 1024 * 1024,           // 5 GB
-            StoragePlanType::Starter => 100 * 1024 * 1024 * 1024,     // 100 GB
-            StoragePlanType::Pro => 1024 * 1024 * 1024 * 1024,        // 1 TB
+            StoragePlanType::Free => 5 * 1024 * 1024 * 1024, // 5 GB
+            StoragePlanType::Starter => 100 * 1024 * 1024 * 1024, // 100 GB
+            StoragePlanType::Pro => 1024 * 1024 * 1024 * 1024, // 1 TB
             StoragePlanType::Enterprise => 10 * 1024 * 1024 * 1024 * 1024, // 10 TB
         }
     }
@@ -29,9 +29,9 @@ impl StoragePlanType {
     pub fn monthly_price(&self) -> u64 {
         match self {
             StoragePlanType::Free => 0,
-            StoragePlanType::Starter => 10_000_000_000,      // 10 CYXWIZ
-            StoragePlanType::Pro => 50_000_000_000,          // 50 CYXWIZ
-            StoragePlanType::Enterprise => 200_000_000_000,  // 200 CYXWIZ
+            StoragePlanType::Starter => 10_000_000_000, // 10 CYXWIZ
+            StoragePlanType::Pro => 50_000_000_000,     // 50 CYXWIZ
+            StoragePlanType::Enterprise => 200_000_000_000, // 200 CYXWIZ
         }
     }
 }
@@ -47,8 +47,8 @@ impl PeriodType {
     /// Get period duration in seconds
     pub fn duration_seconds(&self) -> i64 {
         match self {
-            PeriodType::Monthly => 30 * 24 * 60 * 60,   // 30 days
-            PeriodType::Yearly => 365 * 24 * 60 * 60,   // 365 days
+            PeriodType::Monthly => 30 * 24 * 60 * 60, // 30 days
+            PeriodType::Yearly => 365 * 24 * 60 * 60, // 365 days
         }
     }
 
@@ -235,12 +235,18 @@ impl Default for BlockchainConfig {
                 .expect("Invalid token mint"),
 
             // CyxCloud Storage Programs (Deployed 2025-12-22)
-            subscription_program_id: Pubkey::from_str("HZhWDJVkkUuHrgqkNb9bYxiCfqtnv8cnus9UQt843Fro")
-                .expect("Invalid subscription program ID"),
-            node_registry_program_id: Pubkey::from_str("AQPP8YaiGazv9Mh4bnsVcGiMgTKbarZeCcQsh4jmpi4Z")
-                .expect("Invalid node registry program ID"),
-            payment_pool_program_id: Pubkey::from_str("4wFUJ1SVpVDEpYTobgkLSnwY2yXr4LKAMdWcG3sAe3sX")
-                .expect("Invalid payment pool program ID"),
+            subscription_program_id: Pubkey::from_str(
+                "HZhWDJVkkUuHrgqkNb9bYxiCfqtnv8cnus9UQt843Fro",
+            )
+            .expect("Invalid subscription program ID"),
+            node_registry_program_id: Pubkey::from_str(
+                "AQPP8YaiGazv9Mh4bnsVcGiMgTKbarZeCcQsh4jmpi4Z",
+            )
+            .expect("Invalid node registry program ID"),
+            payment_pool_program_id: Pubkey::from_str(
+                "4wFUJ1SVpVDEpYTobgkLSnwY2yXr4LKAMdWcG3sAe3sX",
+            )
+            .expect("Invalid payment pool program ID"),
 
             // Platform treasury token account
             platform_treasury: Pubkey::from_str("negq5ApurkfM7V6F46NboJbnjbohEtfu1PotDsvMs5e")

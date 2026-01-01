@@ -126,12 +126,7 @@ impl CyxWizClient {
             password: password.to_string(),
         };
 
-        let response = self
-            .client
-            .post(&url)
-            .json(&request)
-            .send()
-            .await?;
+        let response = self.client.post(&url).json(&request).send().await?;
 
         let status = response.status();
 
@@ -167,12 +162,7 @@ impl CyxWizClient {
             name: None,
         };
 
-        let response = self
-            .client
-            .post(&url)
-            .json(&request)
-            .send()
-            .await?;
+        let response = self.client.post(&url).json(&request).send().await?;
 
         let status = response.status();
 
@@ -198,12 +188,7 @@ impl CyxWizClient {
             refresh_token: refresh_token.to_string(),
         };
 
-        let response = self
-            .client
-            .post(&url)
-            .json(&request)
-            .send()
-            .await?;
+        let response = self.client.post(&url).json(&request).send().await?;
 
         let status = response.status();
 

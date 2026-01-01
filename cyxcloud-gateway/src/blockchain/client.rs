@@ -8,10 +8,7 @@
 use anyhow::Result;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
-    commitment_config::CommitmentConfig,
-    pubkey::Pubkey,
-    signature::Keypair,
-    signer::Signer,
+    commitment_config::CommitmentConfig, pubkey::Pubkey, signature::Keypair, signer::Signer,
 };
 use std::path::Path;
 use std::sync::Arc;
@@ -57,10 +54,8 @@ impl CyxCloudBlockchainClient {
             config.token_mint,
         );
 
-        let node_registry = NodeRegistryOps::new(
-            rpc_client.clone(),
-            config.node_registry_program_id,
-        );
+        let node_registry =
+            NodeRegistryOps::new(rpc_client.clone(), config.node_registry_program_id);
 
         let payment_pool = PaymentPoolOps::new(
             rpc_client.clone(),
@@ -250,11 +245,16 @@ impl CyxCloudBlockchainClient {
 
     /// Finalize an epoch
     pub async fn finalize_epoch(&self, epoch: u64) -> Result<String> {
-        self.payment_pool.finalize_epoch(&self.authority, epoch).await
+        self.payment_pool
+            .finalize_epoch(&self.authority, epoch)
+            .await
     }
 
     /// Get epoch rewards info
-    pub async fn get_epoch_rewards(&self, epoch: u64) -> Result<Option<super::types::EpochRewardsInfo>> {
+    pub async fn get_epoch_rewards(
+        &self,
+        epoch: u64,
+    ) -> Result<Option<super::types::EpochRewardsInfo>> {
         self.payment_pool.get_epoch_rewards(epoch).await
     }
 
@@ -374,7 +374,6 @@ impl BlockchainConfig {
         })
     }
 }
-
 
 #[cfg(test)]
 mod tests {

@@ -47,11 +47,7 @@ pub struct CommandExecutor {
 
 impl CommandExecutor {
     /// Create a new command executor
-    pub fn new(
-        node_id: String,
-        storage: Arc<RocksDbBackend>,
-        metrics: NodeMetrics,
-    ) -> Self {
+    pub fn new(node_id: String, storage: Arc<RocksDbBackend>, metrics: NodeMetrics) -> Self {
         Self {
             node_id,
             storage,
@@ -312,7 +308,11 @@ impl CommandExecutor {
         };
 
         // Send to target node
-        match self.chunk_client.store_chunk(&cmd.target_node, chunk_id, data.clone()).await {
+        match self
+            .chunk_client
+            .store_chunk(&cmd.target_node, chunk_id, data.clone())
+            .await
+        {
             Ok(()) => {
                 let duration = start.elapsed();
                 self.metrics.record_get(data.len(), duration); // Counts as outgoing transfer

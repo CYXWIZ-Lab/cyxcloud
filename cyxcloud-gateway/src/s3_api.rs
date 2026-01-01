@@ -48,13 +48,37 @@ pub enum S3Error {
 impl IntoResponse for S3Error {
     fn into_response(self) -> Response {
         let (status, error_code, message) = match &self {
-            S3Error::NoSuchBucket(b) => (StatusCode::NOT_FOUND, "NoSuchBucket", format!("Bucket {} does not exist", b)),
-            S3Error::NoSuchKey(k) => (StatusCode::NOT_FOUND, "NoSuchKey", format!("Key {} does not exist", k)),
-            S3Error::BucketAlreadyExists(b) => (StatusCode::CONFLICT, "BucketAlreadyExists", format!("Bucket {} already exists", b)),
-            S3Error::BucketNotEmpty(b) => (StatusCode::CONFLICT, "BucketNotEmpty", format!("Bucket {} is not empty", b)),
-            S3Error::AccessDenied => (StatusCode::FORBIDDEN, "AccessDenied", "Access Denied".to_string()),
+            S3Error::NoSuchBucket(b) => (
+                StatusCode::NOT_FOUND,
+                "NoSuchBucket",
+                format!("Bucket {} does not exist", b),
+            ),
+            S3Error::NoSuchKey(k) => (
+                StatusCode::NOT_FOUND,
+                "NoSuchKey",
+                format!("Key {} does not exist", k),
+            ),
+            S3Error::BucketAlreadyExists(b) => (
+                StatusCode::CONFLICT,
+                "BucketAlreadyExists",
+                format!("Bucket {} already exists", b),
+            ),
+            S3Error::BucketNotEmpty(b) => (
+                StatusCode::CONFLICT,
+                "BucketNotEmpty",
+                format!("Bucket {} is not empty", b),
+            ),
+            S3Error::AccessDenied => (
+                StatusCode::FORBIDDEN,
+                "AccessDenied",
+                "Access Denied".to_string(),
+            ),
             S3Error::InvalidRequest(m) => (StatusCode::BAD_REQUEST, "InvalidRequest", m.clone()),
-            S3Error::Internal(m) => (StatusCode::INTERNAL_SERVER_ERROR, "InternalError", m.clone()),
+            S3Error::Internal(m) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "InternalError",
+                m.clone(),
+            ),
         };
 
         let body = format!(
@@ -128,16 +152,25 @@ impl ListObjectsV2Response {
         }
 
         xml.push_str(&format!("\n  <MaxKeys>{}</MaxKeys>", self.max_keys));
-        xml.push_str(&format!("\n  <IsTruncated>{}</IsTruncated>", self.is_truncated));
+        xml.push_str(&format!(
+            "\n  <IsTruncated>{}</IsTruncated>",
+            self.is_truncated
+        ));
         xml.push_str(&format!("\n  <KeyCount>{}</KeyCount>", self.key_count));
 
         for obj in &self.contents {
             xml.push_str("\n  <Contents>");
             xml.push_str(&format!("\n    <Key>{}</Key>", obj.key));
-            xml.push_str(&format!("\n    <LastModified>{}</LastModified>", obj.last_modified));
+            xml.push_str(&format!(
+                "\n    <LastModified>{}</LastModified>",
+                obj.last_modified
+            ));
             xml.push_str(&format!("\n    <ETag>{}</ETag>", obj.etag));
             xml.push_str(&format!("\n    <Size>{}</Size>", obj.size));
-            xml.push_str(&format!("\n    <StorageClass>{}</StorageClass>", obj.storage_class));
+            xml.push_str(&format!(
+                "\n    <StorageClass>{}</StorageClass>",
+                obj.storage_class
+            ));
             xml.push_str("\n  </Contents>");
         }
 
@@ -148,7 +181,10 @@ impl ListObjectsV2Response {
         }
 
         if let Some(token) = &self.next_continuation_token {
-            xml.push_str(&format!("\n  <NextContinuationToken>{}</NextContinuationToken>", token));
+            xml.push_str(&format!(
+                "\n  <NextContinuationToken>{}</NextContinuationToken>",
+                token
+            ));
         }
 
         xml.push_str("\n</ListBucketResult>");
@@ -191,10 +227,7 @@ async fn create_bucket(
     // Create bucket in metadata
     state.create_bucket(&bucket).await?;
 
-    Ok((
-        StatusCode::OK,
-        [(header::LOCATION, format!("/{}", bucket))],
-    ))
+    Ok((StatusCode::OK, [(header::LOCATION, format!("/{}", bucket))]))
 }
 
 /// DELETE /:bucket - Delete bucket
@@ -313,10 +346,7 @@ async fn put_object(
     // Store object
     let etag = state.put_object(&bucket, &key, body, &content_type).await?;
 
-    Ok((
-        StatusCode::OK,
-        [(header::ETAG, format!("\"{}\"", etag))],
-    ))
+    Ok((StatusCode::OK, [(header::ETAG, format!("\"{}\"", etag))]))
 }
 
 /// GET /:bucket/*key - Download object

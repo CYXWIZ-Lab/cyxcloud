@@ -85,7 +85,8 @@ impl StorageBackendSync for MemoryBackend {
 
         // If replacing, subtract old size
         if let Some(old) = chunks.get(&id) {
-            self.bytes_used.fetch_sub(old.len() as u64, Ordering::SeqCst);
+            self.bytes_used
+                .fetch_sub(old.len() as u64, Ordering::SeqCst);
         }
 
         chunks.insert(id, data);
@@ -105,7 +106,8 @@ impl StorageBackendSync for MemoryBackend {
         let mut chunks = self.chunks.write();
 
         if let Some(old) = chunks.remove(&id) {
-            self.bytes_used.fetch_sub(old.len() as u64, Ordering::SeqCst);
+            self.bytes_used
+                .fetch_sub(old.len() as u64, Ordering::SeqCst);
             self.deletes.fetch_add(1, Ordering::Relaxed);
             Ok(true)
         } else {
@@ -127,7 +129,7 @@ impl StorageBackendSync for MemoryBackend {
             reads: self.reads.load(Ordering::Relaxed),
             writes: self.writes.load(Ordering::Relaxed),
             deletes: self.deletes.load(Ordering::Relaxed),
-            avg_read_latency_us: 0,  // Negligible for memory
+            avg_read_latency_us: 0, // Negligible for memory
             avg_write_latency_us: 0,
         })
     }
@@ -213,9 +215,7 @@ mod tests {
     fn test_list_chunks() {
         let backend = MemoryBackend::new();
 
-        let ids: Vec<ChunkId> = (0..5)
-            .map(|i| ChunkId::from_data(&[i]))
-            .collect();
+        let ids: Vec<ChunkId> = (0..5).map(|i| ChunkId::from_data(&[i])).collect();
 
         for id in &ids {
             backend.put(*id, Bytes::from_static(b"data")).unwrap();

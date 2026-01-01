@@ -224,7 +224,9 @@ impl DiscoveryService {
     }
 
     /// Build and return the libp2p swarm
-    fn build_swarm(&self) -> Result<Swarm<CyxCloudBehaviour>, Box<dyn std::error::Error + Send + Sync>> {
+    fn build_swarm(
+        &self,
+    ) -> Result<Swarm<CyxCloudBehaviour>, Box<dyn std::error::Error + Send + Sync>> {
         let keypair = self.keypair.clone();
         let behaviour_config = BehaviourConfig::from_keypair(&keypair);
 
@@ -339,7 +341,9 @@ impl DiscoveryService {
                 }
 
                 let mut peers = peers.write();
-                let peer = peers.entry(peer_id).or_insert_with(|| PeerInfo::new(peer_id));
+                let peer = peers
+                    .entry(peer_id)
+                    .or_insert_with(|| PeerInfo::new(peer_id));
                 peer.addresses = addresses.clone();
                 peer.touch();
 
@@ -380,7 +384,9 @@ impl DiscoveryService {
             }
             CyxCloudEvent::IdentifyReceived { peer_id, info } => {
                 let mut peers = peers.write();
-                let peer = peers.entry(peer_id).or_insert_with(|| PeerInfo::new(peer_id));
+                let peer = peers
+                    .entry(peer_id)
+                    .or_insert_with(|| PeerInfo::new(peer_id));
                 peer.addresses = info.listen_addrs.clone();
                 peer.agent_version = Some(info.agent_version);
                 peer.touch();
@@ -426,8 +432,7 @@ mod tests {
 
     #[test]
     fn test_discovery_config() {
-        let config = DiscoveryConfig::default()
-            .with_grpc_port(9000);
+        let config = DiscoveryConfig::default().with_grpc_port(9000);
 
         assert_eq!(config.grpc_port, 9000);
         assert!(!config.listen_addrs.is_empty());

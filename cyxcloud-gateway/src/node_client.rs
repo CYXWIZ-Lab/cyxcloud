@@ -5,8 +5,8 @@
 
 use bytes::Bytes;
 use cyxcloud_protocol::chunk::{
-    chunk_service_client::ChunkServiceClient, GetChunkRequest, StoreChunkRequest,
-    ChunkMetadata as ProtoChunkMetadata,
+    chunk_service_client::ChunkServiceClient, ChunkMetadata as ProtoChunkMetadata, GetChunkRequest,
+    StoreChunkRequest,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -103,8 +103,12 @@ impl NodeClient {
 
         let channel = Channel::from_shared(endpoint)
             .map_err(|e| NodeClientError::ConnectionFailed(e.to_string()))?
-            .connect_timeout(std::time::Duration::from_secs(self.config.connect_timeout_secs))
-            .timeout(std::time::Duration::from_secs(self.config.request_timeout_secs))
+            .connect_timeout(std::time::Duration::from_secs(
+                self.config.connect_timeout_secs,
+            ))
+            .timeout(std::time::Duration::from_secs(
+                self.config.request_timeout_secs,
+            ))
             .connect()
             .await?;
 
@@ -135,7 +139,10 @@ impl NodeClient {
             size: m.size,
             index: m.index,
             total_chunks: m.total_chunks,
-            parent_id: m.parent_id.map(|id| id.as_bytes().to_vec()).unwrap_or_default(),
+            parent_id: m
+                .parent_id
+                .map(|id| id.as_bytes().to_vec())
+                .unwrap_or_default(),
             created_at: m.created_at,
             encrypted: m.encrypted,
             shard_index: m.shard_index.unwrap_or(0),

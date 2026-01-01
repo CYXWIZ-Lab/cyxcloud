@@ -4,7 +4,9 @@
 //! This replaces the gRPC-based registration with the central Gateway.
 
 use crate::config::{self, NodeConfig};
-use crate::cyxwiz_api_client::{CpuInfo, CyxWizApiClient, DetectedHardware, GpuInfo, SavedCredentials};
+use crate::cyxwiz_api_client::{
+    CpuInfo, CyxWizApiClient, DetectedHardware, GpuInfo, SavedCredentials,
+};
 use crate::metrics::NodeMetrics;
 use crate::symbols;
 use std::io::{self, Write};
@@ -31,7 +33,10 @@ pub struct MachineService {
 
 impl MachineService {
     /// Create a new machine service
-    pub fn new(config: NodeConfig, metrics: NodeMetrics) -> Result<Self, crate::cyxwiz_api_client::ApiError> {
+    pub fn new(
+        config: NodeConfig,
+        metrics: NodeMetrics,
+    ) -> Result<Self, crate::cyxwiz_api_client::ApiError> {
         let client = CyxWizApiClient::new(&config.cyxwiz_api)?;
 
         // Initialize system info for hardware detection
@@ -127,7 +132,9 @@ impl MachineService {
         if let (Some(email), Some(username)) = (email.as_ref(), username.as_ref()) {
             // Include node_id from config for persistence across restarts
             let node_id = Some(self.config.node.id.clone());
-            if let Some(creds) = client.get_credentials(email, username, node_id, wallet_address.clone()) {
+            if let Some(creds) =
+                client.get_credentials(email, username, node_id, wallet_address.clone())
+            {
                 let content = serde_json::to_string_pretty(&creds)?;
 
                 // Ensure ~/.cyxcloud/ directory exists
@@ -199,7 +206,11 @@ impl MachineService {
     pub async fn interactive_login(&self) -> Result<(), crate::cyxwiz_api_client::ApiError> {
         println!();
         println!("{}", symbols::BOX_TOP);
-        println!("{}           CyxWiz Storage Node - Login Required           {}", symbols::BOX_SIDE, symbols::BOX_SIDE);
+        println!(
+            "{}           CyxWiz Storage Node - Login Required           {}",
+            symbols::BOX_SIDE,
+            symbols::BOX_SIDE
+        );
         println!("{}", symbols::BOX_BOTTOM);
         println!();
         println!("Please login with your CyxWiz account to register this node.");
@@ -213,8 +224,9 @@ impl MachineService {
         let email = email.trim().to_string();
 
         // Get password (hidden input)
-        let password = rpassword::prompt_password("Password: ")
-            .map_err(|e| crate::cyxwiz_api_client::ApiError::ApiError(format!("Failed to read password: {}", e)))?;
+        let password = rpassword::prompt_password("Password: ").map_err(|e| {
+            crate::cyxwiz_api_client::ApiError::ApiError(format!("Failed to read password: {}", e))
+        })?;
 
         println!();
         println!("Logging in...");
@@ -238,7 +250,10 @@ impl MachineService {
 
         println!();
         println!("{} Login successful!", symbols::CHECK);
-        println!("  Welcome, {}!", result.user.name.as_deref().unwrap_or(&result.user.username));
+        println!(
+            "  Welcome, {}!",
+            result.user.name.as_deref().unwrap_or(&result.user.username)
+        );
         if let Some(ref wallet) = wallet {
             println!("  Wallet: {}...", &wallet[..wallet.len().min(16)]);
         }
@@ -457,9 +472,7 @@ impl MachineService {
         );
 
         let mut client = self.client.write().await;
-        let result = client
-            .register_machine(&hostname, &os, hardware)
-            .await?;
+        let result = client.register_machine(&hostname, &os, hardware).await?;
 
         drop(client);
 
@@ -478,7 +491,10 @@ impl MachineService {
     }
 
     /// Send heartbeat to CyxWiz API
-    pub async fn heartbeat(&self, is_online: bool) -> Result<(), crate::cyxwiz_api_client::ApiError> {
+    pub async fn heartbeat(
+        &self,
+        is_online: bool,
+    ) -> Result<(), crate::cyxwiz_api_client::ApiError> {
         let client = self.client.read().await;
 
         if !client.is_registered() {
@@ -500,14 +516,17 @@ impl MachineService {
         };
 
         // Get local IP address (simplified - in production would be more robust)
-        let ip_address = local_ip_address::local_ip()
-            .map(|ip| ip.to_string())
-            .ok();
+        let ip_address = local_ip_address::local_ip().map(|ip| ip.to_string()).ok();
 
         let version = Some(env!("CARGO_PKG_VERSION").to_string());
 
         client
-            .heartbeat(ip_address.as_deref(), version.as_deref(), is_online, Some(current_load))
+            .heartbeat(
+                ip_address.as_deref(),
+                version.as_deref(),
+                is_online,
+                Some(current_load),
+            )
             .await?;
 
         self.metrics.record_heartbeat(true);
@@ -568,7 +587,10 @@ impl MachineService {
         if self.is_interactive() {
             println!("========================================");
             println!("  Machine service running");
-            println!("  Sending heartbeats every {} seconds", self.config.central.heartbeat_interval_secs);
+            println!(
+                "  Sending heartbeats every {} seconds",
+                self.config.central.heartbeat_interval_secs
+            );
             println!("========================================");
         }
 

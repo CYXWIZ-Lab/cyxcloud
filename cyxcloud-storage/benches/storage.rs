@@ -2,13 +2,13 @@
 //!
 //! Run with: cargo bench --package cyxcloud-storage --bench storage
 
+use bytes::Bytes;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use cyxcloud_core::chunk::ChunkId;
-use cyxcloud_storage::rocks::RocksDbBackend;
-use cyxcloud_storage::memory::MemoryBackend;
 use cyxcloud_storage::backend::StorageBackendSync;
+use cyxcloud_storage::memory::MemoryBackend;
+use cyxcloud_storage::rocks::RocksDbBackend;
 use cyxcloud_storage::StorageConfig;
-use bytes::Bytes;
 use tempfile::TempDir;
 
 /// Generate test data of specified size
@@ -30,11 +30,11 @@ fn bench_put_latency(c: &mut Criterion) {
     let mut group = c.benchmark_group("rocksdb_put_latency");
 
     for size in [
-        1024,              // 1 KB
-        64 * 1024,         // 64 KB
-        256 * 1024,        // 256 KB (typical shard)
-        1024 * 1024,       // 1 MB
-        4 * 1024 * 1024,   // 4 MB (typical chunk)
+        1024,            // 1 KB
+        64 * 1024,       // 64 KB
+        256 * 1024,      // 256 KB (typical shard)
+        1024 * 1024,     // 1 MB
+        4 * 1024 * 1024, // 4 MB (typical chunk)
     ] {
         let data = Bytes::from(generate_data(size));
 
@@ -65,11 +65,11 @@ fn bench_get_latency(c: &mut Criterion) {
     let mut group = c.benchmark_group("rocksdb_get_latency");
 
     for size in [
-        1024,              // 1 KB
-        64 * 1024,         // 64 KB
-        256 * 1024,        // 256 KB
-        1024 * 1024,       // 1 MB
-        4 * 1024 * 1024,   // 4 MB
+        1024,            // 1 KB
+        64 * 1024,       // 64 KB
+        256 * 1024,      // 256 KB
+        1024 * 1024,     // 1 MB
+        4 * 1024 * 1024, // 4 MB
     ] {
         // Pre-populate with data
         let data = Bytes::from(generate_data(size));

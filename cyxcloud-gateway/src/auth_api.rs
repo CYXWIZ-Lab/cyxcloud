@@ -6,8 +6,8 @@
 //! - Token refresh
 
 use crate::auth::{
-    AuthResponse, AuthService, AuthUser, ChallengeResponse, Claims, CreateApiKeyRequest,
-    TokenType, WalletLoginRequest,
+    AuthResponse, AuthService, AuthUser, ChallengeResponse, Claims, CreateApiKeyRequest, TokenType,
+    WalletLoginRequest,
 };
 use crate::AppState;
 use axum::{

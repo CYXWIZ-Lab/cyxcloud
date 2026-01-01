@@ -68,7 +68,9 @@ impl GrpcNetworkClient {
     }
 
     /// Get node info for the planner
-    pub async fn get_node_info(&self) -> Result<Vec<NodeInfo>, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn get_node_info(
+        &self,
+    ) -> Result<Vec<NodeInfo>, Box<dyn std::error::Error + Send + Sync>> {
         let nodes = self
             .db
             .get_all_nodes()
@@ -98,9 +100,7 @@ impl GrpcNetworkClient {
 #[async_trait::async_trait]
 impl NetworkClient for GrpcNetworkClient {
     #[instrument(skip(self))]
-    async fn get_all_nodes(
-        &self,
-    ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn get_all_nodes(&self) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
         let nodes = self
             .db
             .get_all_nodes()
@@ -133,10 +133,8 @@ impl NetworkClient for GrpcNetworkClient {
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
 
-        let result: Vec<(String, String)> = nodes
-            .into_iter()
-            .map(|n| (n.peer_id, n.status))
-            .collect();
+        let result: Vec<(String, String)> =
+            nodes.into_iter().map(|n| (n.peer_id, n.status)).collect();
 
         Ok(result)
     }
@@ -155,12 +153,10 @@ impl NetworkClient for GrpcNetworkClient {
             }
 
             // Node is "online" or "recovering" in DB, verify it's actually reachable
-            let is_reachable = tokio::time::timeout(
-                timeout,
-                self.chunk_client.is_reachable(&node.grpc_address),
-            )
-            .await
-            .unwrap_or(false);
+            let is_reachable =
+                tokio::time::timeout(timeout, self.chunk_client.is_reachable(&node.grpc_address))
+                    .await
+                    .unwrap_or(false);
 
             if !is_reachable {
                 warn!(

@@ -6,11 +6,11 @@
 
 use bytes::Bytes;
 use cyxcloud_core::chunk::ChunkId;
-use cyxcloud_core::tls::{TlsServerConfig, create_tonic_server_tls};
+use cyxcloud_core::tls::{create_tonic_server_tls, TlsServerConfig};
 use cyxcloud_protocol::chunk::{
     chunk_service_server::ChunkService, ChunkData, DeleteChunkRequest, DeleteChunkResponse,
-    GetChunkRequest, GetChunkResponse, StoreChunkRequest, StoreChunkResponse,
-    StreamChunksRequest, VerifyChunkRequest, VerifyChunkResponse,
+    GetChunkRequest, GetChunkResponse, StoreChunkRequest, StoreChunkResponse, StreamChunksRequest,
+    VerifyChunkRequest, VerifyChunkResponse,
 };
 use cyxcloud_storage::backend::StorageBackendSync;
 use cyxcloud_storage::RocksDbBackend;
@@ -153,9 +153,7 @@ impl ChunkService for ChunkServiceImpl {
                 computed = %computed_id,
                 "Chunk ID mismatch - data doesn't match claimed ID"
             );
-            return Err(Status::invalid_argument(
-                "Chunk ID doesn't match data hash",
-            ));
+            return Err(Status::invalid_argument("Chunk ID doesn't match data hash"));
         }
 
         // Store the chunk

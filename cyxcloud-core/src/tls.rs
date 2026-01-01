@@ -136,8 +136,7 @@ pub fn load_server_config(config: &TlsServerConfig) -> Result<Arc<ServerConfig>>
                     format!("Failed to build client verifier: {}", e),
                 ))
             })?;
-        ServerConfig::builder()
-            .with_client_cert_verifier(client_verifier)
+        ServerConfig::builder().with_client_cert_verifier(client_verifier)
     } else if let Some(ca_path) = &config.ca_cert_path {
         // Optional client cert verification (accept but don't require)
         let root_store = build_root_store(ca_path)?;
@@ -150,22 +149,18 @@ pub fn load_server_config(config: &TlsServerConfig) -> Result<Arc<ServerConfig>>
                     format!("Failed to build client verifier: {}", e),
                 ))
             })?;
-        ServerConfig::builder()
-            .with_client_cert_verifier(client_verifier)
+        ServerConfig::builder().with_client_cert_verifier(client_verifier)
     } else {
         // No client cert verification
-        ServerConfig::builder()
-            .with_no_client_auth()
+        ServerConfig::builder().with_no_client_auth()
     };
 
-    let server_config = builder
-        .with_single_cert(certs, key)
-        .map_err(|e| {
-            CyxCloudError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Failed to configure server TLS: {}", e),
-            ))
-        })?;
+    let server_config = builder.with_single_cert(certs, key).map_err(|e| {
+        CyxCloudError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("Failed to configure server TLS: {}", e),
+        ))
+    })?;
 
     Ok(Arc::new(server_config))
 }
@@ -235,7 +230,9 @@ pub fn load_client_config_with_system_roots() -> Result<Arc<ClientConfig>> {
 /// Create a tonic client TLS config from TlsClientConfig.
 ///
 /// This returns a `tonic::transport::ClientTlsConfig` suitable for gRPC clients.
-pub fn create_tonic_client_tls(config: &TlsClientConfig) -> Result<tonic::transport::ClientTlsConfig> {
+pub fn create_tonic_client_tls(
+    config: &TlsClientConfig,
+) -> Result<tonic::transport::ClientTlsConfig> {
     use tonic::transport::Certificate;
 
     let ca_cert = std::fs::read(&config.ca_cert_path).map_err(|e| {
@@ -245,8 +242,8 @@ pub fn create_tonic_client_tls(config: &TlsClientConfig) -> Result<tonic::transp
         ))
     })?;
 
-    let mut tls_config = tonic::transport::ClientTlsConfig::new()
-        .ca_certificate(Certificate::from_pem(ca_cert));
+    let mut tls_config =
+        tonic::transport::ClientTlsConfig::new().ca_certificate(Certificate::from_pem(ca_cert));
 
     if let (Some(cert_path), Some(key_path)) = (&config.client_cert_path, &config.client_key_path) {
         let client_cert = std::fs::read(cert_path).map_err(|e| {
@@ -262,7 +259,10 @@ pub fn create_tonic_client_tls(config: &TlsClientConfig) -> Result<tonic::transp
             ))
         })?;
 
-        tls_config = tls_config.identity(tonic::transport::Identity::from_pem(client_cert, client_key));
+        tls_config = tls_config.identity(tonic::transport::Identity::from_pem(
+            client_cert,
+            client_key,
+        ));
     }
 
     Ok(tls_config)
@@ -271,7 +271,9 @@ pub fn create_tonic_client_tls(config: &TlsClientConfig) -> Result<tonic::transp
 /// Create a tonic server TLS config from TlsServerConfig.
 ///
 /// This returns a `tonic::transport::ServerTlsConfig` suitable for gRPC servers.
-pub fn create_tonic_server_tls(config: &TlsServerConfig) -> Result<tonic::transport::ServerTlsConfig> {
+pub fn create_tonic_server_tls(
+    config: &TlsServerConfig,
+) -> Result<tonic::transport::ServerTlsConfig> {
     use tonic::transport::{Certificate, Identity};
 
     let cert = std::fs::read(&config.cert_path).map_err(|e| {
@@ -287,8 +289,8 @@ pub fn create_tonic_server_tls(config: &TlsServerConfig) -> Result<tonic::transp
         ))
     })?;
 
-    let mut tls_config = tonic::transport::ServerTlsConfig::new()
-        .identity(Identity::from_pem(cert, key));
+    let mut tls_config =
+        tonic::transport::ServerTlsConfig::new().identity(Identity::from_pem(cert, key));
 
     if let Some(ca_path) = &config.ca_cert_path {
         let ca_cert = std::fs::read(ca_path).map_err(|e| {

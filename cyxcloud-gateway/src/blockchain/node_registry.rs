@@ -16,8 +16,8 @@ use std::sync::Arc;
 use tracing::{debug, info, warn};
 
 use super::types::{
-    constants, DiskType, StorageMetrics, StorageNodeInfo, StorageNodeStatus,
-    StorageReputation, StorageSpec,
+    constants, DiskType, StorageMetrics, StorageNodeInfo, StorageNodeStatus, StorageReputation,
+    StorageSpec,
 };
 
 /// Get Anchor discriminator for an instruction
@@ -60,10 +60,7 @@ impl NodeRegistryOps {
 
     /// Get proof PDA
     pub fn get_proof_pda(&self, node: &Pubkey, challenge_id: &[u8]) -> (Pubkey, u8) {
-        Pubkey::find_program_address(
-            &[b"proof", node.as_ref(), challenge_id],
-            &self.program_id,
-        )
+        Pubkey::find_program_address(&[b"proof", node.as_ref(), challenge_id], &self.program_id)
     }
 
     /// Get storage node info

@@ -128,10 +128,7 @@ impl ErasureEncoder {
         padded_data.resize(padded_size, 0);
 
         // Split into data shards
-        let mut shards: Vec<Vec<u8>> = padded_data
-            .chunks(shard_size)
-            .map(|c| c.to_vec())
-            .collect();
+        let mut shards: Vec<Vec<u8>> = padded_data.chunks(shard_size).map(|c| c.to_vec()).collect();
 
         // Add empty parity shards
         for _ in 0..self.config.parity_shards {
@@ -196,11 +193,7 @@ impl ErasureEncoder {
     ///
     /// Requires at least `data_shards` number of shards.
     /// Missing shards should be represented as `None`.
-    pub fn decode(
-        &self,
-        shards: &[Option<ShardData>],
-        original_size: usize,
-    ) -> Result<Bytes> {
+    pub fn decode(&self, shards: &[Option<ShardData>], original_size: usize) -> Result<Bytes> {
         let total_shards = self.config.total_shards();
 
         if shards.len() != total_shards {
@@ -243,9 +236,7 @@ impl ErasureEncoder {
             if let Some(ref shard) = shard_vecs[i] {
                 result.extend_from_slice(shard);
             } else {
-                return Err(CyxCloudError::Internal(
-                    "Reconstruction failed".to_string(),
-                ));
+                return Err(CyxCloudError::Internal("Reconstruction failed".to_string()));
             }
         }
 
@@ -335,8 +326,8 @@ mod tests {
 
         // Remove 4 shards (maximum we can lose)
         let mut shard_opts: Vec<Option<ShardData>> = shards.into_iter().map(Some).collect();
-        shard_opts[0] = None;  // Remove shard 0
-        shard_opts[5] = None;  // Remove shard 5
+        shard_opts[0] = None; // Remove shard 0
+        shard_opts[5] = None; // Remove shard 5
         shard_opts[10] = None; // Remove shard 10 (parity)
         shard_opts[13] = None; // Remove shard 13 (parity)
 

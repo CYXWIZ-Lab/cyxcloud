@@ -90,10 +90,14 @@ impl NodeMonitor {
 
             info!(
                 interval_secs = check_interval.as_secs(),
-                offline_threshold_mins = monitor.config.fault_tolerance.offline_threshold.as_secs() / 60,
-                drain_threshold_hours = monitor.config.fault_tolerance.drain_threshold.as_secs() / 3600,
-                remove_threshold_days = monitor.config.fault_tolerance.remove_threshold.as_secs() / 86400,
-                recovery_quarantine_mins = monitor.config.fault_tolerance.recovery_quarantine.as_secs() / 60,
+                offline_threshold_mins =
+                    monitor.config.fault_tolerance.offline_threshold.as_secs() / 60,
+                drain_threshold_hours =
+                    monitor.config.fault_tolerance.drain_threshold.as_secs() / 3600,
+                remove_threshold_days =
+                    monitor.config.fault_tolerance.remove_threshold.as_secs() / 86400,
+                recovery_quarantine_mins =
+                    monitor.config.fault_tolerance.recovery_quarantine.as_secs() / 60,
                 "Node lifecycle monitor started"
             );
 

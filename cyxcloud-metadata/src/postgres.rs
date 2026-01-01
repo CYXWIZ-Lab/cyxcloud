@@ -56,10 +56,10 @@ pub struct FaultToleranceConfig {
 impl Default for FaultToleranceConfig {
     fn default() -> Self {
         Self {
-            offline_threshold: Duration::from_secs(5 * 60),         // 5 minutes
-            drain_threshold: Duration::from_secs(4 * 60 * 60),      // 4 hours
+            offline_threshold: Duration::from_secs(5 * 60), // 5 minutes
+            drain_threshold: Duration::from_secs(4 * 60 * 60), // 4 hours
             remove_threshold: Duration::from_secs(7 * 24 * 60 * 60), // 7 days
-            recovery_quarantine: Duration::from_secs(5 * 60),       // 5 minutes
+            recovery_quarantine: Duration::from_secs(5 * 60), // 5 minutes
         }
     }
 }
@@ -278,10 +278,9 @@ impl Database {
 
     /// Get node storage summary
     pub async fn get_node_storage_summary(&self) -> Result<Vec<NodeStorageSummary>> {
-        let result =
-            sqlx::query_as::<_, NodeStorageSummary>("SELECT * FROM node_storage_summary")
-                .fetch_all(&self.pool)
-                .await?;
+        let result = sqlx::query_as::<_, NodeStorageSummary>("SELECT * FROM node_storage_summary")
+            .fetch_all(&self.pool)
+            .await?;
         Ok(result)
     }
 
@@ -444,7 +443,9 @@ impl Database {
     #[instrument(skip(self))]
     pub async fn update_node_heartbeat_with_recovery(&self, node_id: Uuid) -> Result<NodeStatus> {
         // First get the current status
-        let node = self.get_node(node_id).await?
+        let node = self
+            .get_node(node_id)
+            .await?
             .ok_or_else(|| DbError::NotFound(format!("Node {} not found", node_id)))?;
 
         match node.status.as_str() {
@@ -506,7 +507,9 @@ impl Database {
     #[instrument(skip(self))]
     pub async fn update_node_heartbeat_by_peer_id(&self, peer_id: &str) -> Result<NodeStatus> {
         // First get the node by peer_id
-        let node = self.get_node_by_peer_id(peer_id).await?
+        let node = self
+            .get_node_by_peer_id(peer_id)
+            .await?
             .ok_or_else(|| DbError::NotFound(format!("Node with peer_id {} not found", peer_id)))?;
 
         match node.status.as_str() {
@@ -635,23 +638,21 @@ impl Database {
 
     /// Get a file by ID
     pub async fn get_file(&self, id: Uuid) -> Result<Option<File>> {
-        let result = sqlx::query_as::<_, File>(
-            "SELECT * FROM files WHERE id = $1 AND deleted_at IS NULL",
-        )
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await?;
+        let result =
+            sqlx::query_as::<_, File>("SELECT * FROM files WHERE id = $1 AND deleted_at IS NULL")
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await?;
         Ok(result)
     }
 
     /// Get a file by path
     pub async fn get_file_by_path(&self, path: &str) -> Result<Option<File>> {
-        let result = sqlx::query_as::<_, File>(
-            "SELECT * FROM files WHERE path = $1 AND deleted_at IS NULL",
-        )
-        .bind(path)
-        .fetch_optional(&self.pool)
-        .await?;
+        let result =
+            sqlx::query_as::<_, File>("SELECT * FROM files WHERE path = $1 AND deleted_at IS NULL")
+                .bind(path)
+                .fetch_optional(&self.pool)
+                .await?;
         Ok(result)
     }
 
@@ -799,7 +800,10 @@ impl Database {
     }
 
     /// Get under-replicated chunks
-    pub async fn get_under_replicated_chunks(&self, limit: i64) -> Result<Vec<ChunkReplicationStatus>> {
+    pub async fn get_under_replicated_chunks(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<ChunkReplicationStatus>> {
         let result = sqlx::query_as::<_, ChunkReplicationStatus>(
             r#"
             SELECT * FROM chunk_replication_status
@@ -949,12 +953,10 @@ impl Database {
 
     /// Get user by wallet address
     pub async fn get_user_by_wallet(&self, wallet_address: &str) -> Result<Option<User>> {
-        let result = sqlx::query_as::<_, User>(
-            "SELECT * FROM users WHERE wallet_address = $1",
-        )
-        .bind(wallet_address)
-        .fetch_optional(&self.pool)
-        .await?;
+        let result = sqlx::query_as::<_, User>("SELECT * FROM users WHERE wallet_address = $1")
+            .bind(wallet_address)
+            .fetch_optional(&self.pool)
+            .await?;
         Ok(result)
     }
 
@@ -999,12 +1001,11 @@ impl Database {
 
     /// List buckets for a user
     pub async fn list_user_buckets(&self, owner_id: Uuid) -> Result<Vec<Bucket>> {
-        let result = sqlx::query_as::<_, Bucket>(
-            "SELECT * FROM buckets WHERE owner_id = $1 ORDER BY name",
-        )
-        .bind(owner_id)
-        .fetch_all(&self.pool)
-        .await?;
+        let result =
+            sqlx::query_as::<_, Bucket>("SELECT * FROM buckets WHERE owner_id = $1 ORDER BY name")
+                .bind(owner_id)
+                .fetch_all(&self.pool)
+                .await?;
         Ok(result)
     }
 
@@ -1021,23 +1022,21 @@ impl Database {
 
     /// Check if a bucket is empty (has no files)
     pub async fn bucket_is_empty(&self, bucket_name: &str) -> Result<bool> {
-        let count: (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM files WHERE bucket = $1 AND deleted_at IS NULL",
-        )
-        .bind(bucket_name)
-        .fetch_one(&self.pool)
-        .await?;
+        let count: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM files WHERE bucket = $1 AND deleted_at IS NULL")
+                .bind(bucket_name)
+                .fetch_one(&self.pool)
+                .await?;
         Ok(count.0 == 0)
     }
 
     /// Count files in a bucket
     pub async fn count_files_in_bucket(&self, bucket_name: &str) -> Result<i64> {
-        let count: (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM files WHERE bucket = $1 AND deleted_at IS NULL",
-        )
-        .bind(bucket_name)
-        .fetch_one(&self.pool)
-        .await?;
+        let count: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM files WHERE bucket = $1 AND deleted_at IS NULL")
+                .bind(bucket_name)
+                .fetch_one(&self.pool)
+                .await?;
         Ok(count.0)
     }
 
@@ -1364,12 +1363,11 @@ impl Database {
 
     /// Get payment epoch by number
     pub async fn get_payment_epoch(&self, epoch: i64) -> Result<Option<PaymentEpoch>> {
-        let result = sqlx::query_as::<_, PaymentEpoch>(
-            "SELECT * FROM payment_epochs WHERE epoch = $1",
-        )
-        .bind(epoch)
-        .fetch_optional(&self.pool)
-        .await?;
+        let result =
+            sqlx::query_as::<_, PaymentEpoch>("SELECT * FROM payment_epochs WHERE epoch = $1")
+                .bind(epoch)
+                .fetch_optional(&self.pool)
+                .await?;
         Ok(result)
     }
 
@@ -1419,7 +1417,11 @@ impl Database {
         .execute(&self.pool)
         .await?;
 
-        debug!(epoch = epoch, nodes_paid = nodes_paid, "Payment epoch finalized");
+        debug!(
+            epoch = epoch,
+            nodes_paid = nodes_paid,
+            "Payment epoch finalized"
+        );
         Ok(())
     }
 
@@ -1504,7 +1506,11 @@ impl Database {
         .await?;
 
         let count = result.rows_affected();
-        debug!(epoch = epoch, nodes_initialized = count, "Initialized epoch for all nodes");
+        debug!(
+            epoch = epoch,
+            nodes_initialized = count,
+            "Initialized epoch for all nodes"
+        );
         Ok(count)
     }
 }

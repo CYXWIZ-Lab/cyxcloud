@@ -2,7 +2,7 @@
 //!
 //! Exposes node health, performance, and storage metrics.
 
-use metrics::{counter, gauge, histogram, describe_counter, describe_gauge, describe_histogram};
+use metrics::{counter, describe_counter, describe_gauge, describe_histogram, gauge, histogram};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -44,38 +44,23 @@ pub fn init_metrics() {
         names::STORAGE_BYTES_AVAILABLE,
         "Available storage capacity in bytes"
     );
-    describe_gauge!(
-        names::STORAGE_CHUNKS_TOTAL,
-        "Total number of chunks stored"
-    );
+    describe_gauge!(names::STORAGE_CHUNKS_TOTAL, "Total number of chunks stored");
 
     // Request metrics
-    describe_counter!(
-        names::REQUESTS_TOTAL,
-        "Total number of requests processed"
-    );
+    describe_counter!(names::REQUESTS_TOTAL, "Total number of requests processed");
     describe_histogram!(
         names::REQUESTS_DURATION,
         "Request processing duration in seconds"
     );
-    describe_counter!(
-        names::REQUESTS_BYTES,
-        "Total bytes transferred in requests"
-    );
+    describe_counter!(names::REQUESTS_BYTES, "Total bytes transferred in requests");
 
     // Network metrics
     describe_gauge!(
         names::CONNECTIONS_ACTIVE,
         "Number of active gRPC connections"
     );
-    describe_counter!(
-        names::BANDWIDTH_IN,
-        "Total incoming bandwidth in bytes"
-    );
-    describe_counter!(
-        names::BANDWIDTH_OUT,
-        "Total outgoing bandwidth in bytes"
-    );
+    describe_counter!(names::BANDWIDTH_IN, "Total incoming bandwidth in bytes");
+    describe_counter!(names::BANDWIDTH_OUT, "Total outgoing bandwidth in bytes");
 
     // Health metrics
     describe_gauge!(names::NODE_UP, "Whether the node is up (1) or down (0)");
@@ -83,14 +68,8 @@ pub fn init_metrics() {
         names::NODE_START_TIME,
         "Unix timestamp when the node started"
     );
-    describe_counter!(
-        names::HEARTBEAT_SUCCESS,
-        "Number of successful heartbeats"
-    );
-    describe_counter!(
-        names::HEARTBEAT_FAILURE,
-        "Number of failed heartbeats"
-    );
+    describe_counter!(names::HEARTBEAT_SUCCESS, "Number of successful heartbeats");
+    describe_counter!(names::HEARTBEAT_FAILURE, "Number of failed heartbeats");
 }
 
 /// Metrics recorder for tracking node statistics
@@ -115,50 +94,64 @@ impl NodeMetrics {
 
         // Set initial metrics
         gauge!(names::NODE_UP, "node_id" => metrics.node_id.clone()).set(1.0);
-        gauge!(names::NODE_START_TIME, "node_id" => metrics.node_id.clone())
-            .set(std::time::SystemTime::now()
+        gauge!(names::NODE_START_TIME, "node_id" => metrics.node_id.clone()).set(
+            std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_secs_f64());
+                .as_secs_f64(),
+        );
 
         metrics
     }
 
     /// Get total bytes uploaded (for heartbeat reporting)
     pub fn get_bytes_uploaded(&self) -> u64 {
-        self.bytes_uploaded.load(std::sync::atomic::Ordering::Relaxed)
+        self.bytes_uploaded
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Get total bytes downloaded (for heartbeat reporting)
     pub fn get_bytes_downloaded(&self) -> u64 {
-        self.bytes_downloaded.load(std::sync::atomic::Ordering::Relaxed)
+        self.bytes_downloaded
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Record a chunk store operation
     pub fn record_store(&self, size: usize, duration: std::time::Duration) {
-        let labels = [("node_id", self.node_id.clone()), ("operation", "store".to_string())];
+        let labels = [
+            ("node_id", self.node_id.clone()),
+            ("operation", "store".to_string()),
+        ];
         counter!(names::REQUESTS_TOTAL, &labels).increment(1);
         counter!(names::REQUESTS_BYTES, &labels).increment(size as u64);
         histogram!(names::REQUESTS_DURATION, &labels).record(duration.as_secs_f64());
         counter!(names::BANDWIDTH_IN, "node_id" => self.node_id.clone()).increment(size as u64);
         // Update atomic counter for heartbeat reporting
-        self.bytes_uploaded.fetch_add(size as u64, std::sync::atomic::Ordering::Relaxed);
+        self.bytes_uploaded
+            .fetch_add(size as u64, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Record a chunk get operation
     pub fn record_get(&self, size: usize, duration: std::time::Duration) {
-        let labels = [("node_id", self.node_id.clone()), ("operation", "get".to_string())];
+        let labels = [
+            ("node_id", self.node_id.clone()),
+            ("operation", "get".to_string()),
+        ];
         counter!(names::REQUESTS_TOTAL, &labels).increment(1);
         counter!(names::REQUESTS_BYTES, &labels).increment(size as u64);
         histogram!(names::REQUESTS_DURATION, &labels).record(duration.as_secs_f64());
         counter!(names::BANDWIDTH_OUT, "node_id" => self.node_id.clone()).increment(size as u64);
         // Update atomic counter for heartbeat reporting
-        self.bytes_downloaded.fetch_add(size as u64, std::sync::atomic::Ordering::Relaxed);
+        self.bytes_downloaded
+            .fetch_add(size as u64, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Record a chunk delete operation
     pub fn record_delete(&self, duration: std::time::Duration) {
-        let labels = [("node_id", self.node_id.clone()), ("operation", "delete".to_string())];
+        let labels = [
+            ("node_id", self.node_id.clone()),
+            ("operation", "delete".to_string()),
+        ];
         counter!(names::REQUESTS_TOTAL, &labels).increment(1);
         histogram!(names::REQUESTS_DURATION, &labels).record(duration.as_secs_f64());
     }
@@ -166,8 +159,10 @@ impl NodeMetrics {
     /// Update storage statistics
     pub fn update_storage(&self, used_bytes: u64, available_bytes: u64, chunk_count: u64) {
         gauge!(names::STORAGE_BYTES_USED, "node_id" => self.node_id.clone()).set(used_bytes as f64);
-        gauge!(names::STORAGE_BYTES_AVAILABLE, "node_id" => self.node_id.clone()).set(available_bytes as f64);
-        gauge!(names::STORAGE_CHUNKS_TOTAL, "node_id" => self.node_id.clone()).set(chunk_count as f64);
+        gauge!(names::STORAGE_BYTES_AVAILABLE, "node_id" => self.node_id.clone())
+            .set(available_bytes as f64);
+        gauge!(names::STORAGE_CHUNKS_TOTAL, "node_id" => self.node_id.clone())
+            .set(chunk_count as f64);
     }
 
     /// Update connection count
@@ -219,7 +214,7 @@ impl MetricsServer {
         metrics_path: String,
         health_state: Arc<RwLock<HealthState>>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        use axum::{routing::get, Router, response::IntoResponse, http::StatusCode};
+        use axum::{http::StatusCode, response::IntoResponse, routing::get, Router};
 
         let handle = self.handle;
 

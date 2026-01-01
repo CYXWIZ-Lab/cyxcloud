@@ -29,7 +29,10 @@ pub async fn login(cyxwiz_client: &CyxWizClient, config: LoginConfig) -> Result<
             style("!").yellow(),
             style(&creds.email).cyan()
         );
-        println!("Run {} to switch accounts", style("cyxcloud logout").green());
+        println!(
+            "Run {} to switch accounts",
+            style("cyxcloud logout").green()
+        );
         return Ok(());
     }
 
@@ -50,8 +53,7 @@ pub async fn login(cyxwiz_client: &CyxWizClient, config: LoginConfig) -> Result<
     }
 
     // Get password
-    let password = rpassword::prompt_password("Password: ")
-        .context("Failed to read password")?;
+    let password = rpassword::prompt_password("Password: ").context("Failed to read password")?;
 
     if password.is_empty() {
         anyhow::bail!("Password is required");
@@ -78,8 +80,7 @@ pub async fn login(cyxwiz_client: &CyxWizClient, config: LoginConfig) -> Result<
         username: auth.user.username,
     };
 
-    config::save_credentials(&credentials)
-        .context("Failed to save credentials")?;
+    config::save_credentials(&credentials).context("Failed to save credentials")?;
 
     println!();
     println!(
@@ -88,7 +89,13 @@ pub async fn login(cyxwiz_client: &CyxWizClient, config: LoginConfig) -> Result<
     );
     println!(
         "Welcome, {}",
-        style(credentials.username.as_deref().unwrap_or(&credentials.email)).cyan()
+        style(
+            credentials
+                .username
+                .as_deref()
+                .unwrap_or(&credentials.email)
+        )
+        .cyan()
     );
 
     Ok(())
@@ -139,10 +146,7 @@ pub async fn whoami(cyxwiz_client: &CyxWizClient) -> Result<()> {
     }
 
     // Try to get profile from server
-    let profile = cyxwiz_client
-        .get_profile(&creds.access_token)
-        .await
-        .ok();
+    let profile = cyxwiz_client.get_profile(&creds.access_token).await.ok();
 
     println!();
     println!("{}", style("User Profile").bold().underlined());
@@ -155,11 +159,7 @@ pub async fn whoami(cyxwiz_client: &CyxWizClient) -> Result<()> {
     );
 
     if let Some(username) = &creds.username {
-        println!(
-            "{:12} {}",
-            style("Username:").dim(),
-            style(username).cyan()
-        );
+        println!("{:12} {}", style("Username:").dim(), style(username).cyan());
     }
 
     println!(
@@ -171,11 +171,7 @@ pub async fn whoami(cyxwiz_client: &CyxWizClient) -> Result<()> {
     // Show profile info from server if available
     if let Some(p) = profile {
         if let Some(name) = &p.name {
-            println!(
-                "{:12} {}",
-                style("Name:").dim(),
-                style(name).cyan()
-            );
+            println!("{:12} {}", style("Name:").dim(), style(name).cyan());
         }
 
         if let Some(wallet) = &p.cyx_wallet {
@@ -185,11 +181,7 @@ pub async fn whoami(cyxwiz_client: &CyxWizClient) -> Result<()> {
                 style(&wallet.public_key).cyan()
             );
         } else if let Some(ext_wallet) = &p.external_wallet {
-            println!(
-                "{:12} {}",
-                style("Wallet:").dim(),
-                style(ext_wallet).cyan()
-            );
+            println!("{:12} {}", style("Wallet:").dim(), style(ext_wallet).cyan());
         } else {
             println!(
                 "{:12} {}",
@@ -207,11 +199,7 @@ pub async fn whoami(cyxwiz_client: &CyxWizClient) -> Result<()> {
         .map(|dt| dt.format("%Y-%m-%d %H:%M:%S UTC").to_string())
         .unwrap_or_else(|| "Unknown".to_string());
 
-    println!(
-        "{:12} {}",
-        style("Expires:").dim(),
-        style(&expires).dim()
-    );
+    println!("{:12} {}", style("Expires:").dim(), style(&expires).dim());
 
     Ok(())
 }
@@ -225,21 +213,23 @@ pub async fn register(cyxwiz_client: &CyxWizClient, config: RegisterConfig) -> R
             style("!").yellow(),
             style(&creds.email).cyan()
         );
-        println!("Run {} first to register a new account", style("cyxcloud logout").green());
+        println!(
+            "Run {} first to register a new account",
+            style("cyxcloud logout").green()
+        );
         return Ok(());
     }
 
     // Get password
-    let password = rpassword::prompt_password("Password: ")
-        .context("Failed to read password")?;
+    let password = rpassword::prompt_password("Password: ").context("Failed to read password")?;
 
     if password.len() < 8 {
         anyhow::bail!("Password must be at least 8 characters");
     }
 
     // Confirm password
-    let confirm = rpassword::prompt_password("Confirm password: ")
-        .context("Failed to read password")?;
+    let confirm =
+        rpassword::prompt_password("Confirm password: ").context("Failed to read password")?;
 
     if password != confirm {
         anyhow::bail!("Passwords do not match");
@@ -266,8 +256,7 @@ pub async fn register(cyxwiz_client: &CyxWizClient, config: RegisterConfig) -> R
         username: auth.user.username.or(config.username),
     };
 
-    config::save_credentials(&credentials)
-        .context("Failed to save credentials")?;
+    config::save_credentials(&credentials).context("Failed to save credentials")?;
 
     println!();
     println!(
@@ -276,7 +265,13 @@ pub async fn register(cyxwiz_client: &CyxWizClient, config: RegisterConfig) -> R
     );
     println!(
         "Welcome, {}",
-        style(credentials.username.as_deref().unwrap_or(&credentials.email)).cyan()
+        style(
+            credentials
+                .username
+                .as_deref()
+                .unwrap_or(&credentials.email)
+        )
+        .cyan()
     );
 
     Ok(())

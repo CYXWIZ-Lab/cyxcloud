@@ -70,11 +70,9 @@ impl ChunkId {
 
     /// Parse from CyxCloud URI format
     pub fn from_uri(uri: &str) -> Result<Self> {
-        let base58 = uri
-            .strip_prefix("cyx://")
-            .ok_or_else(|| CyxCloudError::InvalidChunkId(
-                "URI must start with cyx://".to_string()
-            ))?;
+        let base58 = uri.strip_prefix("cyx://").ok_or_else(|| {
+            CyxCloudError::InvalidChunkId("URI must start with cyx://".to_string())
+        })?;
         Self::from_base58(base58)
     }
 }
@@ -293,11 +291,7 @@ mod tests {
 
     #[test]
     fn test_chunk_verification() {
-        let chunk = Chunk::new(
-            Bytes::from_static(b"test data"),
-            0,
-            1,
-        ).unwrap();
+        let chunk = Chunk::new(Bytes::from_static(b"test data"), 0, 1).unwrap();
 
         assert!(chunk.verify());
     }

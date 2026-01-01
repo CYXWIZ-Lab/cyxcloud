@@ -99,9 +99,9 @@ impl NodeService for NodeServiceImpl {
         })?;
 
         // Extract node info from request
-        let info = req.info.ok_or_else(|| {
-            Status::invalid_argument("NodeInfo is required")
-        })?;
+        let info = req
+            .info
+            .ok_or_else(|| Status::invalid_argument("NodeInfo is required"))?;
 
         // Get location and capacity
         let location = info.location.unwrap_or_default();
@@ -188,9 +188,9 @@ impl NodeService for NodeServiceImpl {
 
         debug!(node_id = %node_id_str, "Processing heartbeat");
 
-        let metadata = self.metadata().ok_or_else(|| {
-            Status::unavailable("Metadata service not configured")
-        })?;
+        let metadata = self
+            .metadata()
+            .ok_or_else(|| Status::unavailable("Metadata service not configured"))?;
 
         // Use peer_id directly - the node sends its own ID which is stored as peer_id
         // Update heartbeat with recovery-aware logic
@@ -229,9 +229,9 @@ impl NodeService for NodeServiceImpl {
         let req = request.into_inner();
         tracing::Span::current().record("node_id", &req.node_id);
 
-        let metadata = self.metadata().ok_or_else(|| {
-            Status::unavailable("Metadata service not configured")
-        })?;
+        let metadata = self
+            .metadata()
+            .ok_or_else(|| Status::unavailable("Metadata service not configured"))?;
 
         // Get node from metadata by peer_id
         match metadata.database().get_node_by_peer_id(&req.node_id).await {
@@ -262,9 +262,9 @@ impl NodeService for NodeServiceImpl {
     ) -> Result<Response<ListNodesResponse>, Status> {
         let req = request.into_inner();
 
-        let metadata = self.metadata().ok_or_else(|| {
-            Status::unavailable("Metadata service not configured")
-        })?;
+        let metadata = self
+            .metadata()
+            .ok_or_else(|| Status::unavailable("Metadata service not configured"))?;
 
         // Get all online nodes (or filter by status if specified)
         let nodes = match metadata.get_online_nodes().await {
@@ -346,14 +346,13 @@ impl NodeService for NodeServiceImpl {
             "Node drain requested"
         );
 
-        let metadata = self.metadata().ok_or_else(|| {
-            Status::unavailable("Metadata service not configured")
-        })?;
+        let metadata = self
+            .metadata()
+            .ok_or_else(|| Status::unavailable("Metadata service not configured"))?;
 
         // Parse node UUID
-        let node_uuid = Uuid::parse_str(&req.node_id).map_err(|e| {
-            Status::invalid_argument(format!("Invalid node_id format: {}", e))
-        })?;
+        let node_uuid = Uuid::parse_str(&req.node_id)
+            .map_err(|e| Status::invalid_argument(format!("Invalid node_id format: {}", e)))?;
 
         // Update node status to draining
         match metadata
@@ -407,8 +406,7 @@ impl DataServiceImpl {
 
 #[tonic::async_trait]
 impl DataService for DataServiceImpl {
-    type StreamDataStream =
-        Pin<Box<dyn Stream<Item = Result<DataChunk, Status>> + Send + 'static>>;
+    type StreamDataStream = Pin<Box<dyn Stream<Item = Result<DataChunk, Status>> + Send + 'static>>;
 
     #[instrument(skip(self, request), fields(dataset_id))]
     async fn stream_data(
@@ -427,14 +425,13 @@ impl DataService for DataServiceImpl {
             "Starting data stream"
         );
 
-        let metadata = self.metadata().ok_or_else(|| {
-            Status::unavailable("Metadata service not configured")
-        })?;
+        let metadata = self
+            .metadata()
+            .ok_or_else(|| Status::unavailable("Metadata service not configured"))?;
 
         // Parse dataset ID as UUID (file ID)
-        let file_uuid = Uuid::parse_str(&dataset_id).map_err(|e| {
-            Status::invalid_argument(format!("Invalid dataset_id: {}", e))
-        })?;
+        let file_uuid = Uuid::parse_str(&dataset_id)
+            .map_err(|e| Status::invalid_argument(format!("Invalid dataset_id: {}", e)))?;
 
         // Get file chunks from metadata
         let chunks = metadata.get_file_chunks(file_uuid).await.map_err(|e| {
@@ -499,7 +496,10 @@ impl DataService for DataServiceImpl {
                 }
 
                 // Retrieve chunk data from storage node
-                match node_client.get_chunk_from_any(&locations, &chunk.chunk_id).await {
+                match node_client
+                    .get_chunk_from_any(&locations, &chunk.chunk_id)
+                    .await
+                {
                     Ok(data) => {
                         batch_data.extend_from_slice(&data);
 
@@ -558,14 +558,13 @@ impl DataService for DataServiceImpl {
         let req = request.into_inner();
         tracing::Span::current().record("dataset_id", &req.dataset_id);
 
-        let metadata = self.metadata().ok_or_else(|| {
-            Status::unavailable("Metadata service not configured")
-        })?;
+        let metadata = self
+            .metadata()
+            .ok_or_else(|| Status::unavailable("Metadata service not configured"))?;
 
         // Parse dataset ID as UUID (file ID)
-        let file_uuid = Uuid::parse_str(&req.dataset_id).map_err(|e| {
-            Status::invalid_argument(format!("Invalid dataset_id: {}", e))
-        })?;
+        let file_uuid = Uuid::parse_str(&req.dataset_id)
+            .map_err(|e| Status::invalid_argument(format!("Invalid dataset_id: {}", e)))?;
 
         // Get file metadata
         let file = metadata.get_file(file_uuid).await.map_err(|e| {
@@ -573,9 +572,8 @@ impl DataService for DataServiceImpl {
             Status::internal(format!("Database error: {}", e))
         })?;
 
-        let file = file.ok_or_else(|| {
-            Status::not_found(format!("Dataset not found: {}", req.dataset_id))
-        })?;
+        let file = file
+            .ok_or_else(|| Status::not_found(format!("Dataset not found: {}", req.dataset_id)))?;
 
         // Get chunk count
         let chunks = metadata.get_file_chunks(file_uuid).await.map_err(|e| {
@@ -620,9 +618,9 @@ impl DataService for DataServiceImpl {
             "Processing prefetch request"
         );
 
-        let metadata = self.metadata().ok_or_else(|| {
-            Status::unavailable("Metadata service not configured")
-        })?;
+        let metadata = self
+            .metadata()
+            .ok_or_else(|| Status::unavailable("Metadata service not configured"))?;
 
         let mut cached_chunks = 0u64;
         let mut failed_chunks = 0u64;
@@ -631,9 +629,8 @@ impl DataService for DataServiceImpl {
         // Otherwise, prefetch all chunks for the dataset
         let chunk_ids: Vec<Vec<u8>> = if req.chunk_ids.is_empty() {
             // Get all chunks for dataset
-            let file_uuid = Uuid::parse_str(&req.dataset_id).map_err(|e| {
-                Status::invalid_argument(format!("Invalid dataset_id: {}", e))
-            })?;
+            let file_uuid = Uuid::parse_str(&req.dataset_id)
+                .map_err(|e| Status::invalid_argument(format!("Invalid dataset_id: {}", e)))?;
 
             metadata
                 .get_file_chunks(file_uuid)
@@ -662,7 +659,11 @@ impl DataService for DataServiceImpl {
             }
 
             // Try to retrieve the chunk (this validates it's accessible)
-            match self.node_client().get_chunk_from_any(&locations, chunk_id).await {
+            match self
+                .node_client()
+                .get_chunk_from_any(&locations, chunk_id)
+                .await
+            {
                 Ok(_) => {
                     cached_chunks += 1;
                     // In a real implementation, we would cache this data locally
@@ -796,7 +797,9 @@ impl Interceptor for AuthInterceptor {
         let token = auth_header
             .and_then(|v| v.to_str().ok())
             .and_then(|s| s.strip_prefix("Bearer "))
-            .ok_or_else(|| Status::unauthenticated("Invalid authorization format (expected 'Bearer <token>')"))?;
+            .ok_or_else(|| {
+                Status::unauthenticated("Invalid authorization format (expected 'Bearer <token>')")
+            })?;
 
         // Validate token synchronously (we can't use async in interceptor)
         // For production, consider using a tower layer instead
@@ -865,7 +868,6 @@ pub mod data_service {
 // =============================================================================
 // TESTS
 // =============================================================================
-
 
 #[cfg(test)]
 mod tests {

@@ -114,7 +114,12 @@ impl SledMetadataStore {
     }
 
     /// Store a serializable value
-    fn put_value<K: AsRef<[u8]>, V: Serialize>(&self, tree: &sled::Tree, key: K, value: &V) -> Result<()> {
+    fn put_value<K: AsRef<[u8]>, V: Serialize>(
+        &self,
+        tree: &sled::Tree,
+        key: K,
+        value: &V,
+    ) -> Result<()> {
         let encoded = bincode::serialize(value)?;
         tree.insert(key, encoded)
             .map_err(|e| CyxCloudError::Storage(e.to_string()))?;
@@ -122,8 +127,15 @@ impl SledMetadataStore {
     }
 
     /// Get a deserializable value
-    fn get_value<K: AsRef<[u8]>, V: DeserializeOwned>(&self, tree: &sled::Tree, key: K) -> Result<Option<V>> {
-        match tree.get(key).map_err(|e| CyxCloudError::Storage(e.to_string()))? {
+    fn get_value<K: AsRef<[u8]>, V: DeserializeOwned>(
+        &self,
+        tree: &sled::Tree,
+        key: K,
+    ) -> Result<Option<V>> {
+        match tree
+            .get(key)
+            .map_err(|e| CyxCloudError::Storage(e.to_string()))?
+        {
             Some(bytes) => {
                 let value: V = bincode::deserialize(&bytes)?;
                 Ok(Some(value))
@@ -159,7 +171,10 @@ impl SledMetadataStore {
     pub fn get_file_by_name(&self, name: &str) -> Result<Option<FileMetadata>> {
         let name_tree = self.tree("files_by_name")?;
 
-        match name_tree.get(name.as_bytes()).map_err(|e| CyxCloudError::Storage(e.to_string()))? {
+        match name_tree
+            .get(name.as_bytes())
+            .map_err(|e| CyxCloudError::Storage(e.to_string()))?
+        {
             Some(id_bytes) => {
                 let id = Uuid::from_slice(&id_bytes)
                     .map_err(|e| CyxCloudError::Storage(e.to_string()))?;
@@ -240,7 +255,9 @@ impl SledMetadataStore {
     /// Get all nodes storing a chunk
     pub fn get_chunk_locations(&self, chunk_id: ChunkId) -> Result<Vec<String>> {
         let tree = self.tree("chunk_locations")?;
-        Ok(self.get_value(&tree, chunk_id.as_bytes())?.unwrap_or_default())
+        Ok(self
+            .get_value(&tree, chunk_id.as_bytes())?
+            .unwrap_or_default())
     }
 
     /// Remove a node from chunk location

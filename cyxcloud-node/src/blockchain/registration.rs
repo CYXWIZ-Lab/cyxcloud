@@ -95,7 +95,11 @@ impl RegistrationOps {
     }
 
     /// Get node information from on-chain
-    pub async fn get_node_info(&self, owner: &Pubkey, node_id: &str) -> Result<Option<StorageNodeInfo>> {
+    pub async fn get_node_info(
+        &self,
+        owner: &Pubkey,
+        node_id: &str,
+    ) -> Result<Option<StorageNodeInfo>> {
         let (node_pda, _) = self.derive_node_pda(owner, node_id);
 
         let account = match self.rpc_client.get_account(&node_pda) {
@@ -115,7 +119,8 @@ impl RegistrationOps {
         // Parse node_id (Anchor string: 4-byte length + UTF-8)
         let node_id_len = u32::from_le_bytes(data[offset..offset + 4].try_into()?) as usize;
         offset += 4;
-        let parsed_node_id = String::from_utf8_lossy(&data[offset..offset + node_id_len]).to_string();
+        let parsed_node_id =
+            String::from_utf8_lossy(&data[offset..offset + node_id_len]).to_string();
         offset += node_id_len;
 
         // owner (32 bytes)
@@ -391,11 +396,7 @@ impl RegistrationOps {
     }
 
     /// Complete stake withdrawal (after lockup period)
-    pub async fn complete_withdraw(
-        &self,
-        owner: &Keypair,
-        node_id: &str,
-    ) -> Result<Signature> {
+    pub async fn complete_withdraw(&self, owner: &Keypair, node_id: &str) -> Result<Signature> {
         let (registry_pda, _) = self.derive_registry_pda();
         let (node_pda, _) = self.derive_node_pda(&owner.pubkey(), node_id);
 
