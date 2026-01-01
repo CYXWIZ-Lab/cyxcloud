@@ -140,11 +140,7 @@ async fn main() -> anyhow::Result<()> {
 
                         // Calculate reserved and available
                         let reserved_gb = 2;
-                        let available_gb = if gb > reserved_gb {
-                            gb - reserved_gb
-                        } else {
-                            0
-                        };
+                        let available_gb = gb.saturating_sub(reserved_gb);
                         println!("  System reserved: {} GB", reserved_gb);
                         println!("  Available for storage: {} GB", available_gb);
                         println!();

@@ -240,11 +240,9 @@ impl StorageBackendSync for RocksDbBackend {
             .db
             .iterator_cf(&self.cf_chunks(), rocksdb::IteratorMode::Start);
 
-        for item in iter {
-            if let Ok((_, value)) = item {
-                chunk_count += 1;
-                bytes_used += value.len() as u64;
-            }
+        for (_, value) in iter.flatten() {
+            chunk_count += 1;
+            bytes_used += value.len() as u64;
         }
 
         // Calculate average latencies
@@ -289,13 +287,11 @@ impl StorageBackendSync for RocksDbBackend {
             .db
             .iterator_cf(&self.cf_chunks(), rocksdb::IteratorMode::Start);
 
-        for item in iter {
-            if let Ok((key, _)) = item {
-                if key.len() == 32 {
-                    let mut arr = [0u8; 32];
-                    arr.copy_from_slice(&key);
-                    chunks.push(ChunkId::from_bytes(arr));
-                }
+        for (key, _) in iter.flatten() {
+            if key.len() == 32 {
+                let mut arr = [0u8; 32];
+                arr.copy_from_slice(&key);
+                chunks.push(ChunkId::from_bytes(arr));
             }
         }
 

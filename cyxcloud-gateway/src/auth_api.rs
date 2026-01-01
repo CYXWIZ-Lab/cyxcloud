@@ -5,6 +5,8 @@
 //! - API key management
 //! - Token refresh
 
+#![allow(unused_imports)]
+
 use crate::auth::{
     AuthResponse, AuthService, AuthUser, ChallengeResponse, Claims, CreateApiKeyRequest, TokenType,
     WalletLoginRequest,

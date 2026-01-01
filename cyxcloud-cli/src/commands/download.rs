@@ -55,7 +55,7 @@ async fn download_single_file(
     // Determine output file path
     let file_path = if output_path.is_dir() {
         // If output is a directory, use the key's filename
-        let filename = key.split('/').last().unwrap_or(key);
+        let filename = key.split('/').next_back().unwrap_or(key);
         output_path.join(filename)
     } else {
         output_path.to_path_buf()

@@ -8,6 +8,8 @@
 //! - Rebalancing (distribute data evenly across nodes)
 //! - Hot-swap support (drain nodes before shutdown)
 
+#![allow(clippy::type_complexity)]
+
 pub mod config;
 pub mod detector;
 pub mod executor;

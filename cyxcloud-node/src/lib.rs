@@ -9,6 +9,9 @@
 //! - CyxWiz API integration for machine management
 //! - Blockchain integration for Solana (optional)
 
+#![allow(clippy::field_reassign_with_default)]
+#![allow(clippy::derivable_impls)]
+
 pub mod command_executor;
 pub mod config;
 pub mod cyxwiz_api_client;

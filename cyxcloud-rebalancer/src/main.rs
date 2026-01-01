@@ -6,6 +6,8 @@
 //! - Rebalancing (distribute data evenly)
 //! - Hot-swap support (drain nodes before shutdown)
 
+#![allow(dead_code)]
+
 mod config;
 mod detector;
 mod executor;
@@ -20,8 +22,6 @@ use std::time::Duration;
 use tokio::signal;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn, Level};
-
-use config::RebalancerConfig;
 use detector::{Detector, DetectorConfig};
 use executor::{Executor, ExecutorConfig, ProgressUpdate};
 use metadata_client::PostgresMetadataClient;

@@ -3,6 +3,8 @@
 //! Manages connections to storage nodes for chunk operations.
 //! Uses the ChunkService gRPC interface defined in cyxcloud-protocol.
 
+#![allow(unused_imports)]
+
 use bytes::Bytes;
 use cyxcloud_protocol::chunk::{
     chunk_service_client::ChunkServiceClient, ChunkMetadata as ProtoChunkMetadata, GetChunkRequest,

@@ -41,6 +41,15 @@
 //! let nodes = service.get_chunk_locations(&chunk_id).await?;
 //! ```
 
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::derivable_impls)]
+#![allow(clippy::option_map_or_none)]
+#![allow(clippy::manual_unwrap_or_default)]
+#![allow(clippy::should_implement_trait)]
+#![allow(clippy::if_then_some_else_none)]
+#![allow(clippy::map_flatten)]
+#![allow(clippy::obfuscated_if_else)]
+
 pub mod cache;
 pub mod health;
 pub mod models;

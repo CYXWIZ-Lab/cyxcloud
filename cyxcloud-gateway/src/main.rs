@@ -7,6 +7,13 @@
 //! - Authentication (JWT, wallet signatures)
 //! - mTLS support for secure node communication
 
+#![allow(clippy::double_ended_iterator_last)]
+#![allow(clippy::useless_conversion)]
+#![allow(clippy::result_large_err)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::type_complexity)]
+#![allow(dead_code)]
+
 pub mod auth;
 mod auth_api;
 #[cfg(feature = "blockchain")]

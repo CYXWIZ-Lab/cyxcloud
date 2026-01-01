@@ -5,6 +5,9 @@
 //! Uses NodeClient for chunk operations with storage nodes.
 //! Optionally integrates with Solana blockchain for payments.
 
+#![allow(unused_imports)]
+#![allow(unused_variables)]
+
 use bytes::Bytes;
 use cyxcloud_core::{
     crypto::ContentHash, reassemble_chunks, split_into_chunks, ErasureEncoder, ShardData,

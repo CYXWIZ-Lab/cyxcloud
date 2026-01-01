@@ -130,11 +130,7 @@ impl<T: StorageBackendSync + 'static> StorageBackend for AsyncWrapper<T> {
         id: ChunkId,
         data: Bytes,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
-        Box::pin(async move {
-            // Run sync operation in blocking thread pool
-            let result = self.0.put(id, data);
-            result
-        })
+        Box::pin(async move { self.0.put(id, data) })
     }
 
     fn get<'a>(

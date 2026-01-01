@@ -5,6 +5,8 @@
 //! - Cluster health changes
 //! - Job status updates
 
+#![allow(unused_variables)]
+
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},

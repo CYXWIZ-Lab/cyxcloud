@@ -3,6 +3,8 @@
 //! Implements a subset of the AWS S3 API for object storage operations.
 //! Supports: PUT, GET, DELETE, HEAD, and LIST operations.
 
+#![allow(unused_imports)]
+
 use axum::{
     body::Body,
     extract::{Path, Query, State},

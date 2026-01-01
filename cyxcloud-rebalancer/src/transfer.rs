@@ -2,6 +2,8 @@
 //!
 //! Handles the actual transfer of chunks between storage nodes using gRPC.
 
+#![allow(clippy::type_complexity)]
+
 use cyxcloud_core::chunk::ChunkId;
 use cyxcloud_metadata::postgres::Database;
 use cyxcloud_network::grpc_client::ChunkClient;

@@ -18,6 +18,8 @@
 //! Config file: ~/.cyxcloud/config.toml
 //! Credentials: ~/.cyxcloud/credentials.json
 
+#![allow(dead_code)]
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;

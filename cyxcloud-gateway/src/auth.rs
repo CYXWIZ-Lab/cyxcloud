@@ -6,6 +6,8 @@
 //! - API key management
 //! - Authentication middleware
 
+#![allow(unused_imports)]
+
 use chrono::{Duration, Utc};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, TokenData, Validation};

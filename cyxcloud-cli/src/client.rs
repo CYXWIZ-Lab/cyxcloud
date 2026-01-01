@@ -26,9 +26,6 @@ pub enum ClientError {
 
     #[error("Not found: {0}")]
     NotFound(String),
-
-    #[error("Invalid response: {0}")]
-    InvalidResponse(String),
 }
 
 pub type Result<T> = std::result::Result<T, ClientError>;

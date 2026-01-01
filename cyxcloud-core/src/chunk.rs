@@ -206,7 +206,7 @@ pub fn split_into_chunks(
     parent_id: Option<Uuid>,
 ) -> Result<Vec<Chunk>> {
     let chunk_size = chunk_size.clamp(MIN_CHUNK_SIZE, MAX_CHUNK_SIZE);
-    let total_chunks = (data.len() + chunk_size - 1) / chunk_size;
+    let total_chunks = data.len().div_ceil(chunk_size);
 
     let chunks: Vec<Chunk> = data
         .chunks(chunk_size)

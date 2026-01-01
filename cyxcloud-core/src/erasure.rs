@@ -216,7 +216,7 @@ impl ErasureEncoder {
         let shard_size = shards
             .iter()
             .find_map(|s| s.as_ref().map(|s| s.size()))
-            .ok_or_else(|| CyxCloudError::InsufficientShards {
+            .ok_or(CyxCloudError::InsufficientShards {
                 available: 0,
                 required: self.config.data_shards,
             })?;
@@ -232,8 +232,8 @@ impl ErasureEncoder {
 
         // Extract data shards and concatenate
         let mut result = Vec::with_capacity(shard_size * self.config.data_shards);
-        for i in 0..self.config.data_shards {
-            if let Some(ref shard) = shard_vecs[i] {
+        for shard_opt in shard_vecs.iter().take(self.config.data_shards) {
+            if let Some(ref shard) = shard_opt {
                 result.extend_from_slice(shard);
             } else {
                 return Err(CyxCloudError::Internal("Reconstruction failed".to_string()));
@@ -248,7 +248,7 @@ impl ErasureEncoder {
     /// Calculate the size of each shard given the data size
     fn calculate_shard_size(&self, data_size: usize) -> usize {
         // Round up to ensure all data fits
-        (data_size + self.config.data_shards - 1) / self.config.data_shards
+        data_size.div_ceil(self.config.data_shards)
     }
 
     /// Verify that shards are consistent (for health checking)

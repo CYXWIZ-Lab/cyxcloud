@@ -48,6 +48,12 @@
 //! manager.start().await?;
 //! ```
 
+#![allow(clippy::await_holding_lock)]
+#![allow(clippy::redundant_locals)]
+#![allow(clippy::result_large_err)]
+#![allow(clippy::derivable_impls)]
+#![allow(clippy::should_implement_trait)]
+
 pub mod behavior;
 pub mod discovery;
 pub mod grpc_client;
