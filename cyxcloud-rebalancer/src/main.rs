@@ -17,16 +17,16 @@ mod planner;
 mod transfer;
 
 use clap::Parser;
-use std::sync::Arc;
-use std::time::Duration;
-use tokio::signal;
-use tokio::sync::mpsc;
-use tracing::{error, info, warn, Level};
 use detector::{Detector, DetectorConfig};
 use executor::{Executor, ExecutorConfig, ProgressUpdate};
 use metadata_client::PostgresMetadataClient;
 use network_client::GrpcNetworkClient;
 use planner::{NodeInfo, Planner, PlannerConfig};
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::signal;
+use tokio::sync::mpsc;
+use tracing::{error, info, warn, Level};
 use transfer::create_transfer_fn;
 
 #[derive(Parser)]
