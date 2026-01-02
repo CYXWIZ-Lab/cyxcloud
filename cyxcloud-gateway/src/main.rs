@@ -32,7 +32,7 @@ pub use auth::{AuthConfig, AuthService};
 pub use blockchain::{BlockchainConfig, CyxCloudBlockchainClient};
 pub use state::{AppState, GatewayConfig};
 
-use axum::{routing::get, Router};
+use axum::{extract::DefaultBodyLimit, routing::get, Router};
 use clap::Parser;
 use cyxcloud_core::tls::{create_tonic_server_tls, TlsServerConfig};
 use cyxcloud_protocol::data::data_service_server::DataServiceServer;
@@ -226,6 +226,7 @@ async fn main() -> anyhow::Result<()> {
         // WebSocket endpoint
         .merge(websocket::routes())
         // Add middleware
+        .layer(DefaultBodyLimit::max(256 * 1024 * 1024))
         .layer(TraceLayer::new_for_http())
         .layer(cors)
         .with_state(state.clone());

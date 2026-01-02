@@ -725,13 +725,14 @@ impl Database {
     pub async fn create_chunk(&self, chunk: CreateChunk) -> Result<Chunk> {
         let result = sqlx::query_as::<_, Chunk>(
             r#"
-            INSERT INTO chunks (chunk_id, file_id, shard_index, is_parity, size_bytes, replication_factor)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO chunks (chunk_id, file_id, chunk_index, shard_index, is_parity, size_bytes, replication_factor)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             RETURNING *
             "#,
         )
         .bind(&chunk.chunk_id)
         .bind(chunk.file_id)
+        .bind(chunk.chunk_index)
         .bind(chunk.shard_index)
         .bind(chunk.is_parity)
         .bind(chunk.size_bytes)
@@ -755,7 +756,7 @@ impl Database {
     /// Get all chunks for a file
     pub async fn get_file_chunks(&self, file_id: Uuid) -> Result<Vec<Chunk>> {
         let result = sqlx::query_as::<_, Chunk>(
-            "SELECT * FROM chunks WHERE file_id = $1 ORDER BY shard_index",
+            "SELECT * FROM chunks WHERE file_id = $1 ORDER BY chunk_index, shard_index",
         )
         .bind(file_id)
         .fetch_all(&self.pool)

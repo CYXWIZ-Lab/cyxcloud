@@ -212,7 +212,8 @@ pub struct Chunk {
     pub file_id: Uuid,
 
     // Position
-    pub shard_index: i32,
+    pub chunk_index: i32,  // Which chunk of the file (0-based, for multi-chunk files)
+    pub shard_index: i32,  // Which shard within erasure coding (0-13)
     pub is_parity: bool,
 
     // Size
@@ -235,7 +236,8 @@ pub struct Chunk {
 pub struct CreateChunk {
     pub chunk_id: Vec<u8>,
     pub file_id: Uuid,
-    pub shard_index: i32,
+    pub chunk_index: i32,  // Which chunk of the file (0-based)
+    pub shard_index: i32,  // Which shard within erasure coding (0-13)
     pub is_parity: bool,
     pub size_bytes: i32,
     pub replication_factor: i32,
