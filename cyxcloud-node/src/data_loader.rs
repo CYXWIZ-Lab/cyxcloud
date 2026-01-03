@@ -390,6 +390,11 @@ impl DataLoader {
     pub fn is_stopped(&self) -> bool {
         self.should_stop.load(Ordering::SeqCst)
     }
+
+    /// Get current configuration
+    pub fn config(&self) -> &DataLoaderConfig {
+        &self.config
+    }
 }
 
 /// Builder for DataLoader
