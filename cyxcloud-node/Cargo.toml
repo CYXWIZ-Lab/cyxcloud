@@ -52,6 +52,8 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 bytes = { workspace = true }
 hostname = "0.3"
+hex = "0.4"
+blake3 = "1.5"
 
 # System metrics
 sysinfo = "0.31"

@@ -15,10 +15,14 @@
 pub mod command_executor;
 pub mod config;
 pub mod cyxwiz_api_client;
+pub mod data_loader;
+pub mod datastream_client;
 pub mod health;
 pub mod machine_service;
 pub mod metrics;
 pub mod symbols;
+pub mod training_executor;
+pub mod verification;
 
 #[cfg(feature = "blockchain")]
 pub mod blockchain;
@@ -43,3 +47,18 @@ pub use health::{
 };
 pub use machine_service::MachineService;
 pub use metrics::{init_metrics, HealthState, MetricsServer, NodeMetrics};
+pub use data_loader::{
+    DataLoader, DataLoaderBuilder, DataLoaderConfig, LoaderState, LoaderStats, TrainingBatch,
+};
+pub use datastream_client::{
+    BatchIterator, DataStreamClient, DataStreamClientBuilder, DataStreamConfig, DataStreamError,
+    DataStreamResult, VerifiedBatch,
+};
+pub use training_executor::{
+    TrainingError, TrainingExecutor, TrainingExecutorBuilder, TrainingJobConfig, TrainingState,
+    TrainingStatus,
+};
+pub use verification::{
+    DatasetVerification, DatasetVerifier, PublicDatasetHashes, TrustRequirement,
+    VerificationError, VerificationOptions,
+};
