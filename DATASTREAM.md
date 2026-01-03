@@ -4,6 +4,47 @@
 
 DataStream enables zero-copy data streaming from CyxCloud directly to GPU memory during ML training, with cryptographic verification at every step.
 
+### Training Modes
+
+Users can mix and match data sources and training locations:
+
+| Mode | Data Source | Training Location | Cost | Use Case |
+|------|-------------|-------------------|------|----------|
+| **Local + Local** | Local files | Your GPU | Free | Development, small datasets |
+| **Cloud + Local** | CyxCloud | Your GPU | Storage only | Multi-machine, collaboration, verified datasets |
+| **Cloud + Cloud** | CyxCloud | Server Node | Storage + Compute | No GPU, large-scale training |
+
+**Cloud + Local Flow** (Train locally with cloud data):
+```
+┌──────────────────┐         ┌──────────────────┐         ┌──────────────────┐
+│   CyxWiz Engine  │         │  CyxCloud Gateway │         │  Storage Nodes   │
+│   (Your Machine) │         │                   │         │                  │
+│                  │         │                   │         │                  │
+│  1. Login ───────┼────────>│                   │         │                  │
+│                  │         │                   │         │                  │
+│  2. Browse ──────┼────────>│  ListDatasets()   │         │                  │
+│     datasets     │<────────┼──                 │         │                  │
+│                  │         │                   │         │                  │
+│  3. Start local  │         │                   │         │                  │
+│     training     │         │                   │         │                  │
+│        │         │         │                   │         │                  │
+│        ▼         │         │                   │         │                  │
+│  4. StreamBatches├────────>│  Fetch & decode   │────────>│  Get shards      │
+│     (gRPC)       │<────────┼── verified data   │<────────┼──                │
+│        │         │         │                   │         │                  │
+│        ▼         │         │                   │         │                  │
+│  5. Train on     │         │                   │         │                  │
+│     YOUR GPU     │         │                   │         │                  │
+└──────────────────┘         └──────────────────┘         └──────────────────┘
+```
+
+**Benefits of Cloud + Local:**
+- **Multi-machine access** - Same dataset from laptop, desktop, work PC
+- **Team collaboration** - Share datasets, each member trains locally
+- **Verified data** - Use trusted public datasets (MNIST, CIFAR, ImageNet) with hash verification
+- **No large downloads** - Stream only the batches you need during training
+- **Backup** - Data is erasure-coded across distributed storage nodes
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                              CyxWiz Engine                               │
