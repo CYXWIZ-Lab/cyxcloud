@@ -864,6 +864,72 @@ LEFT JOIN public_datasets pd ON pd.cached_dataset_id = d.id;
 | 6.2 | `tests/verification_test.rs` | Hash verification tests |
 | 6.3 | `tests/e2e_training_test.rs` | End-to-end training test |
 
+### Phase 7: Engine GUI Integration (Week 4-5)
+
+| Task | File | Description |
+|------|------|-------------|
+| 7.1 | `cyxwiz-engine/src/network/datastream_client.h/cpp` | DataStream gRPC client (C++) |
+| 7.2 | `cyxwiz-engine/src/gui/panels/cloud_browser.h/cpp` | Browse CyxCloud datasets with search/filter |
+| 7.3 | `cyxwiz-engine/src/gui/panels/cloud_dataset_manager.h/cpp` | Create, verify, share, delete datasets |
+| 7.4 | `cyxwiz-engine/src/gui/panels/cloud_upload_dialog.h/cpp` | Upload local files to CyxCloud |
+| 7.5 | `cyxwiz-engine/src/core/cloud_data_registry.h/cpp` | Integration with existing DataRegistry |
+| 7.6 | `cyxwiz-engine/src/gui/panels/trust_badge.h/cpp` | Trust level visualization (icons, colors) |
+| 7.7 | `cyxwiz-protocol/proto/datastream.proto` | Generate C++ stubs for Engine |
+
+**Engine GUI Features:**
+
+1. **Cloud Browser Panel** - Browse user's datasets and public registry
+   - Tree view: My Datasets / Shared With Me / Public Datasets
+   - Search by name, filter by trust level
+   - Preview dataset info (size, file count, schema)
+   - Double-click to load into DataRegistry
+
+2. **Dataset Manager Panel** - Full dataset lifecycle
+   - Create dataset from uploaded files
+   - Verify dataset integrity
+   - Share with other users (email/user ID)
+   - View sharing permissions
+   - Delete dataset
+
+3. **Upload Dialog** - Upload local files to CyxCloud
+   - Drag-and-drop folder/files
+   - Progress bar with cancel
+   - Auto-create dataset option
+
+4. **Trust Badge Widget** - Visual trust indicators
+   - Icons: 🔒 Self, ✍️ Signed, ✅ Verified, 🛡️ Attested, ⚠️ Untrusted
+   - Tooltip with verification details
+   - Click to verify/upgrade trust
+
+5. **Node Editor Integration** - DataInput node enhancements
+   - "Load from Cloud" button
+   - Show trust badge on node
+   - Streaming progress indicator
+
+**Flow Diagram:**
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           CyxWiz Engine GUI                              │
+│                                                                          │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌─────────────┐ │
+│  │ Cloud        │  │ Dataset      │  │ Upload       │  │ Node Editor │ │
+│  │ Browser      │  │ Manager      │  │ Dialog       │  │ (DataInput) │ │
+│  │              │  │              │  │              │  │             │ │
+│  │ ├─ My Data   │  │ [Create]     │  │ [Drop files] │  │ [Load from  │ │
+│  │ ├─ Shared    │  │ [Verify]     │  │ [Upload]     │  │  Cloud]     │ │
+│  │ └─ Public    │  │ [Share]      │  │ [Cancel]     │  │ ✅ CIFAR-10 │ │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  └──────┬──────┘ │
+│         │                 │                 │                 │         │
+│         └─────────────────┴─────────────────┴─────────────────┘         │
+│                                    │                                     │
+│                         DataStreamClient (gRPC)                          │
+└────────────────────────────────────┼─────────────────────────────────────┘
+                                     │
+                                     ▼
+                            CyxCloud Gateway
+```
+
 ---
 
 ## API Examples
