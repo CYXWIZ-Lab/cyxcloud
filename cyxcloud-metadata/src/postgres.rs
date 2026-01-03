@@ -1514,6 +1514,453 @@ impl Database {
         );
         Ok(count)
     }
+
+    // =========================================================================
+    // DATASTREAM OPERATIONS
+    // =========================================================================
+
+    /// Create a new dataset
+    #[instrument(skip(self, dataset))]
+    pub async fn create_dataset(&self, dataset: CreateDataset) -> Result<Dataset> {
+        let result = sqlx::query_as::<_, Dataset>(
+            r#"
+            INSERT INTO datasets (name, owner_id, description, content_hash, total_size_bytes,
+                                 file_count, schema, trust_level, signature, parent_version_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            RETURNING *
+            "#,
+        )
+        .bind(&dataset.name)
+        .bind(dataset.owner_id)
+        .bind(&dataset.description)
+        .bind(&dataset.content_hash)
+        .bind(dataset.total_size_bytes)
+        .bind(dataset.file_count)
+        .bind(&dataset.schema)
+        .bind(dataset.trust_level as i32)
+        .bind(&dataset.signature)
+        .bind(dataset.parent_version_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        debug!(dataset_id = %result.id, name = %dataset.name, "Dataset created");
+        Ok(result)
+    }
+
+    /// Get a dataset by ID
+    pub async fn get_dataset(&self, id: Uuid) -> Result<Option<Dataset>> {
+        let result = sqlx::query_as::<_, Dataset>("SELECT * FROM datasets WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(result)
+    }
+
+    /// Get datasets by owner
+    pub async fn get_datasets_by_owner(&self, owner_id: Uuid) -> Result<Vec<Dataset>> {
+        let result = sqlx::query_as::<_, Dataset>(
+            "SELECT * FROM datasets WHERE owner_id = $1 ORDER BY created_at DESC",
+        )
+        .bind(owner_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
+    /// Get dataset by name and owner (latest version)
+    pub async fn get_dataset_by_name(
+        &self,
+        owner_id: Uuid,
+        name: &str,
+    ) -> Result<Option<Dataset>> {
+        let result = sqlx::query_as::<_, Dataset>(
+            "SELECT * FROM datasets WHERE owner_id = $1 AND name = $2 ORDER BY version DESC LIMIT 1",
+        )
+        .bind(owner_id)
+        .bind(name)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
+    /// Get all versions of a dataset
+    pub async fn get_dataset_versions(&self, owner_id: Uuid, name: &str) -> Result<Vec<Dataset>> {
+        let result = sqlx::query_as::<_, Dataset>(
+            "SELECT * FROM datasets WHERE owner_id = $1 AND name = $2 ORDER BY version DESC",
+        )
+        .bind(owner_id)
+        .bind(name)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
+    /// Get datasets by trust level
+    pub async fn get_datasets_by_trust_level(&self, trust_level: i32) -> Result<Vec<Dataset>> {
+        let result = sqlx::query_as::<_, Dataset>(
+            "SELECT * FROM datasets WHERE trust_level <= $1 ORDER BY created_at DESC",
+        )
+        .bind(trust_level)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
+    /// Update dataset trust level and verification
+    pub async fn update_dataset_trust(
+        &self,
+        dataset_id: Uuid,
+        trust_level: i32,
+        signature: Option<&[u8]>,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE datasets
+            SET trust_level = $1, signature = $2, verified_at = NOW(), updated_at = NOW()
+            WHERE id = $3
+            "#,
+        )
+        .bind(trust_level)
+        .bind(signature)
+        .bind(dataset_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Delete a dataset
+    pub async fn delete_dataset(&self, dataset_id: Uuid) -> Result<()> {
+        sqlx::query("DELETE FROM datasets WHERE id = $1")
+            .bind(dataset_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Add a file to a dataset
+    #[instrument(skip(self, file))]
+    pub async fn create_dataset_file(&self, file: CreateDatasetFile) -> Result<DatasetFile> {
+        let result = sqlx::query_as::<_, DatasetFile>(
+            r#"
+            INSERT INTO dataset_files (dataset_id, file_id, path_in_dataset, content_hash, size_bytes, file_index)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING *
+            "#,
+        )
+        .bind(file.dataset_id)
+        .bind(file.file_id)
+        .bind(&file.path_in_dataset)
+        .bind(&file.content_hash)
+        .bind(file.size_bytes)
+        .bind(file.file_index)
+        .fetch_one(&self.pool)
+        .await?;
+
+        debug!(dataset_id = %file.dataset_id, file_id = %file.file_id, "Dataset file added");
+        Ok(result)
+    }
+
+    /// Get all files in a dataset
+    pub async fn get_dataset_files(&self, dataset_id: Uuid) -> Result<Vec<DatasetFile>> {
+        let result = sqlx::query_as::<_, DatasetFile>(
+            "SELECT * FROM dataset_files WHERE dataset_id = $1 ORDER BY file_index",
+        )
+        .bind(dataset_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
+    /// Get a specific file in a dataset by path
+    pub async fn get_dataset_file_by_path(
+        &self,
+        dataset_id: Uuid,
+        path: &str,
+    ) -> Result<Option<DatasetFile>> {
+        let result = sqlx::query_as::<_, DatasetFile>(
+            "SELECT * FROM dataset_files WHERE dataset_id = $1 AND path_in_dataset = $2",
+        )
+        .bind(dataset_id)
+        .bind(path)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
+    /// Get a file by index (for streaming batches)
+    pub async fn get_dataset_file_by_index(
+        &self,
+        dataset_id: Uuid,
+        index: i32,
+    ) -> Result<Option<DatasetFile>> {
+        let result = sqlx::query_as::<_, DatasetFile>(
+            "SELECT * FROM dataset_files WHERE dataset_id = $1 AND file_index = $2",
+        )
+        .bind(dataset_id)
+        .bind(index)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
+    /// Get public dataset by name and version
+    pub async fn get_public_dataset(
+        &self,
+        name: &str,
+        version: &str,
+    ) -> Result<Option<PublicDataset>> {
+        let result = sqlx::query_as::<_, PublicDataset>(
+            "SELECT * FROM public_datasets WHERE name = $1 AND version = $2",
+        )
+        .bind(name)
+        .bind(version)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
+    /// Get all public datasets
+    pub async fn get_all_public_datasets(&self) -> Result<Vec<PublicDataset>> {
+        let result =
+            sqlx::query_as::<_, PublicDataset>("SELECT * FROM public_datasets ORDER BY name")
+                .fetch_all(&self.pool)
+                .await?;
+        Ok(result)
+    }
+
+    /// Find public dataset by hash
+    pub async fn find_public_dataset_by_hash(
+        &self,
+        hash: &[u8],
+    ) -> Result<Option<PublicDataset>> {
+        let result = sqlx::query_as::<_, PublicDataset>(
+            "SELECT * FROM public_datasets WHERE official_hash = $1",
+        )
+        .bind(hash)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
+    /// Update public dataset cache reference
+    pub async fn update_public_dataset_cache(
+        &self,
+        public_dataset_id: Uuid,
+        cached_dataset_id: Uuid,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE public_datasets SET cached_dataset_id = $1, cached_at = NOW() WHERE id = $2",
+        )
+        .bind(cached_dataset_id)
+        .bind(public_dataset_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Create a data access token
+    #[instrument(skip(self, token))]
+    pub async fn create_data_access_token(
+        &self,
+        token: CreateDataAccessToken,
+    ) -> Result<DataAccessToken> {
+        let result = sqlx::query_as::<_, DataAccessToken>(
+            r#"
+            INSERT INTO data_access_tokens (id, dataset_id, node_id, user_id, token_hash, scopes, expires_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING *
+            "#,
+        )
+        .bind(token.id)
+        .bind(token.dataset_id)
+        .bind(token.node_id)
+        .bind(token.user_id)
+        .bind(&token.token_hash)
+        .bind(&token.scopes)
+        .bind(token.expires_at)
+        .fetch_one(&self.pool)
+        .await?;
+
+        debug!(token_id = %result.id, dataset_id = %token.dataset_id, "Data access token created");
+        Ok(result)
+    }
+
+    /// Get data access token by ID
+    pub async fn get_data_access_token(&self, id: Uuid) -> Result<Option<DataAccessToken>> {
+        let result = sqlx::query_as::<_, DataAccessToken>(
+            "SELECT * FROM data_access_tokens WHERE id = $1 AND revoked_at IS NULL AND expires_at > NOW()",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
+    /// Validate a data access token by hash
+    pub async fn validate_data_access_token(
+        &self,
+        token_hash: &[u8],
+    ) -> Result<Option<DataAccessToken>> {
+        let result = sqlx::query_as::<_, DataAccessToken>(
+            "SELECT * FROM data_access_tokens WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > NOW()",
+        )
+        .bind(token_hash)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
+    /// Revoke a data access token
+    pub async fn revoke_data_access_token(&self, token_id: Uuid) -> Result<()> {
+        sqlx::query("UPDATE data_access_tokens SET revoked_at = NOW() WHERE id = $1")
+            .bind(token_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Revoke all tokens for a dataset
+    pub async fn revoke_dataset_tokens(&self, dataset_id: Uuid) -> Result<u64> {
+        let result = sqlx::query(
+            "UPDATE data_access_tokens SET revoked_at = NOW() WHERE dataset_id = $1 AND revoked_at IS NULL",
+        )
+        .bind(dataset_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
+
+    /// Clean up expired tokens
+    pub async fn cleanup_expired_tokens(&self) -> Result<u64> {
+        let result =
+            sqlx::query("DELETE FROM data_access_tokens WHERE expires_at < NOW() - INTERVAL '7 days'")
+                .execute(&self.pool)
+                .await?;
+        Ok(result.rows_affected())
+    }
+
+    /// Share a dataset with another user
+    #[instrument(skip(self, share))]
+    pub async fn create_dataset_share(&self, share: CreateDatasetShare) -> Result<DatasetShare> {
+        let result = sqlx::query_as::<_, DatasetShare>(
+            r#"
+            INSERT INTO dataset_shares (dataset_id, shared_with_user_id, shared_by_user_id, permissions, expires_at)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (dataset_id, shared_with_user_id) DO UPDATE SET
+                permissions = EXCLUDED.permissions,
+                expires_at = EXCLUDED.expires_at
+            RETURNING *
+            "#,
+        )
+        .bind(share.dataset_id)
+        .bind(share.shared_with_user_id)
+        .bind(share.shared_by_user_id)
+        .bind(&share.permissions)
+        .bind(share.expires_at)
+        .fetch_one(&self.pool)
+        .await?;
+
+        debug!(
+            dataset_id = %share.dataset_id,
+            shared_with = %share.shared_with_user_id,
+            "Dataset shared"
+        );
+        Ok(result)
+    }
+
+    /// Get shares for a dataset
+    pub async fn get_dataset_shares(&self, dataset_id: Uuid) -> Result<Vec<DatasetShare>> {
+        let result = sqlx::query_as::<_, DatasetShare>(
+            "SELECT * FROM dataset_shares WHERE dataset_id = $1 AND (expires_at IS NULL OR expires_at > NOW())",
+        )
+        .bind(dataset_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
+    /// Get datasets shared with a user
+    pub async fn get_datasets_shared_with_user(&self, user_id: Uuid) -> Result<Vec<Dataset>> {
+        let result = sqlx::query_as::<_, Dataset>(
+            r#"
+            SELECT d.* FROM datasets d
+            JOIN dataset_shares ds ON ds.dataset_id = d.id
+            WHERE ds.shared_with_user_id = $1
+            AND (ds.expires_at IS NULL OR ds.expires_at > NOW())
+            ORDER BY d.created_at DESC
+            "#,
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
+    /// Check if user has access to a dataset
+    pub async fn check_dataset_access(
+        &self,
+        dataset_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<Option<DatasetShare>> {
+        let result = sqlx::query_as::<_, DatasetShare>(
+            r#"
+            SELECT * FROM dataset_shares
+            WHERE dataset_id = $1 AND shared_with_user_id = $2
+            AND (expires_at IS NULL OR expires_at > NOW())
+            "#,
+        )
+        .bind(dataset_id)
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
+    /// Remove a dataset share
+    pub async fn remove_dataset_share(
+        &self,
+        dataset_id: Uuid,
+        shared_with_user_id: Uuid,
+    ) -> Result<()> {
+        sqlx::query(
+            "DELETE FROM dataset_shares WHERE dataset_id = $1 AND shared_with_user_id = $2",
+        )
+        .bind(dataset_id)
+        .bind(shared_with_user_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Get dataset summary with trust info
+    pub async fn get_dataset_summary(&self, dataset_id: Uuid) -> Result<Option<DatasetSummary>> {
+        let result = sqlx::query_as::<_, DatasetSummary>(
+            "SELECT * FROM dataset_summary WHERE id = $1",
+        )
+        .bind(dataset_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
+    /// Get all accessible datasets for a user (owned + shared)
+    pub async fn get_user_accessible_datasets(&self, user_id: Uuid) -> Result<Vec<Dataset>> {
+        let result = sqlx::query_as::<_, Dataset>(
+            r#"
+            SELECT * FROM datasets WHERE owner_id = $1
+            UNION
+            SELECT d.* FROM datasets d
+            JOIN dataset_shares ds ON ds.dataset_id = d.id
+            WHERE ds.shared_with_user_id = $1
+            AND (ds.expires_at IS NULL OR ds.expires_at > NOW())
+            ORDER BY created_at DESC
+            "#,
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(result)
+    }
 }
 
 #[cfg(test)]

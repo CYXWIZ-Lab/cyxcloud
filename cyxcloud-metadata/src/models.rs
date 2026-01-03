@@ -703,3 +703,274 @@ mod tests {
         assert_eq!(SlashReason::from_str("invalid"), None);
     }
 }
+
+// =============================================================================
+// DATASTREAM MODELS (Zero-copy ML Training Data)
+// =============================================================================
+
+/// Trust level for datasets
+/// 0=self, 1=signed, 2=verified, 3=attested, 4=untrusted
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "int4")]
+#[repr(i32)]
+pub enum TrustLevel {
+    /// Self-uploaded data (highest trust)
+    SelfUploaded = 0,
+    /// Cryptographically signed by trusted party
+    Signed = 1,
+    /// Hash verified against known good source
+    Verified = 2,
+    /// TEE/SGX attested
+    Attested = 3,
+    /// Untrusted (needs verification)
+    Untrusted = 4,
+}
+
+impl Default for TrustLevel {
+    fn default() -> Self {
+        Self::Untrusted
+    }
+}
+
+impl TrustLevel {
+    pub fn from_i32(value: i32) -> Self {
+        match value {
+            0 => Self::SelfUploaded,
+            1 => Self::Signed,
+            2 => Self::Verified,
+            3 => Self::Attested,
+            _ => Self::Untrusted,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::SelfUploaded => "self",
+            Self::Signed => "signed",
+            Self::Verified => "verified",
+            Self::Attested => "attested",
+            Self::Untrusted => "untrusted",
+        }
+    }
+}
+
+impl std::fmt::Display for TrustLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+/// Dataset - Versioned collection of files for ML training
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct Dataset {
+    pub id: Uuid,
+    pub name: String,
+    pub owner_id: Uuid,
+    pub description: Option<String>,
+
+    // Content addressing
+    pub content_hash: Vec<u8>,
+    pub total_size_bytes: i64,
+    pub file_count: i32,
+
+    // Schema (for structured data)
+    pub schema: Option<serde_json::Value>,
+
+    // Trust
+    pub trust_level: i32,
+    pub signature: Option<Vec<u8>>,
+    pub verified_at: Option<DateTime<Utc>>,
+
+    // Versioning
+    pub version: i32,
+    pub parent_version_id: Option<Uuid>,
+
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl Dataset {
+    pub fn trust_level_enum(&self) -> TrustLevel {
+        TrustLevel::from_i32(self.trust_level)
+    }
+
+    pub fn is_trusted(&self) -> bool {
+        self.trust_level <= TrustLevel::Verified as i32
+    }
+}
+
+/// Parameters for creating a new dataset
+#[derive(Debug, Clone)]
+pub struct CreateDataset {
+    pub name: String,
+    pub owner_id: Uuid,
+    pub description: Option<String>,
+    pub content_hash: Vec<u8>,
+    pub total_size_bytes: i64,
+    pub file_count: i32,
+    pub schema: Option<serde_json::Value>,
+    pub trust_level: TrustLevel,
+    pub signature: Option<Vec<u8>>,
+    pub parent_version_id: Option<Uuid>,
+}
+
+/// File within a dataset
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct DatasetFile {
+    pub id: Uuid,
+    pub dataset_id: Uuid,
+    pub file_id: Uuid,
+    pub path_in_dataset: String,
+    pub content_hash: Vec<u8>,
+    pub size_bytes: i64,
+    pub file_index: i32,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Parameters for creating a dataset file reference
+#[derive(Debug, Clone)]
+pub struct CreateDatasetFile {
+    pub dataset_id: Uuid,
+    pub file_id: Uuid,
+    pub path_in_dataset: String,
+    pub content_hash: Vec<u8>,
+    pub size_bytes: i64,
+    pub file_index: i32,
+}
+
+/// Public dataset registry entry (ImageNet, CIFAR, etc.)
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct PublicDataset {
+    pub id: Uuid,
+    pub name: String,
+    pub version: String,
+    pub official_url: String,
+    pub official_hash: Vec<u8>,
+    pub paper_url: Option<String>,
+    pub license: Option<String>,
+
+    // CyxCloud cached copy
+    pub cached_dataset_id: Option<Uuid>,
+    pub cached_at: Option<DateTime<Utc>>,
+
+    // Verification
+    pub verified_by: Vec<String>,
+    pub verified_at: DateTime<Utc>,
+
+    pub created_at: DateTime<Utc>,
+}
+
+/// Short-lived token for Server Node direct data access
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct DataAccessToken {
+    pub id: Uuid,
+    pub dataset_id: Uuid,
+    pub node_id: Option<Uuid>,
+    pub user_id: Uuid,
+    pub token_hash: Vec<u8>,
+    pub scopes: Vec<String>,
+    pub expires_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+    pub revoked_at: Option<DateTime<Utc>>,
+}
+
+impl DataAccessToken {
+    pub fn is_valid(&self) -> bool {
+        self.revoked_at.is_none() && self.expires_at > Utc::now()
+    }
+
+    pub fn has_scope(&self, scope: &str) -> bool {
+        self.scopes.iter().any(|s| s == scope || s == "*")
+    }
+}
+
+/// Parameters for creating a data access token
+#[derive(Debug, Clone)]
+pub struct CreateDataAccessToken {
+    pub id: Uuid,
+    pub dataset_id: Uuid,
+    pub node_id: Option<Uuid>,
+    pub user_id: Uuid,
+    pub token_hash: Vec<u8>,
+    pub scopes: Vec<String>,
+    pub expires_at: DateTime<Utc>,
+}
+
+/// Dataset sharing between users
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct DatasetShare {
+    pub id: Uuid,
+    pub dataset_id: Uuid,
+    pub shared_with_user_id: Uuid,
+    pub shared_by_user_id: Uuid,
+    pub permissions: Vec<String>,
+    pub created_at: DateTime<Utc>,
+    pub expires_at: Option<DateTime<Utc>>,
+}
+
+impl DatasetShare {
+    pub fn is_valid(&self) -> bool {
+        self.expires_at.map_or(true, |exp| exp > Utc::now())
+    }
+
+    pub fn can_read(&self) -> bool {
+        self.permissions.iter().any(|p| p == "read" || p == "*")
+    }
+
+    pub fn can_stream(&self) -> bool {
+        self.permissions.iter().any(|p| p == "stream" || p == "*")
+    }
+
+    pub fn can_reshare(&self) -> bool {
+        self.permissions.iter().any(|p| p == "reshare" || p == "*")
+    }
+}
+
+/// Parameters for creating a dataset share
+#[derive(Debug, Clone)]
+pub struct CreateDatasetShare {
+    pub dataset_id: Uuid,
+    pub shared_with_user_id: Uuid,
+    pub shared_by_user_id: Uuid,
+    pub permissions: Vec<String>,
+    pub expires_at: Option<DateTime<Utc>>,
+}
+
+/// Dataset summary view (with trust info)
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct DatasetSummary {
+    pub id: Uuid,
+    pub name: String,
+    pub owner_id: Uuid,
+    pub description: Option<String>,
+    pub total_size_bytes: i64,
+    pub file_count: i32,
+    pub trust_level: i32,
+    pub version: i32,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub trust_label: Option<String>,
+    pub public_dataset_name: Option<String>,
+    pub public_verified_by: Option<Vec<String>>,
+}
+
+/// Dataset verification result
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DatasetVerification {
+    pub dataset_id: Uuid,
+    pub verified: bool,
+    pub trust_level: TrustLevel,
+    pub expected_hash: Vec<u8>,
+    pub actual_hash: Option<Vec<u8>>,
+    pub verified_at: DateTime<Utc>,
+    pub verified_by: Option<String>,
+    pub message: Option<String>,
+}
+
+/// Match result when checking against public datasets
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublicDatasetMatch {
+    pub public_dataset: PublicDataset,
+    pub hash_matches: bool,
+    pub confidence: f64,
+}
