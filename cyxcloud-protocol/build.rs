@@ -11,6 +11,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "proto/metadata.proto",
                 "proto/node.proto",
                 "proto/data.proto",
+                "proto/datastream.proto",
             ],
             &["proto"],
         )?;

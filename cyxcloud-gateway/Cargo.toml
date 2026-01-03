@@ -57,6 +57,7 @@ rand = "0.8"
 md5 = "0.7"
 base64 = "0.21"
 hex = "0.4"
+blake3 = "1.5"
 
 # Authentication
 jsonwebtoken = { workspace = true }

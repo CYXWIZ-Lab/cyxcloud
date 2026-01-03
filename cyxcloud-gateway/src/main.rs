@@ -18,6 +18,7 @@ pub mod auth;
 mod auth_api;
 #[cfg(feature = "blockchain")]
 pub mod blockchain;
+mod datastream;
 mod grpc_api;
 mod node_client;
 mod node_monitor;
@@ -36,7 +37,9 @@ use axum::{extract::DefaultBodyLimit, routing::get, Router};
 use clap::Parser;
 use cyxcloud_core::tls::{create_tonic_server_tls, TlsServerConfig};
 use cyxcloud_protocol::data::data_service_server::DataServiceServer;
+use cyxcloud_protocol::datastream::data_stream_service_server::DataStreamServiceServer;
 use cyxcloud_protocol::node::node_service_server::NodeServiceServer;
+use datastream::DataStreamServiceImpl;
 use grpc_api::{AuthInterceptor, DataServiceImpl, NodeServiceImpl};
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -258,6 +261,9 @@ async fn main() -> anyhow::Result<()> {
         // Data service for ML training data streaming
         let data_service = DataServiceImpl::new(grpc_state.clone());
 
+        // DataStream service for zero-copy ML training data with verification
+        let datastream_service = DataStreamServiceImpl::new(grpc_state.clone());
+
         let tls_status = if grpc_tls_config.is_some() {
             "enabled"
         } else {
@@ -299,11 +305,15 @@ async fn main() -> anyhow::Result<()> {
             // Wrap services with authentication
             let node_server =
                 NodeServiceServer::with_interceptor(node_service, auth_interceptor.clone());
-            let data_server = DataServiceServer::with_interceptor(data_service, auth_interceptor);
+            let data_server =
+                DataServiceServer::with_interceptor(data_service, auth_interceptor.clone());
+            let datastream_server =
+                DataStreamServiceServer::with_interceptor(datastream_service, auth_interceptor);
 
             if let Err(e) = builder
                 .add_service(node_server)
                 .add_service(data_server)
+                .add_service(datastream_server)
                 .serve(grpc_addr)
                 .await
             {
@@ -313,10 +323,12 @@ async fn main() -> anyhow::Result<()> {
             // No authentication
             let node_server = NodeServiceServer::new(node_service);
             let data_server = DataServiceServer::new(data_service);
+            let datastream_server = DataStreamServiceServer::new(datastream_service);
 
             if let Err(e) = builder
                 .add_service(node_server)
                 .add_service(data_server)
+                .add_service(datastream_server)
                 .serve(grpc_addr)
                 .await
             {

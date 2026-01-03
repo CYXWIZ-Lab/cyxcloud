@@ -1628,6 +1628,7 @@ dependencies = [
  "axum 0.7.9",
  "axum-server",
  "base64 0.21.7",
+ "blake3",
  "bs58",
  "bytes",
  "chrono",
