@@ -1171,6 +1171,49 @@ impl AppState {
         Ok(data.slice(start..end))
     }
 
+    /// Get object with content hash verification
+    ///
+    /// Returns the object data only if the content hash matches the expected hash.
+    /// Used by DataStream service to ensure data integrity during training.
+    pub async fn get_object_verified(
+        &self,
+        bucket: &str,
+        key: &str,
+        expected_hash: &[u8],
+    ) -> S3Result<Bytes> {
+        let data = self.get_object(bucket, key).await?;
+
+        // Compute actual hash
+        let actual_hash = ContentHash::compute(&data);
+
+        // Verify hash matches
+        if actual_hash.as_bytes() != expected_hash {
+            warn!(
+                bucket = bucket,
+                key = key,
+                expected = hex::encode(expected_hash),
+                actual = actual_hash.to_hex(),
+                "Content hash verification failed"
+            );
+            return Err(S3Error::Internal(format!(
+                "Content hash mismatch for {}/{}: expected {}, got {}",
+                bucket,
+                key,
+                hex::encode(expected_hash),
+                actual_hash.to_hex()
+            )));
+        }
+
+        debug!(
+            bucket = bucket,
+            key = key,
+            hash = actual_hash.to_hex(),
+            "Object retrieved with verified hash"
+        );
+
+        Ok(data)
+    }
+
     /// Delete an object
     pub async fn delete_object(&self, bucket: &str, key: &str) -> S3Result<()> {
         if self.use_memory {

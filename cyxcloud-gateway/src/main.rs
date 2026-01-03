@@ -18,6 +18,7 @@ pub mod auth;
 mod auth_api;
 #[cfg(feature = "blockchain")]
 pub mod blockchain;
+mod data_access;
 mod datastream;
 mod grpc_api;
 mod node_client;
@@ -26,6 +27,7 @@ mod payment_daemon;
 mod rebalancer_daemon;
 mod s3_api;
 mod state;
+mod verification;
 mod websocket;
 
 pub use auth::{AuthConfig, AuthService};

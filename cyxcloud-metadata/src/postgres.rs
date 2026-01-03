@@ -1742,6 +1742,47 @@ impl Database {
         Ok(result)
     }
 
+    /// List public datasets with optional name filter
+    pub async fn list_public_datasets(
+        &self,
+        name_filter: Option<&str>,
+    ) -> Result<Vec<PublicDataset>> {
+        let result = if let Some(filter) = name_filter {
+            let pattern = format!("%{}%", filter);
+            sqlx::query_as::<_, PublicDataset>(
+                "SELECT * FROM public_datasets WHERE name ILIKE $1 ORDER BY name",
+            )
+            .bind(pattern)
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query_as::<_, PublicDataset>("SELECT * FROM public_datasets ORDER BY name")
+                .fetch_all(&self.pool)
+                .await?
+        };
+        Ok(result)
+    }
+
+    /// Update dataset signature only
+    pub async fn update_dataset_signature(
+        &self,
+        dataset_id: Uuid,
+        signature: Vec<u8>,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE datasets
+            SET signature = $1, updated_at = NOW()
+            WHERE id = $2
+            "#,
+        )
+        .bind(&signature)
+        .bind(dataset_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     /// Update public dataset cache reference
     pub async fn update_public_dataset_cache(
         &self,
