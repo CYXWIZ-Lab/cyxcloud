@@ -19,11 +19,13 @@ mod auth_api;
 #[cfg(feature = "blockchain")]
 pub mod blockchain;
 mod data_access;
+mod dataset_api;
 mod datastream;
 mod grpc_api;
 mod node_client;
 mod node_monitor;
 mod payment_daemon;
+mod public_registry;
 mod rebalancer_daemon;
 mod s3_api;
 mod state;
@@ -226,6 +228,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/version", get(version))
         // Authentication API
         .nest("/api/v1/auth", auth_api::routes())
+        // Dataset API
+        .nest("/api/datasets", dataset_api::routes())
         // S3-compatible API
         .nest("/s3", s3_api::routes())
         // WebSocket endpoint

@@ -971,6 +971,17 @@ impl Database {
         Ok(())
     }
 
+    /// Get user by email or wallet address
+    pub async fn get_user_by_email_or_wallet(&self, identifier: &str) -> Result<Option<User>> {
+        let result = sqlx::query_as::<_, User>(
+            "SELECT * FROM users WHERE email = $1 OR wallet_address = $1",
+        )
+        .bind(identifier)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
     // =========================================================================
     // BUCKET OPERATIONS
     // =========================================================================
@@ -2001,6 +2012,78 @@ impl Database {
         .fetch_all(&self.pool)
         .await?;
         Ok(result)
+    }
+
+    /// List user's datasets with options for including shared and limiting results
+    pub async fn list_user_datasets(
+        &self,
+        user_id: Uuid,
+        include_shared: bool,
+        limit: i32,
+    ) -> Result<Vec<Dataset>> {
+        let result = if include_shared {
+            sqlx::query_as::<_, Dataset>(
+                r#"
+                SELECT * FROM datasets WHERE owner_id = $1
+                UNION
+                SELECT d.* FROM datasets d
+                JOIN dataset_shares ds ON ds.dataset_id = d.id
+                WHERE ds.shared_with_user_id = $1
+                AND (ds.expires_at IS NULL OR ds.expires_at > NOW())
+                ORDER BY created_at DESC
+                LIMIT $2
+                "#,
+            )
+            .bind(user_id)
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query_as::<_, Dataset>(
+                r#"
+                SELECT * FROM datasets WHERE owner_id = $1
+                ORDER BY created_at DESC
+                LIMIT $2
+                "#,
+            )
+            .bind(user_id)
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await?
+        };
+        Ok(result)
+    }
+
+    /// List files in a bucket with optional prefix filter
+    pub async fn list_files_by_bucket_prefix(
+        &self,
+        bucket: &str,
+        prefix: Option<&str>,
+        limit: i32,
+    ) -> Result<Vec<File>> {
+        self.list_files_in_bucket(bucket, prefix, limit as i64, 0).await
+    }
+
+    /// Share a dataset with another user (convenience method)
+    pub async fn share_dataset(
+        &self,
+        dataset_id: Uuid,
+        shared_with_user_id: Uuid,
+        permissions: Vec<String>,
+    ) -> Result<DatasetShare> {
+        // Get dataset to find the owner
+        let dataset = self.get_dataset(dataset_id).await?
+            .ok_or_else(|| sqlx::Error::RowNotFound)?;
+
+        let share = CreateDatasetShare {
+            dataset_id,
+            shared_with_user_id,
+            shared_by_user_id: dataset.owner_id,
+            permissions,
+            expires_at: None, // No expiration by default
+        };
+
+        self.create_dataset_share(share).await
     }
 }
 

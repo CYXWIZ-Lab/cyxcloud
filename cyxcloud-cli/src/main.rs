@@ -31,7 +31,7 @@ mod cyxwiz_client;
 mod symbols;
 
 use client::{GatewayClient, TlsConfig};
-use commands::{auth, delete, download, list, status, upload};
+use commands::{auth, dataset, delete, download, list, status, upload};
 use cyxwiz_client::CyxWizClient;
 
 #[derive(Parser)]
@@ -180,6 +180,85 @@ enum Commands {
     Config {
         #[command(subcommand)]
         command: Option<ConfigCommands>,
+    },
+
+    /// Dataset management commands
+    Dataset {
+        #[command(subcommand)]
+        command: DatasetCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum DatasetCommands {
+    /// List your datasets
+    List {
+        /// Include datasets shared with you
+        #[arg(short, long)]
+        shared: bool,
+
+        /// Maximum number of datasets to return
+        #[arg(long, default_value = "100")]
+        limit: i32,
+    },
+
+    /// List public datasets (MNIST, CIFAR, ImageNet, etc.)
+    ListPublic {
+        /// Filter by name
+        #[arg(short, long)]
+        filter: Option<String>,
+    },
+
+    /// Create a dataset from uploaded files
+    Create {
+        /// Dataset name
+        name: String,
+
+        /// Description
+        #[arg(short, long)]
+        description: Option<String>,
+
+        /// Source bucket
+        #[arg(short, long, default_value = "default")]
+        bucket: String,
+
+        /// File prefix filter
+        #[arg(short, long)]
+        prefix: Option<String>,
+    },
+
+    /// Verify dataset integrity
+    Verify {
+        /// Dataset ID
+        dataset_id: String,
+
+        /// Check against public registry
+        #[arg(long, default_value = "true")]
+        check_public: bool,
+
+        /// Verify all file contents (slow)
+        #[arg(long)]
+        full: bool,
+    },
+
+    /// Share dataset with another user
+    Share {
+        /// Dataset ID
+        dataset_id: String,
+
+        /// User email or ID to share with
+        #[arg(short, long)]
+        with: String,
+
+        /// Permissions: read, stream, reshare
+        #[arg(short, long, default_value = "read,stream")]
+        permissions: String,
+    },
+
+    /// Show dataset information
+    Info {
+        /// Dataset ID
+        dataset_id: String,
     },
 }
 
@@ -332,6 +411,68 @@ async fn main() -> Result<()> {
 
         Commands::Config { command } => {
             handle_config_command(command)?;
+        }
+
+        Commands::Dataset { command } => {
+            require_auth(&auth_token)?;
+            match command {
+                DatasetCommands::List { shared, limit } => {
+                    let config = dataset::ListConfig {
+                        include_shared: shared,
+                        limit,
+                    };
+                    dataset::list(&client, config).await?;
+                }
+                DatasetCommands::ListPublic { filter } => {
+                    let config = dataset::ListPublicConfig {
+                        name_filter: filter,
+                    };
+                    dataset::list_public(&client, config).await?;
+                }
+                DatasetCommands::Create {
+                    name,
+                    description,
+                    bucket,
+                    prefix,
+                } => {
+                    let config = dataset::CreateConfig {
+                        name,
+                        description,
+                        file_ids: vec![],
+                        bucket,
+                        prefix,
+                    };
+                    dataset::create(&client, config).await?;
+                }
+                DatasetCommands::Verify {
+                    dataset_id,
+                    check_public,
+                    full,
+                } => {
+                    let config = dataset::VerifyConfig {
+                        dataset_id,
+                        check_public,
+                        full_verification: full,
+                    };
+                    dataset::verify(&client, config).await?;
+                }
+                DatasetCommands::Share {
+                    dataset_id,
+                    with,
+                    permissions,
+                } => {
+                    let config = dataset::ShareConfig {
+                        dataset_id,
+                        share_with: with,
+                        permissions: permissions.split(',').map(|s| s.trim().to_string()).collect(),
+                    };
+                    dataset::share(&client, config).await?;
+                }
+                DatasetCommands::Info { dataset_id } => {
+                    let config = dataset::InfoConfig { dataset_id };
+                    dataset::info(&client, config).await?;
+                }
+            }
         }
     }
 

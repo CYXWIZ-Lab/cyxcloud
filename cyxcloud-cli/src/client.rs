@@ -63,6 +63,60 @@ pub struct BucketInfo {
     pub total_size: u64,
 }
 
+/// Dataset info
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DatasetInfo {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub owner_id: String,
+    pub file_count: i64,
+    pub size_bytes: i64,
+    pub content_hash: Vec<u8>,
+    pub trust_level: i32,
+    pub version: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Public dataset info
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublicDatasetInfo {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub license: Option<String>,
+    pub verified_by: Vec<String>,
+    pub cached: bool,
+}
+
+/// Dataset verification result
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerificationResult {
+    pub manifest_valid: bool,
+    pub all_files_valid: bool,
+    pub files_verified: i32,
+    pub files_failed: i32,
+    pub trust_level: i32,
+    pub public_match: Option<PublicDatasetMatch>,
+}
+
+/// Public dataset match
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublicDatasetMatch {
+    pub name: String,
+    pub version: String,
+    pub verified_by: Vec<String>,
+    pub license: Option<String>,
+}
+
+/// Dataset share result
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShareResult {
+    pub success: bool,
+    pub share_id: String,
+}
+
 /// TLS configuration for the gateway client
 #[derive(Debug, Clone, Default)]
 pub struct TlsConfig {
@@ -397,6 +451,204 @@ impl GatewayClient {
             Ok(objects)
         } else if response.status() == StatusCode::NOT_FOUND {
             Err(ClientError::NotFound(bucket.to_string()))
+        } else {
+            Err(ClientError::Api {
+                status: response.status().as_u16(),
+                message: response.text().await.unwrap_or_default(),
+            })
+        }
+    }
+
+    // ==================== Dataset API ====================
+
+    /// List user's datasets
+    pub async fn list_datasets(
+        &self,
+        include_shared: bool,
+        limit: i32,
+    ) -> Result<Vec<DatasetInfo>> {
+        let url = format!(
+            "{}/api/datasets?include_shared={}&limit={}",
+            self.base_url, include_shared, limit
+        );
+
+        let mut req = self.client.get(&url);
+        if let Some(auth) = self.auth_headers() {
+            req = req.header("Authorization", auth);
+        }
+
+        let response = req.send().await?;
+
+        if response.status().is_success() {
+            let datasets: Vec<DatasetInfo> = response.json().await?;
+            Ok(datasets)
+        } else {
+            Err(ClientError::Api {
+                status: response.status().as_u16(),
+                message: response.text().await.unwrap_or_default(),
+            })
+        }
+    }
+
+    /// List public datasets
+    pub async fn list_public_datasets(
+        &self,
+        name_filter: Option<&str>,
+    ) -> Result<Vec<PublicDatasetInfo>> {
+        let mut url = format!("{}/api/datasets/public", self.base_url);
+        if let Some(filter) = name_filter {
+            url.push_str(&format!("?filter={}", filter));
+        }
+
+        let mut req = self.client.get(&url);
+        if let Some(auth) = self.auth_headers() {
+            req = req.header("Authorization", auth);
+        }
+
+        let response = req.send().await?;
+
+        if response.status().is_success() {
+            let datasets: Vec<PublicDatasetInfo> = response.json().await?;
+            Ok(datasets)
+        } else {
+            Err(ClientError::Api {
+                status: response.status().as_u16(),
+                message: response.text().await.unwrap_or_default(),
+            })
+        }
+    }
+
+    /// Create a dataset from files in a bucket
+    pub async fn create_dataset(
+        &self,
+        name: &str,
+        description: Option<&str>,
+        bucket: &str,
+        prefix: Option<&str>,
+    ) -> Result<DatasetInfo> {
+        let url = format!("{}/api/datasets", self.base_url);
+
+        #[derive(Serialize)]
+        struct CreateDatasetRequest<'a> {
+            name: &'a str,
+            description: Option<&'a str>,
+            bucket: &'a str,
+            prefix: Option<&'a str>,
+        }
+
+        let body = CreateDatasetRequest {
+            name,
+            description,
+            bucket,
+            prefix,
+        };
+
+        let mut req = self.client.post(&url).json(&body);
+        if let Some(auth) = self.auth_headers() {
+            req = req.header("Authorization", auth);
+        }
+
+        let response = req.send().await?;
+
+        if response.status().is_success() {
+            let dataset: DatasetInfo = response.json().await?;
+            Ok(dataset)
+        } else {
+            Err(ClientError::Api {
+                status: response.status().as_u16(),
+                message: response.text().await.unwrap_or_default(),
+            })
+        }
+    }
+
+    /// Verify a dataset's integrity
+    pub async fn verify_dataset(
+        &self,
+        dataset_id: &str,
+        check_public: bool,
+        full_verification: bool,
+    ) -> Result<VerificationResult> {
+        let url = format!(
+            "{}/api/datasets/{}/verify?check_public={}&full={}",
+            self.base_url, dataset_id, check_public, full_verification
+        );
+
+        let mut req = self.client.post(&url);
+        if let Some(auth) = self.auth_headers() {
+            req = req.header("Authorization", auth);
+        }
+
+        let response = req.send().await?;
+
+        if response.status().is_success() {
+            let result: VerificationResult = response.json().await?;
+            Ok(result)
+        } else if response.status() == StatusCode::NOT_FOUND {
+            Err(ClientError::NotFound(dataset_id.to_string()))
+        } else {
+            Err(ClientError::Api {
+                status: response.status().as_u16(),
+                message: response.text().await.unwrap_or_default(),
+            })
+        }
+    }
+
+    /// Share a dataset with another user
+    pub async fn share_dataset(
+        &self,
+        dataset_id: &str,
+        share_with: &str,
+        permissions: &[String],
+    ) -> Result<ShareResult> {
+        let url = format!("{}/api/datasets/{}/share", self.base_url, dataset_id);
+
+        #[derive(Serialize)]
+        struct ShareRequest<'a> {
+            share_with: &'a str,
+            permissions: &'a [String],
+        }
+
+        let body = ShareRequest {
+            share_with,
+            permissions,
+        };
+
+        let mut req = self.client.post(&url).json(&body);
+        if let Some(auth) = self.auth_headers() {
+            req = req.header("Authorization", auth);
+        }
+
+        let response = req.send().await?;
+
+        if response.status().is_success() {
+            let result: ShareResult = response.json().await?;
+            Ok(result)
+        } else if response.status() == StatusCode::NOT_FOUND {
+            Err(ClientError::NotFound(dataset_id.to_string()))
+        } else {
+            Err(ClientError::Api {
+                status: response.status().as_u16(),
+                message: response.text().await.unwrap_or_default(),
+            })
+        }
+    }
+
+    /// Get detailed dataset information
+    pub async fn get_dataset_info(&self, dataset_id: &str) -> Result<DatasetInfo> {
+        let url = format!("{}/api/datasets/{}", self.base_url, dataset_id);
+
+        let mut req = self.client.get(&url);
+        if let Some(auth) = self.auth_headers() {
+            req = req.header("Authorization", auth);
+        }
+
+        let response = req.send().await?;
+
+        if response.status().is_success() {
+            let dataset: DatasetInfo = response.json().await?;
+            Ok(dataset)
+        } else if response.status() == StatusCode::NOT_FOUND {
+            Err(ClientError::NotFound(dataset_id.to_string()))
         } else {
             Err(ClientError::Api {
                 status: response.status().as_u16(),

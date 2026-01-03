@@ -1,6 +1,7 @@
 //! CLI Commands
 
 pub mod auth;
+pub mod dataset;
 pub mod delete;
 pub mod download;
 pub mod list;
