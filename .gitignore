@@ -35,3 +35,7 @@ coverage/
 *.bin
 /downloaded.bin
 /reflect.md
+
+# Local state files
+imgui.ini
+tutorial_progress.json
