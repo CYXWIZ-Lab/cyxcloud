@@ -8,6 +8,7 @@
 //! - Common types and error handling
 
 pub mod chunk;
+pub mod circuit_breaker;
 pub mod crypto;
 pub mod erasure;
 pub mod error;

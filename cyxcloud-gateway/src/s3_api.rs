@@ -100,7 +100,7 @@ impl IntoResponse for S3Error {
             .status(status)
             .header(header::CONTENT_TYPE, "application/xml")
             .body(Body::from(body))
-            .unwrap()
+            .expect("S3 error response construction should never fail")
     }
 }
 

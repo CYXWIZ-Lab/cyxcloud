@@ -16,6 +16,7 @@
 // are fully integrated. Currently 40 dead_code items in partially-implemented modules.
 #![allow(dead_code)]
 
+mod audit;
 pub mod auth;
 mod auth_api;
 #[cfg(feature = "blockchain")]
@@ -24,6 +25,7 @@ mod data_access;
 mod dataset_api;
 mod datastream;
 mod grpc_api;
+mod metrics;
 mod node_client;
 mod node_monitor;
 mod payment_daemon;
@@ -244,11 +246,17 @@ async fn main() -> anyhow::Result<()> {
             ])
     };
 
+    // Initialize Prometheus metrics
+    let metrics_handle = metrics::init_metrics();
+    info!("Prometheus metrics initialized (GET /metrics)");
+
     // Build HTTP router
     let app = Router::new()
         // Health and version endpoints
         .route("/health", get(health))
         .route("/version", get(version))
+        // Prometheus metrics endpoint
+        .merge(metrics::routes(metrics_handle))
         // Authentication API
         .nest("/api/v1/auth", auth_api::routes())
         // Dataset API
@@ -270,8 +278,8 @@ async fn main() -> anyhow::Result<()> {
     // Build TLS config if enabled
     let tls_server_config = if tls_enabled {
         Some(TlsServerConfig {
-            cert_path: cli.tls_cert.clone().unwrap(),
-            key_path: cli.tls_key.clone().unwrap(),
+            cert_path: cli.tls_cert.clone().expect("tls_cert checked above"),
+            key_path: cli.tls_key.clone().expect("tls_key checked above"),
             ca_cert_path: cli.tls_ca_cert.clone(),
             require_client_cert: cli.tls_require_client_cert,
         })

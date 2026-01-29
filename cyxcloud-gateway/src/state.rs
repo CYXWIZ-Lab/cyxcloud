@@ -240,11 +240,29 @@ impl AppState {
             None
         };
 
+        // Build auth service, optionally with Redis for persistent token revocation
+        let mut auth_service = AuthService::from_env();
+        if let Some(ref redis_url) = config.redis_url {
+            match redis::Client::open(redis_url.as_str()) {
+                Ok(client) => match client.get_multiplexed_async_connection().await {
+                    Ok(conn) => {
+                        auth_service = auth_service.with_redis(conn);
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "Failed to connect Redis for token revocation (in-memory only)");
+                    }
+                },
+                Err(e) => {
+                    warn!(error = %e, "Invalid Redis URL for token revocation (in-memory only)");
+                }
+            }
+        }
+
         Ok(Self {
             event_hub: Arc::new(EventHub::new(1024)),
             metadata,
             node_client: Arc::new(NodeClient::new(NodeClientConfig::default())),
-            auth: Arc::new(AuthService::from_env()),
+            auth: Arc::new(auth_service),
             #[cfg(feature = "blockchain")]
             blockchain,
             memory_buckets: RwLock::new(HashMap::new()),

@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 description = "CyxCloud API gateway with S3-compatible REST API"
 
+[lib]
+name = "cyxcloud_gateway"
+path = "src/lib.rs"
+
 [[bin]]
 name = "cyxcloud-gateway"
 path = "src/main.rs"
@@ -59,10 +63,17 @@ base64 = "0.21"
 hex = "0.4"
 blake3 = "1.5"
 
+# Metrics
+metrics = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }
+
 # Authentication
 jsonwebtoken = { workspace = true }
 ed25519-dalek = { workspace = true }
 bs58 = { workspace = true }
+
+# Redis (for persistent token revocation)
+redis = { workspace = true }
 
 # Blockchain (Solana) - optional, requires OpenSSL on Windows
 solana-sdk = { workspace = true, optional = true }

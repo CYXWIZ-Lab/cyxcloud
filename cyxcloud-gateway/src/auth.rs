@@ -11,6 +11,7 @@
 use chrono::{Duration, Utc};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, TokenData, Validation};
+use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
@@ -200,8 +201,10 @@ pub struct AuthService {
     encoding_key: EncodingKey,
     decoding_key: DecodingKey,
     validation: Validation,
-    /// Revoked token IDs (JTIs)
+    /// Local cache of revoked token IDs (JTIs) — acts as L1 cache
     revoked_tokens: RwLock<std::collections::HashSet<String>>,
+    /// Redis connection for persistent revocation (L2) — survives restarts
+    redis: Option<RwLock<redis::aio::MultiplexedConnection>>,
 }
 
 impl AuthService {
@@ -235,12 +238,21 @@ impl AuthService {
             decoding_key,
             validation,
             revoked_tokens: RwLock::new(std::collections::HashSet::new()),
+            redis: None,
         }
     }
 
     /// Create auth service from environment
     pub fn from_env() -> Self {
         Self::new(AuthConfig::from_env())
+    }
+
+    /// Attach a Redis connection for persistent token revocation.
+    /// Without Redis, revocations are in-memory only and lost on restart.
+    pub fn with_redis(mut self, conn: redis::aio::MultiplexedConnection) -> Self {
+        self.redis = Some(RwLock::new(conn));
+        info!("Token revocation backed by Redis");
+        self
     }
 
     /// Generate a JWT token for a user
@@ -276,6 +288,10 @@ impl AuthService {
     }
 
     /// Validate a JWT token and return claims
+    ///
+    /// Checks revocation in two tiers:
+    /// 1. L1: local in-memory HashSet (fast, but lost on restart)
+    /// 2. L2: Redis (persistent, survives restarts)
     pub async fn validate_token(&self, token: &str) -> AuthResult<Claims> {
         // Decode and validate token
         let token_data: TokenData<Claims> = decode(token, &self.decoding_key, &self.validation)
@@ -284,13 +300,36 @@ impl AuthService {
                 _ => AuthError::InvalidToken(e.to_string()),
             })?;
 
-        // Check if token is revoked
+        let jti = &token_data.claims.jti;
+
+        // L1: check local cache
         {
             let revoked = self.revoked_tokens.read().await;
-            if revoked.contains(&token_data.claims.jti) {
+            if revoked.contains(jti) {
                 return Err(AuthError::InvalidToken(
                     "Token has been revoked".to_string(),
                 ));
+            }
+        }
+
+        // L2: check Redis (if available)
+        if let Some(ref redis) = self.redis {
+            let key = format!("revoked:{}", jti);
+            let mut conn = redis.write().await;
+            match conn.exists::<_, bool>(&key).await {
+                Ok(true) => {
+                    // Populate L1 cache so subsequent checks are fast
+                    let mut revoked = self.revoked_tokens.write().await;
+                    revoked.insert(jti.clone());
+                    return Err(AuthError::InvalidToken(
+                        "Token has been revoked".to_string(),
+                    ));
+                }
+                Ok(false) => {} // Not revoked
+                Err(e) => {
+                    // Fail-open: if Redis is down, allow the request but warn
+                    warn!(jti = %jti, error = %e, "Redis revocation check failed (fail-open)");
+                }
             }
         }
 
@@ -298,10 +337,29 @@ impl AuthService {
     }
 
     /// Revoke a token by its JTI
+    ///
+    /// Stores in both the local in-memory cache (L1) and Redis (L2) if available.
+    /// Redis entries have a TTL matching the maximum token lifetime so they
+    /// auto-expire and don't accumulate indefinitely.
     pub async fn revoke_token(&self, jti: &str) {
-        let mut revoked = self.revoked_tokens.write().await;
-        revoked.insert(jti.to_string());
-        debug!(jti = %jti, "Token revoked");
+        // L1: local cache
+        {
+            let mut revoked = self.revoked_tokens.write().await;
+            revoked.insert(jti.to_string());
+        }
+
+        // L2: Redis (persistent across restarts)
+        if let Some(ref redis) = self.redis {
+            let key = format!("revoked:{}", jti);
+            // Use max token lifetime (7 days for refresh tokens) as TTL
+            let ttl_secs = TokenType::Refresh.lifetime_secs() as u64;
+            let mut conn = redis.write().await;
+            if let Err(e) = conn.set_ex::<_, _, ()>(&key, "1", ttl_secs).await {
+                warn!(jti = %jti, error = %e, "Failed to persist token revocation to Redis");
+            } else {
+                debug!(jti = %jti, ttl_secs = ttl_secs, "Token revocation persisted to Redis");
+            }
+        }
     }
 
     /// Verify a Solana wallet signature
