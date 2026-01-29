@@ -157,8 +157,24 @@ impl NodeService for NodeServiceImpl {
                     "Node registered successfully"
                 );
 
-                // Generate a simple auth token (in production, use proper JWT)
-                let auth_token = format!("node-token-{}", node.id);
+                // Generate a proper JWT token for the node
+                let auth_token = self
+                    .state
+                    .auth_service()
+                    .generate_token(
+                        &node.id.to_string(),
+                        crate::auth::TokenType::Node,
+                        node.wallet_address.clone(),
+                        vec![
+                            crate::auth::permissions::NODE_REGISTER.to_string(),
+                            crate::auth::permissions::STORAGE_READ.to_string(),
+                            crate::auth::permissions::STORAGE_WRITE.to_string(),
+                        ],
+                    )
+                    .map_err(|e| {
+                        error!(error = %e, "Failed to generate node auth token");
+                        Status::internal("Failed to generate auth token")
+                    })?;
 
                 Ok(Response::new(RegisterNodeResponse {
                     success: true,
@@ -812,17 +828,16 @@ impl Interceptor for AuthInterceptor {
     }
 }
 
-/// Synchronous token validation for use in interceptor
+/// Synchronous token validation for use in interceptor.
+/// Uses the existing Tokio runtime handle instead of creating a new one per request.
 fn validate_token_sync(token: &str, auth: &AuthService) -> Result<Claims, Status> {
-    // Create a small runtime for async validation
-    // Note: In production, consider caching validated tokens or using a tower layer
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| Status::internal(format!("Runtime error: {}", e)))?;
+    let handle = tokio::runtime::Handle::try_current()
+        .map_err(|_| Status::internal("No Tokio runtime available"))?;
 
-    rt.block_on(auth.validate_token(token))
-        .map_err(|e| Status::unauthenticated(format!("Invalid token: {}", e)))
+    tokio::task::block_in_place(|| {
+        handle.block_on(auth.validate_token(token))
+    })
+    .map_err(|e| Status::unauthenticated(format!("Invalid token: {}", e)))
 }
 
 /// Extension trait for extracting claims from request

@@ -421,6 +421,23 @@ impl OptionalCache {
     pub fn is_available(&self) -> bool {
         self.cache.is_some()
     }
+
+    /// Check rate limit. Returns Ok(true) if allowed, Ok(false) if rate limited.
+    /// Returns Ok(true) if cache unavailable (fail-open).
+    pub async fn try_check_rate_limit(
+        &self,
+        key: &str,
+        max_requests: u64,
+        window: Duration,
+    ) -> std::result::Result<bool, CacheError> {
+        match &self.cache {
+            Some(cache) => {
+                let (allowed, _count) = cache.check_rate_limit(key, max_requests, window).await?;
+                Ok(allowed)
+            }
+            None => Ok(true),
+        }
+    }
 }
 
 #[cfg(test)]

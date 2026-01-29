@@ -12,6 +12,8 @@
 #![allow(clippy::result_large_err)]
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::type_complexity)]
+// TODO(audit): Remove blanket allow once data_access, public_registry, verification modules
+// are fully integrated. Currently 40 dead_code items in partially-implemented modules.
 #![allow(dead_code)]
 
 pub mod auth;
@@ -50,7 +52,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::signal;
 use tonic::transport::Server as TonicServer;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing::{error, info, warn, Level};
 
@@ -82,8 +84,9 @@ struct Cli {
     #[arg(long, default_value = "false")]
     memory_only: bool,
 
-    /// Enable gRPC authentication (requires JWT)
-    #[arg(long, default_value = "false")]
+    /// Enable gRPC authentication (requires JWT). Enabled by default for security.
+    /// Use --no-grpc-auth to disable (development only).
+    #[arg(long, default_value = "true")]
     grpc_auth: bool,
 
     // ===== TLS Configuration =====
@@ -213,12 +216,32 @@ async fn main() -> anyhow::Result<()> {
 
     // Build CORS layer
     let cors = if cli.cors_permissive {
+        warn!("CORS permissive mode enabled - do NOT use in production");
         CorsLayer::permissive()
     } else {
+        // Read allowed origins from environment, default to localhost for development
+        let allowed_origins = std::env::var("CORS_ALLOWED_ORIGINS")
+            .unwrap_or_else(|_| "http://localhost:3000".to_string());
+        let origins: Vec<_> = allowed_origins
+            .split(',')
+            .filter_map(|s| s.trim().parse::<axum::http::HeaderValue>().ok())
+            .collect();
+        info!(origins = ?allowed_origins, "CORS configured with specific origins");
         CorsLayer::new()
-            .allow_origin(Any)
-            .allow_methods(Any)
-            .allow_headers(Any)
+            .allow_origin(origins)
+            .allow_methods([
+                axum::http::Method::GET,
+                axum::http::Method::POST,
+                axum::http::Method::PUT,
+                axum::http::Method::DELETE,
+                axum::http::Method::HEAD,
+                axum::http::Method::OPTIONS,
+            ])
+            .allow_headers([
+                axum::http::header::AUTHORIZATION,
+                axum::http::header::CONTENT_TYPE,
+                axum::http::header::ACCEPT,
+            ])
     };
 
     // Build HTTP router
@@ -359,6 +382,17 @@ async fn main() -> anyhow::Result<()> {
             .await?;
     } else {
         // Plain HTTP mode
+        // In production, refuse to start without TLS
+        let is_production = std::env::var("CYXCLOUD_ENV")
+            .map(|v| v.to_lowercase() == "production")
+            .unwrap_or(false);
+        if is_production {
+            anyhow::bail!(
+                "TLS is required in production. Provide --tls-cert and --tls-key, \
+                 or set CYXCLOUD_ENV=development for testing without TLS."
+            );
+        }
+
         let http_listener = tokio::net::TcpListener::bind(http_addr).await?;
         info!("HTTP server listening on {} (TLS disabled)", http_addr);
         warn!("Running without TLS - use --tls-cert and --tls-key for production");

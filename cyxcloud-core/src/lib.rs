@@ -22,9 +22,25 @@ pub use error::{CyxCloudError, Result};
 /// - 10 data shards: minimum required to reconstruct
 /// - 4 parity shards: can tolerate 4 node failures
 /// - 14 total shards distributed across nodes
+///
+/// Override at runtime via ERASURE_DATA_SHARDS / ERASURE_PARITY_SHARDS env vars.
 pub const DATA_SHARDS: usize = 10;
 pub const PARITY_SHARDS: usize = 4;
 pub const TOTAL_SHARDS: usize = DATA_SHARDS + PARITY_SHARDS;
+
+/// Read erasure shard counts from environment, falling back to compile-time defaults.
+/// Returns (data_shards, parity_shards, total_shards).
+pub fn erasure_config_from_env() -> (usize, usize, usize) {
+    let data = std::env::var("ERASURE_DATA_SHARDS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(DATA_SHARDS);
+    let parity = std::env::var("ERASURE_PARITY_SHARDS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(PARITY_SHARDS);
+    (data, parity, data + parity)
+}
 
 /// Chunk size constants
 pub const MIN_CHUNK_SIZE: usize = 256 * 1024; // 256 KB

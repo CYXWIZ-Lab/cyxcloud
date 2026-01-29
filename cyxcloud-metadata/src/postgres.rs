@@ -4,6 +4,7 @@
 
 use crate::models::*;
 use sqlx::postgres::{PgPool, PgPoolOptions};
+use std::collections::HashMap;
 use std::time::Duration;
 use thiserror::Error;
 use tracing::{debug, info, instrument};
@@ -862,6 +863,34 @@ impl Database {
         .fetch_all(&self.pool)
         .await?;
         Ok(result)
+    }
+
+    /// Get all chunk locations for a file (batch query to avoid N+1)
+    ///
+    /// Returns a map of chunk_id -> list of node gRPC addresses
+    pub async fn get_file_chunk_locations(
+        &self,
+        file_id: Uuid,
+    ) -> Result<HashMap<Vec<u8>, Vec<String>>> {
+        let rows = sqlx::query_as::<_, (Vec<u8>, String)>(
+            r#"
+            SELECT cl.chunk_id, n.grpc_address
+            FROM chunk_locations cl
+            JOIN chunks c ON cl.chunk_id = c.chunk_id
+            JOIN nodes n ON cl.node_id = n.id
+            WHERE c.file_id = $1 AND cl.status = 'stored' AND n.status = 'online'
+            ORDER BY cl.chunk_id
+            "#,
+        )
+        .bind(file_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut map: HashMap<Vec<u8>, Vec<String>> = HashMap::new();
+        for (chunk_id, address) in rows {
+            map.entry(chunk_id).or_default().push(address);
+        }
+        Ok(map)
     }
 
     /// Get node addresses storing a chunk

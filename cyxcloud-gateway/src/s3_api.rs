@@ -50,36 +50,40 @@ pub enum S3Error {
 impl IntoResponse for S3Error {
     fn into_response(self) -> Response {
         let (status, error_code, message) = match &self {
-            S3Error::NoSuchBucket(b) => (
+            S3Error::NoSuchBucket(_) => (
                 StatusCode::NOT_FOUND,
                 "NoSuchBucket",
-                format!("Bucket {} does not exist", b),
+                "The specified bucket does not exist".to_string(),
             ),
-            S3Error::NoSuchKey(k) => (
+            S3Error::NoSuchKey(_) => (
                 StatusCode::NOT_FOUND,
                 "NoSuchKey",
-                format!("Key {} does not exist", k),
+                "The specified key does not exist".to_string(),
             ),
-            S3Error::BucketAlreadyExists(b) => (
+            S3Error::BucketAlreadyExists(_) => (
                 StatusCode::CONFLICT,
                 "BucketAlreadyExists",
-                format!("Bucket {} already exists", b),
+                "The specified bucket already exists".to_string(),
             ),
-            S3Error::BucketNotEmpty(b) => (
+            S3Error::BucketNotEmpty(_) => (
                 StatusCode::CONFLICT,
                 "BucketNotEmpty",
-                format!("Bucket {} is not empty", b),
+                "The bucket is not empty".to_string(),
             ),
             S3Error::AccessDenied => (
                 StatusCode::FORBIDDEN,
                 "AccessDenied",
                 "Access Denied".to_string(),
             ),
-            S3Error::InvalidRequest(m) => (StatusCode::BAD_REQUEST, "InvalidRequest", m.clone()),
-            S3Error::Internal(m) => (
+            S3Error::InvalidRequest(m) => (
+                StatusCode::BAD_REQUEST,
+                "InvalidRequest",
+                xml_escape(m),
+            ),
+            S3Error::Internal(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "InternalError",
-                m.clone(),
+                "An internal error occurred".to_string(),
             ),
         };
 
@@ -101,6 +105,48 @@ impl IntoResponse for S3Error {
 }
 
 pub type S3Result<T> = Result<T, S3Error>;
+
+/// Validate an S3 object key for path traversal and invalid characters
+fn validate_object_key(key: &str) -> S3Result<()> {
+    if key.is_empty() {
+        return Err(S3Error::InvalidRequest("Key cannot be empty".to_string()));
+    }
+    if key.contains("..") {
+        return Err(S3Error::InvalidRequest(
+            "Key cannot contain '..'".to_string(),
+        ));
+    }
+    if key.starts_with('/') {
+        return Err(S3Error::InvalidRequest(
+            "Key cannot start with '/'".to_string(),
+        ));
+    }
+    if key.contains('\0') {
+        return Err(S3Error::InvalidRequest(
+            "Key cannot contain null bytes".to_string(),
+        ));
+    }
+    if key.bytes().any(|b| b < 0x20 && b != b'\t') {
+        return Err(S3Error::InvalidRequest(
+            "Key cannot contain control characters".to_string(),
+        ));
+    }
+    if key.len() > 1024 {
+        return Err(S3Error::InvalidRequest(
+            "Key cannot exceed 1024 characters".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Escape a string for safe inclusion in XML
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
 
 /// Query parameters for list objects
 #[derive(Debug, Deserialize)]
@@ -331,6 +377,7 @@ async fn put_object(
     headers: HeaderMap,
     body: Bytes,
 ) -> S3Result<impl IntoResponse> {
+    validate_object_key(&key)?;
     info!(bucket = %bucket, key = %key, size = body.len(), "Uploading object");
 
     // Validate bucket exists
@@ -358,6 +405,7 @@ async fn get_object(
     Path((bucket, key)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> S3Result<Response> {
+    validate_object_key(&key)?;
     debug!(bucket = %bucket, key = %key, "Getting object");
 
     // Validate bucket exists
@@ -411,6 +459,7 @@ async fn delete_object(
     State(state): State<Arc<AppState>>,
     Path((bucket, key)): Path<(String, String)>,
 ) -> S3Result<impl IntoResponse> {
+    validate_object_key(&key)?;
     info!(bucket = %bucket, key = %key, "Deleting object");
 
     // Validate bucket exists
@@ -430,6 +479,7 @@ async fn head_object(
     State(state): State<Arc<AppState>>,
     Path((bucket, key)): Path<(String, String)>,
 ) -> S3Result<Response> {
+    validate_object_key(&key)?;
     debug!(bucket = %bucket, key = %key, "Head object");
 
     // Validate bucket exists

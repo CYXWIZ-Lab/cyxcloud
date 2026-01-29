@@ -55,6 +55,12 @@ pub struct NodeClientConfig {
 
     /// Required replicas for write operations
     pub write_replicas: usize,
+
+    /// Maximum number of cached connections
+    pub max_connections: usize,
+
+    /// Evict connections unused for this many seconds
+    pub stale_connection_secs: u64,
 }
 
 impl Default for NodeClientConfig {
@@ -64,8 +70,16 @@ impl Default for NodeClientConfig {
             request_timeout_secs: 60,
             max_retries: 3,
             write_replicas: 3, // Store each chunk on 3 nodes
+            max_connections: 100,
+            stale_connection_secs: 300, // 5 minutes
         }
     }
+}
+
+/// A pooled connection with last-used tracking
+struct PooledConnection {
+    client: ChunkServiceClient<Channel>,
+    last_used: std::time::Instant,
 }
 
 /// Client for communicating with storage nodes
@@ -73,8 +87,8 @@ pub struct NodeClient {
     /// Configuration
     config: NodeClientConfig,
 
-    /// Connection pool: node_address -> client
-    connections: RwLock<HashMap<String, ChunkServiceClient<Channel>>>,
+    /// Connection pool: node_address -> pooled connection
+    connections: RwLock<HashMap<String, PooledConnection>>,
 }
 
 impl NodeClient {
@@ -93,9 +107,10 @@ impl NodeClient {
     ) -> Result<ChunkServiceClient<Channel>, NodeClientError> {
         // Check if we have an existing connection
         {
-            let connections = self.connections.read().await;
-            if let Some(client) = connections.get(address) {
-                return Ok(client.clone());
+            let mut connections = self.connections.write().await;
+            if let Some(pooled) = connections.get_mut(address) {
+                pooled.last_used = std::time::Instant::now();
+                return Ok(pooled.client.clone());
             }
         }
 
@@ -116,10 +131,41 @@ impl NodeClient {
 
         let client = ChunkServiceClient::new(channel);
 
-        // Store the connection
+        // Store the connection, evicting stale entries if at capacity
         {
             let mut connections = self.connections.write().await;
-            connections.insert(address.to_string(), client.clone());
+
+            // Evict stale connections
+            let stale_threshold =
+                std::time::Duration::from_secs(self.config.stale_connection_secs);
+            let now = std::time::Instant::now();
+            connections.retain(|addr, pooled| {
+                let keep = now.duration_since(pooled.last_used) < stale_threshold;
+                if !keep {
+                    debug!(address = %addr, "Evicting stale connection");
+                }
+                keep
+            });
+
+            // If still at capacity, evict the oldest connection
+            if connections.len() >= self.config.max_connections {
+                if let Some(oldest_addr) = connections
+                    .iter()
+                    .min_by_key(|(_, p)| p.last_used)
+                    .map(|(addr, _)| addr.clone())
+                {
+                    debug!(address = %oldest_addr, "Evicting oldest connection (pool full)");
+                    connections.remove(&oldest_addr);
+                }
+            }
+
+            connections.insert(
+                address.to_string(),
+                PooledConnection {
+                    client: client.clone(),
+                    last_used: std::time::Instant::now(),
+                },
+            );
         }
 
         info!(address = %address, "Connected to storage node");
@@ -263,8 +309,14 @@ impl NodeClient {
     /// Close all connections
     pub async fn close_all(&self) {
         let mut connections = self.connections.write().await;
+        let count = connections.len();
         connections.clear();
-        info!("Closed all storage node connections");
+        info!(count = count, "Closed all storage node connections");
+    }
+
+    /// Get current pool size
+    pub async fn pool_size(&self) -> usize {
+        self.connections.read().await.len()
     }
 }
 
@@ -303,6 +355,8 @@ mod tests {
         let config = NodeClientConfig::default();
         assert_eq!(config.write_replicas, 3);
         assert_eq!(config.max_retries, 3);
+        assert_eq!(config.max_connections, 100);
+        assert_eq!(config.stale_connection_secs, 300);
     }
 
     #[test]

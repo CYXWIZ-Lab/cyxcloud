@@ -245,6 +245,19 @@ impl MetadataService {
         self.placement.clone()
     }
 
+    /// Check rate limit using Redis cache. Returns Ok(true) if allowed, Ok(false) if rate limited.
+    /// Fails open (allows) if cache is unavailable.
+    pub async fn check_rate_limit(
+        &self,
+        key: &str,
+        max_requests: u64,
+        window_secs: u64,
+    ) -> std::result::Result<bool, CacheError> {
+        self.cache
+            .try_check_rate_limit(key, max_requests, std::time::Duration::from_secs(window_secs))
+            .await
+    }
+
     // =========================================================================
     // NODE OPERATIONS
     // =========================================================================
@@ -444,6 +457,17 @@ impl MetadataService {
             .await;
 
         Ok(addrs)
+    }
+
+    /// Get all chunk locations for a file in one query (avoids N+1)
+    ///
+    /// Returns a map of chunk_id -> list of node gRPC addresses
+    pub async fn get_file_chunk_locations(
+        &self,
+        file_id: Uuid,
+    ) -> Result<std::collections::HashMap<Vec<u8>, Vec<String>>> {
+        let map = self.db.get_file_chunk_locations(file_id).await?;
+        Ok(map)
     }
 
     /// Get chunks for a file

@@ -13,15 +13,94 @@ use crate::auth::{
 };
 use crate::AppState;
 use axum::{
-    extract::{Json, State},
+    extract::{ConnectInfo, Json, State},
     http::{header, HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{get, post},
     Router,
 };
 use serde::{Deserialize, Serialize};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
+
+/// Rate limit configuration for auth endpoints
+struct RateLimit {
+    /// Key prefix for the rate limit
+    key: &'static str,
+    /// Maximum requests allowed in the window
+    max_requests: u64,
+    /// Window duration in seconds
+    window_secs: u64,
+}
+
+const RATE_LIMIT_CHALLENGE: RateLimit = RateLimit {
+    key: "auth:challenge",
+    max_requests: 10,
+    window_secs: 60,
+};
+
+const RATE_LIMIT_LOGIN: RateLimit = RateLimit {
+    key: "auth:login",
+    max_requests: 10,
+    window_secs: 60,
+};
+
+const RATE_LIMIT_REFRESH: RateLimit = RateLimit {
+    key: "auth:refresh",
+    max_requests: 20,
+    window_secs: 60,
+};
+
+const RATE_LIMIT_API_KEY: RateLimit = RateLimit {
+    key: "auth:api_key",
+    max_requests: 5,
+    window_secs: 60,
+};
+
+/// Check rate limit using Redis cache via MetadataService. Fails open if unavailable.
+async fn check_rate_limit(
+    state: &AppState,
+    limit: &RateLimit,
+    client_ip: &str,
+) -> Result<(), (StatusCode, Json<ApiError>)> {
+    if let Some(meta) = state.metadata_service() {
+        let key = format!("{}:{}", limit.key, client_ip);
+        match meta
+            .check_rate_limit(&key, limit.max_requests, limit.window_secs)
+            .await
+        {
+            Ok(allowed) => {
+                if !allowed {
+                    warn!(
+                        key = %limit.key,
+                        ip = %client_ip,
+                        "Rate limit exceeded"
+                    );
+                    return Err((
+                        StatusCode::TOO_MANY_REQUESTS,
+                        Json(ApiError::new("Rate limit exceeded", "RATE_LIMITED")),
+                    ));
+                }
+            }
+            Err(e) => {
+                // Fail open: if Redis is down, allow the request
+                debug!(error = %e, "Rate limit check failed (fail-open)");
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Extract client IP from headers (X-Forwarded-For) or connection
+fn extract_client_ip(headers: &HeaderMap) -> String {
+    headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.split(',').next())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "unknown".to_string())
+}
 
 /// API error response
 #[derive(Debug, Serialize)]
@@ -59,7 +138,11 @@ pub fn routes() -> Router<Arc<AppState>> {
 /// Get a challenge message for wallet authentication
 async fn get_challenge(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
 ) -> Result<Json<ChallengeResponse>, (StatusCode, Json<ApiError>)> {
+    let client_ip = extract_client_ip(&headers);
+    check_rate_limit(&state, &RATE_LIMIT_CHALLENGE, &client_ip).await?;
+
     let auth = state.auth_service();
     let (nonce, message) = auth.generate_challenge();
 
@@ -76,8 +159,12 @@ async fn get_challenge(
 /// Login with wallet signature
 async fn wallet_login(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(req): Json<WalletLoginRequest>,
 ) -> Result<Json<AuthResponse>, (StatusCode, Json<ApiError>)> {
+    let client_ip = extract_client_ip(&headers);
+    check_rate_limit(&state, &RATE_LIMIT_LOGIN, &client_ip).await?;
+
     let auth = state.auth_service();
 
     info!(wallet = %req.wallet_address, "Wallet login attempt");
@@ -171,8 +258,12 @@ pub struct RefreshTokenRequest {
 /// Refresh access token using refresh token
 async fn refresh_token(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(req): Json<RefreshTokenRequest>,
 ) -> Result<Json<AuthResponse>, (StatusCode, Json<ApiError>)> {
+    let client_ip = extract_client_ip(&headers);
+    check_rate_limit(&state, &RATE_LIMIT_REFRESH, &client_ip).await?;
+
     let auth = state.auth_service();
 
     // Validate refresh token
@@ -211,19 +302,78 @@ async fn refresh_token(
     }))
 }
 
+/// Allowed permissions for API keys
+const ALLOWED_PERMISSIONS: &[&str] = &[
+    "storage:read",
+    "storage:write",
+    "storage:delete",
+    "dataset:read",
+    "dataset:write",
+    "node:register",
+    "node:admin",
+    "*",
+];
+
 /// Create an API key
 async fn create_api_key(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Json(req): Json<CreateApiKeyRequest>,
 ) -> Result<Json<ApiKeyResponse>, (StatusCode, Json<ApiError>)> {
+    let client_ip = extract_client_ip(&headers);
+    check_rate_limit(&state, &RATE_LIMIT_API_KEY, &client_ip).await?;
+
     let auth = state.auth_service();
+
+    // Validate input
+    if req.name.is_empty() || req.name.len() > 64 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ApiError::new(
+                "API key name must be 1-64 characters",
+                "INVALID_NAME",
+            )),
+        ));
+    }
+    if !req
+        .name
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ApiError::new(
+                "API key name must contain only alphanumeric, dash, or underscore characters",
+                "INVALID_NAME",
+            )),
+        ));
+    }
+    let expires_days = req.expires_in_days.unwrap_or(365);
+    if expires_days < 1 || expires_days > 3650 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ApiError::new(
+                "expires_in_days must be between 1 and 3650",
+                "INVALID_EXPIRY",
+            )),
+        ));
+    }
+    for perm in &req.permissions {
+        if !ALLOWED_PERMISSIONS.contains(&perm.as_str()) {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(ApiError::new(
+                    format!("Unknown permission: {}", perm),
+                    "INVALID_PERMISSION",
+                )),
+            ));
+        }
+    }
 
     // Authenticate the request
     let claims = extract_and_validate_token(&headers, auth).await?;
 
     // Generate API key token
-    let expires_days = req.expires_in_days.unwrap_or(365);
     let permissions = if req.permissions.is_empty() {
         claims.permissions.clone()
     } else {

@@ -30,6 +30,12 @@ use crate::node_client::{ChunkMeta, NodeClient, NodeClientConfig};
 use crate::s3_api::{ObjectInfo, ObjectMetadata, S3Error, S3Result};
 use crate::websocket::EventHub;
 
+/// Maximum number of in-memory buckets (development mode)
+const MAX_MEMORY_BUCKETS: usize = 1000;
+
+/// Maximum total bytes stored in memory (256 MB)
+const MAX_MEMORY_BYTES: usize = 256 * 1024 * 1024;
+
 /// Gateway configuration
 #[derive(Debug, Clone)]
 pub struct GatewayConfig {
@@ -139,6 +145,9 @@ pub struct AppState {
     /// In-memory bucket storage (for development)
     memory_buckets: RwLock<HashMap<String, BucketState>>,
 
+    /// Total bytes stored in memory across all buckets
+    memory_bytes_used: std::sync::atomic::AtomicUsize,
+
     /// User ID (would come from authentication)
     user_id: Uuid,
 
@@ -171,6 +180,7 @@ impl AppState {
             #[cfg(feature = "blockchain")]
             blockchain: None,
             memory_buckets: RwLock::new(HashMap::new()),
+            memory_bytes_used: std::sync::atomic::AtomicUsize::new(0),
             user_id: Uuid::new_v4(),
             use_memory: true,
         }
@@ -238,6 +248,7 @@ impl AppState {
             #[cfg(feature = "blockchain")]
             blockchain,
             memory_buckets: RwLock::new(HashMap::new()),
+            memory_bytes_used: std::sync::atomic::AtomicUsize::new(0),
             user_id: Uuid::new_v4(),
             use_memory,
         })
@@ -520,6 +531,13 @@ impl AppState {
                 return Err(S3Error::BucketAlreadyExists(name.to_string()));
             }
 
+            if buckets.len() >= MAX_MEMORY_BUCKETS {
+                return Err(S3Error::Internal(format!(
+                    "Maximum number of in-memory buckets ({}) reached",
+                    MAX_MEMORY_BUCKETS
+                )));
+            }
+
             buckets.insert(
                 name.to_string(),
                 BucketState {
@@ -640,6 +658,19 @@ impl AppState {
         content_type: &str,
     ) -> S3Result<String> {
         if self.use_memory {
+            let new_size = data.len();
+
+            // Check memory limit
+            let current_bytes = self
+                .memory_bytes_used
+                .load(std::sync::atomic::Ordering::Relaxed);
+            if current_bytes + new_size > MAX_MEMORY_BYTES {
+                return Err(S3Error::Internal(format!(
+                    "In-memory storage limit ({} MB) exceeded",
+                    MAX_MEMORY_BYTES / (1024 * 1024)
+                )));
+            }
+
             let mut buckets = self.memory_buckets.write().await;
             let bucket_state = buckets
                 .get_mut(bucket)
@@ -647,6 +678,13 @@ impl AppState {
 
             // Calculate ETag (MD5 hash)
             let etag = format!("{:x}", md5::compute(&data));
+
+            // Track size delta (subtract old object size if overwriting)
+            let old_size = bucket_state
+                .objects
+                .get(key)
+                .map(|o| o.data.len())
+                .unwrap_or(0);
 
             bucket_state.objects.insert(
                 key.to_string(),
@@ -657,6 +695,15 @@ impl AppState {
                     created_at: chrono::Utc::now(),
                 },
             );
+
+            // Update tracked memory usage
+            if new_size >= old_size {
+                self.memory_bytes_used
+                    .fetch_add(new_size - old_size, std::sync::atomic::Ordering::Relaxed);
+            } else {
+                self.memory_bytes_used
+                    .fetch_sub(old_size - new_size, std::sync::atomic::Ordering::Relaxed);
+            }
 
             // Publish event
             drop(buckets);
@@ -891,14 +938,17 @@ impl AppState {
                                         size_bytes: shard.data.len() as i32,
                                         replication_factor: 3, // Target replicas for rebalancer
                                     };
-                                    let _ = meta.register_chunk(create_chunk).await;
+                                    if let Err(e) = meta.register_chunk(create_chunk).await {
+                                        warn!(error = %e, "Failed to register chunk in database (backup node)");
+                                    }
 
                                     if let Some(node) = nodes
                                         .iter()
                                         .find(|n| n.grpc_address == backup_node.grpc_address)
                                     {
-                                        let _ =
-                                            meta.record_chunk_location(&shard_id, node.id).await;
+                                        if let Err(e) = meta.record_chunk_location(&shard_id, node.id).await {
+                                            warn!(error = %e, "Failed to record shard location (backup node)");
+                                        }
                                     }
                                     shards_stored += 1;
                                     stored = true;
@@ -1009,6 +1059,12 @@ impl AppState {
                     .push(shard);
             }
 
+            // Batch-fetch all chunk locations for this file (avoids N+1 queries)
+            let all_locations = meta
+                .get_file_chunk_locations(file.id)
+                .await
+                .map_err(|e| S3Error::Internal(e.to_string()))?;
+
             // Create erasure decoder
             let erasure_decoder = ErasureEncoder::new().map_err(|e| {
                 S3Error::Internal(format!("Failed to create erasure decoder: {}", e))
@@ -1039,11 +1095,11 @@ impl AppState {
                         continue;
                     }
 
-                    // Get node addresses for this shard
-                    let addresses = meta
-                        .get_chunk_locations(&shard_record.chunk_id)
-                        .await
-                        .map_err(|e| S3Error::Internal(e.to_string()))?;
+                    // Look up node addresses from batch-fetched map
+                    let addresses = all_locations
+                        .get(&shard_record.chunk_id)
+                        .cloned()
+                        .unwrap_or_default();
 
                     if addresses.is_empty() {
                         debug!(
@@ -1222,7 +1278,10 @@ impl AppState {
                 .get_mut(bucket)
                 .ok_or_else(|| S3Error::NoSuchBucket(bucket.to_string()))?;
 
-            bucket_state.objects.remove(key);
+            if let Some(removed) = bucket_state.objects.remove(key) {
+                self.memory_bytes_used
+                    .fetch_sub(removed.data.len(), std::sync::atomic::Ordering::Relaxed);
+            }
 
             // Publish event
             drop(buckets);

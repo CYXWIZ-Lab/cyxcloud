@@ -135,17 +135,30 @@ impl Default for AuthConfig {
             accepted_issuers: vec!["cyxwiz-api".to_string()],
             audience: "cyxcloud".to_string(),
             require_wallet_verification: false,
-            skip_issuer_validation: true, // Allow tokens from CyxWiz API
+            skip_issuer_validation: false, // Issuer validation enabled by default
         }
     }
 }
 
 impl AuthConfig {
     /// Create config from environment variables
+    ///
+    /// In production (CYXCLOUD_ENV=production), JWT_SECRET is required.
+    /// In development, a random secret is generated if not set.
     pub fn from_env() -> Self {
+        let is_production = std::env::var("CYXCLOUD_ENV")
+            .map(|v| v.to_lowercase() == "production")
+            .unwrap_or(false);
+
         let jwt_secret = std::env::var("JWT_SECRET")
             .map(|s| s.into_bytes())
             .unwrap_or_else(|_| {
+                if is_production {
+                    panic!(
+                        "JWT_SECRET environment variable is required in production. \
+                         Set CYXCLOUD_ENV=development to use a random secret for testing."
+                    );
+                }
                 warn!("JWT_SECRET not set, using random secret (not suitable for production)");
                 rand::random::<[u8; 32]>().to_vec()
             });
@@ -163,9 +176,12 @@ impl AuthConfig {
             .map(|v| v == "1" || v.to_lowercase() == "true")
             .unwrap_or(false);
 
+        // Default to false: issuer validation is enabled by default for security.
+        // Set JWT_SKIP_ISSUER_VALIDATION=true only if you need cross-service token sharing
+        // without issuer checks (not recommended for production).
         let skip_issuer = std::env::var("JWT_SKIP_ISSUER_VALIDATION")
             .map(|v| v == "1" || v.to_lowercase() == "true")
-            .unwrap_or(true); // Default to true for CyxWiz API compatibility
+            .unwrap_or(false);
 
         Self {
             jwt_secret,
