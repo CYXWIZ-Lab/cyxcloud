@@ -15,8 +15,8 @@ services:
     environment:
       RUST_LOG: info,cyxwiz_api=debug
       PORT: 3002
-      MONGODB_URI: mongodb+srv://mrcj:joel2012@cyxwiz-cluster.auuzk3a.mongodb.net/cyxwiz
-      JWT_SECRET: cyxcloud-dev-secret-change-in-production
+      MONGODB_URI: ${CYXWIZ_API_MONGODB_URI}
+      JWT_SECRET: ${JWT_SECRET}
       CENTRAL_SERVER_URL: http://gateway:50052
     networks:
       - cyxcloud-net
@@ -33,7 +33,7 @@ services:
       - "5432:5432"
     environment:
       POSTGRES_USER: cyxcloud
-      POSTGRES_PASSWORD: cyxcloud_secret
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: cyxcloud
     volumes:
       - postgres-data:/var/lib/postgresql/data
@@ -80,9 +80,9 @@ services:
       - "50052:50052"   # gRPC for nodes
     environment:
       RUST_LOG: info,cyxcloud_gateway=debug
-      DATABASE_URL: postgres://cyxcloud:cyxcloud_secret@postgres:5432/cyxcloud
+      DATABASE_URL: postgres://cyxcloud:${POSTGRES_PASSWORD}@postgres:5432/cyxcloud
       REDIS_URL: redis://redis:6379
-      JWT_SECRET: cyxcloud-dev-secret-change-in-production
+      JWT_SECRET: ${JWT_SECRET}
       # Blockchain (optional - devnet)
       SOLANA_RPC_URL: https://api.devnet.solana.com
     command: ["--http-addr", "0.0.0.0:8080", "--grpc-addr", "0.0.0.0:50052", "--cors-permissive"]
@@ -131,7 +131,7 @@ services:
       # CyxWiz API for authentication
       CYXWIZ_API_URL: http://cyxwiz-api:3002
       CYXWIZ_EMAIL: test@example.com
-      CYXWIZ_PASSWORD: Test123!
+      CYXWIZ_PASSWORD: ${CYXCLOUD_NODE_PASSWORD}
     volumes:
       - node1-data:/data
     networks:
@@ -169,7 +169,7 @@ services:
       # CyxWiz API for authentication
       CYXWIZ_API_URL: http://cyxwiz-api:3002
       CYXWIZ_EMAIL: test@example.com
-      CYXWIZ_PASSWORD: Test123!
+      CYXWIZ_PASSWORD: ${CYXCLOUD_NODE_PASSWORD}
     volumes:
       - node2-data:/data
     networks:
@@ -209,7 +209,7 @@ services:
       # CyxWiz API for authentication
       CYXWIZ_API_URL: http://cyxwiz-api:3002
       CYXWIZ_EMAIL: test@example.com
-      CYXWIZ_PASSWORD: Test123!
+      CYXWIZ_PASSWORD: ${CYXCLOUD_NODE_PASSWORD}
     volumes:
       - node3-data:/data
     networks:
