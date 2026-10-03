@@ -164,7 +164,7 @@ async fn main() -> anyhow::Result<()> {
     info!(
         http = %cli.http_addr,
         grpc = %cli.grpc_addr,
-        database = ?cli.database_url,
+        database = ?cli.database_url.as_deref().map(redact_url_password),
         tls = tls_enabled,
         "Starting CyxCloud gateway"
     );
@@ -439,5 +439,32 @@ async fn shutdown_signal() {
         _ = terminate => {
             info!("Received terminate signal, shutting down");
         },
+    }
+}
+
+/// `postgres://user:secret@host/db` -> `postgres://user:***@host/db`, for logs.
+fn redact_url_password(url: &str) -> String {
+    match (url.find("://"), url.rfind('@')) {
+        (Some(scheme), Some(at)) if at > scheme => {
+            let credentials = &url[scheme + 3..at];
+            match credentials.find(':') {
+                Some(colon) => format!("{}{}:***{}", &url[..scheme + 3], &credentials[..colon], &url[at..]),
+                None => url.to_string(),
+            }
+        }
+        _ => url.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod redact_tests {
+    use super::redact_url_password;
+
+    #[test]
+    fn hides_only_the_password() {
+        assert_eq!(redact_url_password("postgres://cyxcloud:s3cret@localhost:5433/cyxcloud"),
+                   "postgres://cyxcloud:***@localhost:5433/cyxcloud");
+        assert_eq!(redact_url_password("redis://localhost:6380"), "redis://localhost:6380");
+        assert_eq!(redact_url_password("postgres://user@host/db"), "postgres://user@host/db");
     }
 }
