@@ -61,13 +61,17 @@ pub struct Claims {
     /// Issued at (Unix timestamp)
     pub iat: i64,
 
-    /// Not before (Unix timestamp)
+    /// Not before (Unix timestamp); absent in CyxWiz API sign-in tokens.
+    #[serde(default)]
     pub nbf: i64,
 
-    /// JWT ID (unique identifier)
+    /// JWT ID (unique identifier); CyxWiz API sign-in tokens have none, so
+    /// they cannot be revoked one by one (they expire within 24 h).
+    #[serde(default)]
     pub jti: String,
 
-    /// User type (user, node, api_key)
+    /// User type (user, node, api_key); CyxWiz API sign-in tokens are users.
+    #[serde(default = "default_user_type")]
     pub user_type: String,
 
     /// Wallet address (optional)
@@ -77,6 +81,10 @@ pub struct Claims {
     /// Permissions
     #[serde(default)]
     pub permissions: Vec<String>,
+}
+
+fn default_user_type() -> String {
+    "user".to_string()
 }
 
 /// Token type for different authentication flows
@@ -301,6 +309,10 @@ impl AuthService {
             })?;
 
         let jti = &token_data.claims.jti;
+        if jti.is_empty() {
+            // A CyxWiz API sign-in token: nothing to look up for revocation.
+            return Ok(token_data.claims);
+        }
 
         // L1: check local cache
         {
@@ -563,6 +575,32 @@ mod tests {
         assert!(!nonce.is_empty());
         assert!(message.contains(&nonce));
         assert!(message.contains("CyxCloud"));
+    }
+
+    #[tokio::test]
+    async fn accepts_cyxwiz_api_sign_in_tokens() {
+        // The CyxWiz web API signs {sub, email, role, iat, exp, iss} with the
+        // shared JWT_SECRET (TOFIX136 E2e).
+        let config = AuthConfig::default();
+        let secret = config.jwt_secret.clone();
+        let auth = AuthService::new(config);
+        let now = chrono::Utc::now().timestamp();
+        let api_claims = serde_json::json!({
+            "sub": "6ac29f910171abdbcfdf8a04", "email": "e2e-user@local.test", "role": "user",
+            "iat": now, "exp": now + 3600, "iss": "cyxwiz-api"
+        });
+        let token = jsonwebtoken::encode(&jsonwebtoken::Header::default(), &api_claims,
+                                         &jsonwebtoken::EncodingKey::from_secret(&secret)).unwrap();
+        let claims = auth.validate_token(&token).await.expect("API token accepted");
+        assert_eq!(claims.sub, "6ac29f910171abdbcfdf8a04");
+        assert_eq!(claims.user_type, "user");
+
+        let expired = serde_json::json!({
+            "sub": "x", "iat": now - 7200, "exp": now - 3600, "iss": "cyxwiz-api"
+        });
+        let token = jsonwebtoken::encode(&jsonwebtoken::Header::default(), &expired,
+                                         &jsonwebtoken::EncodingKey::from_secret(&secret)).unwrap();
+        assert!(auth.validate_token(&token).await.is_err(), "expired API token refused");
     }
 
     #[test]
