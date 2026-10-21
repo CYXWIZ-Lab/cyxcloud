@@ -981,6 +981,24 @@ impl Database {
         Ok(result)
     }
 
+    /// The users row with this id, created if it does not exist yet. Used for
+    /// accounts that live in the CyxWiz API (TOFIX164): their id is derived
+    /// from the API's user id, so the row carries no wallet, email or name.
+    pub async fn ensure_user(&self, id: Uuid) -> Result<User> {
+        let result = sqlx::query_as::<_, User>(
+            r#"
+            INSERT INTO users (id)
+            VALUES ($1)
+            ON CONFLICT (id) DO UPDATE SET updated_at = NOW()
+            RETURNING *
+            "#,
+        )
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
     /// Get user by wallet address
     pub async fn get_user_by_wallet(&self, wallet_address: &str) -> Result<Option<User>> {
         let result = sqlx::query_as::<_, User>("SELECT * FROM users WHERE wallet_address = $1")

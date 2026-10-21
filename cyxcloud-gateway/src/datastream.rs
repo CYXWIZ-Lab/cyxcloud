@@ -50,10 +50,14 @@ impl DataStreamServiceImpl {
     }
 
     /// Get user ID from request claims
-    fn get_user_id(request: &Request<impl std::any::Any>) -> Result<Uuid, Status> {
+    /// The caller's CyxCloud user id (a CyxWiz API account maps to a stable
+    /// UUID; see auth::user_uuid_for_subject), with its users row in place.
+    async fn user_id(&self, request: &Request<impl std::any::Any>) -> Result<Uuid, Status> {
         let claims = request.require_auth()?;
-        Uuid::parse_str(&claims.sub)
-            .map_err(|_| Status::internal("Invalid user ID in token"))
+        self.state
+            .user_for_claims(claims)
+            .await
+            .map_err(Status::internal)
     }
 
     /// Convert internal Dataset to proto DatasetInfo
@@ -340,7 +344,7 @@ impl DataStreamService for DataStreamServiceImpl {
         &self,
         request: Request<ListDatasetsRequest>,
     ) -> Result<Response<ListDatasetsResponse>, Status> {
-        let user_id = Self::get_user_id(&request)?;
+        let user_id = self.user_id(&request).await?;
         let req = request.into_inner();
 
         let metadata = self.metadata()?;
@@ -398,7 +402,7 @@ impl DataStreamService for DataStreamServiceImpl {
         &self,
         request: Request<CreateDatasetRequest>,
     ) -> Result<Response<CreateDatasetResponse>, Status> {
-        let user_id = Self::get_user_id(&request)?;
+        let user_id = self.user_id(&request).await?;
         let req = request.into_inner();
         tracing::Span::current().record("name", &req.name);
 
@@ -514,7 +518,7 @@ impl DataStreamService for DataStreamServiceImpl {
         &self,
         request: Request<CreateAccessTokenRequest>,
     ) -> Result<Response<AccessTokenResponse>, Status> {
-        let user_id = Self::get_user_id(&request)?;
+        let user_id = self.user_id(&request).await?;
         let req = request.into_inner();
         tracing::Span::current().record("dataset_id", &req.dataset_id);
 
@@ -619,7 +623,7 @@ impl DataStreamService for DataStreamServiceImpl {
         &self,
         request: Request<RevokeAccessTokenRequest>,
     ) -> Result<Response<RevokeAccessTokenResponse>, Status> {
-        let _user_id = Self::get_user_id(&request)?;
+        let _user_id = self.user_id(&request).await?;
         let req = request.into_inner();
         tracing::Span::current().record("token_id", &req.token_id);
 
@@ -789,7 +793,7 @@ impl DataStreamService for DataStreamServiceImpl {
         &self,
         request: Request<ShareDatasetRequest>,
     ) -> Result<Response<ShareDatasetResponse>, Status> {
-        let user_id = Self::get_user_id(&request)?;
+        let user_id = self.user_id(&request).await?;
         let req = request.into_inner();
         tracing::Span::current().record("dataset_id", &req.dataset_id);
 

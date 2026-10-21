@@ -781,96 +781,10 @@ fn parse_dataset_metadata(metadata_json: &Option<String>) -> (Vec<i32>, String, 
 }
 
 // =============================================================================
-// gRPC AUTHENTICATION INTERCEPTOR
+// CLAIMS ON A REQUEST (set by grpc_auth::AuthLayer)
 // =============================================================================
 
-use crate::auth::{AuthService, Claims};
-use tonic::service::Interceptor;
-
-/// gRPC authentication interceptor
-///
-/// Validates JWT tokens in the `authorization` metadata header.
-/// Adds validated claims to request extensions for use by service handlers.
-#[derive(Clone)]
-pub struct AuthInterceptor {
-    auth: Arc<AuthService>,
-    /// Skip authentication for these methods (e.g., health checks)
-    skip_methods: Vec<String>,
-}
-
-impl AuthInterceptor {
-    /// Create a new auth interceptor
-    pub fn new(auth: Arc<AuthService>) -> Self {
-        Self {
-            auth,
-            skip_methods: vec![
-                // Allow unauthenticated node registration
-                "/cyxcloud.node.NodeService/RegisterNode".to_string(),
-            ],
-        }
-    }
-
-    /// Add a method to skip authentication for
-    pub fn skip_method(mut self, method: impl Into<String>) -> Self {
-        self.skip_methods.push(method.into());
-        self
-    }
-}
-
-impl Interceptor for AuthInterceptor {
-    fn call(&mut self, mut request: tonic::Request<()>) -> Result<tonic::Request<()>, Status> {
-        // Check if we have an authorization header
-        let auth_header = request.metadata().get("authorization");
-
-        // If no auth header and we allow some methods to skip, check the grpc-method header
-        if auth_header.is_none() {
-            // Try to get the method from a custom header (set by client if needed)
-            let method_name = request
-                .metadata()
-                .get("grpc-method")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("");
-
-            // Check if method should skip auth
-            if self.skip_methods.iter().any(|m| method_name.contains(m)) {
-                return Ok(request);
-            }
-
-            // For node registration, allow without auth
-            // (RegisterNode is typically the first call from a node)
-            return Err(Status::unauthenticated("Missing authorization header"));
-        }
-
-        // Get authorization header
-        let token = auth_header
-            .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.strip_prefix("Bearer "))
-            .ok_or_else(|| {
-                Status::unauthenticated("Invalid authorization format (expected 'Bearer <token>')")
-            })?;
-
-        // Validate token synchronously (we can't use async in interceptor)
-        // For production, consider using a tower layer instead
-        let claims = validate_token_sync(token, &self.auth)?;
-
-        // Add claims to request extensions
-        request.extensions_mut().insert(claims);
-
-        Ok(request)
-    }
-}
-
-/// Synchronous token validation for use in interceptor.
-/// Uses the existing Tokio runtime handle instead of creating a new one per request.
-fn validate_token_sync(token: &str, auth: &AuthService) -> Result<Claims, Status> {
-    let handle = tokio::runtime::Handle::try_current()
-        .map_err(|_| Status::internal("No Tokio runtime available"))?;
-
-    tokio::task::block_in_place(|| {
-        handle.block_on(auth.validate_token(token))
-    })
-    .map_err(|e| Status::unauthenticated(format!("Invalid token: {}", e)))
-}
+use crate::auth::Claims;
 
 /// Extension trait for extracting claims from request
 pub trait RequestClaimsExt {

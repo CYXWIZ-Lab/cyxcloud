@@ -173,10 +173,10 @@ async fn list_datasets(
         )
     })?;
 
-    let user_id = Uuid::parse_str(&claims.sub).map_err(|_| {
+    let user_id = state.user_for_claims(&claims).await.map_err(|e| {
         (
-            StatusCode::BAD_REQUEST,
-            Json(ApiError::new("Invalid user ID", "INVALID_USER_ID")),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError::new(e, "USER_RECORD")),
         )
     })?;
 
@@ -257,10 +257,10 @@ async fn create_dataset(
         )
     })?;
 
-    let user_id = Uuid::parse_str(&claims.sub).map_err(|_| {
+    let user_id = state.user_for_claims(&claims).await.map_err(|e| {
         (
-            StatusCode::BAD_REQUEST,
-            Json(ApiError::new("Invalid user ID", "INVALID_USER_ID")),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError::new(e, "USER_RECORD")),
         )
     })?;
 
@@ -371,10 +371,10 @@ async fn get_dataset_info(
         )
     })?;
 
-    let user_id = Uuid::parse_str(&claims.sub).map_err(|_| {
+    let user_id = state.user_for_claims(&claims).await.map_err(|e| {
         (
-            StatusCode::BAD_REQUEST,
-            Json(ApiError::new("Invalid user ID", "INVALID_USER_ID")),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError::new(e, "USER_RECORD")),
         )
     })?;
 
@@ -450,10 +450,10 @@ async fn verify_dataset(
         )
     })?;
 
-    let user_id = Uuid::parse_str(&claims.sub).map_err(|_| {
+    let user_id = state.user_for_claims(&claims).await.map_err(|e| {
         (
-            StatusCode::BAD_REQUEST,
-            Json(ApiError::new("Invalid user ID", "INVALID_USER_ID")),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError::new(e, "USER_RECORD")),
         )
     })?;
 
@@ -571,10 +571,10 @@ async fn share_dataset(
         )
     })?;
 
-    let user_id = Uuid::parse_str(&claims.sub).map_err(|_| {
+    let user_id = state.user_for_claims(&claims).await.map_err(|e| {
         (
-            StatusCode::BAD_REQUEST,
-            Json(ApiError::new("Invalid user ID", "INVALID_USER_ID")),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError::new(e, "USER_RECORD")),
         )
     })?;
 

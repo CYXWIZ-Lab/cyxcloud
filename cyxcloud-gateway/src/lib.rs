@@ -18,6 +18,7 @@ mod data_access;
 mod dataset_api;
 mod datastream;
 mod grpc_api;
+mod grpc_auth;
 pub mod metrics;
 mod node_client;
 mod node_monitor;

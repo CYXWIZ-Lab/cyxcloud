@@ -25,6 +25,7 @@ mod data_access;
 mod dataset_api;
 mod datastream;
 mod grpc_api;
+mod grpc_auth;
 mod metrics;
 mod node_client;
 mod node_monitor;
@@ -48,7 +49,8 @@ use cyxcloud_protocol::data::data_service_server::DataServiceServer;
 use cyxcloud_protocol::datastream::data_stream_service_server::DataStreamServiceServer;
 use cyxcloud_protocol::node::node_service_server::NodeServiceServer;
 use datastream::DataStreamServiceImpl;
-use grpc_api::{AuthInterceptor, DataServiceImpl, NodeServiceImpl};
+use grpc_api::{DataServiceImpl, NodeServiceImpl};
+use grpc_auth::AuthLayer;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -336,21 +338,15 @@ async fn main() -> anyhow::Result<()> {
         }
 
         if enable_grpc_auth {
-            // Create auth interceptor
-            let auth_interceptor = AuthInterceptor::new(grpc_state.auth_service_arc());
-
-            // Wrap services with authentication
-            let node_server =
-                NodeServiceServer::with_interceptor(node_service, auth_interceptor.clone());
-            let data_server =
-                DataServiceServer::with_interceptor(data_service, auth_interceptor.clone());
-            let datastream_server =
-                DataStreamServiceServer::with_interceptor(datastream_service, auth_interceptor);
+            // One auth layer over all services: it decides by the request
+            // path which methods run without a JWT (grpc_auth.rs).
+            let auth_layer = AuthLayer::new(grpc_state.auth_service_arc());
 
             if let Err(e) = builder
-                .add_service(node_server)
-                .add_service(data_server)
-                .add_service(datastream_server)
+                .layer(auth_layer)
+                .add_service(NodeServiceServer::new(node_service))
+                .add_service(DataServiceServer::new(data_service))
+                .add_service(DataStreamServiceServer::new(datastream_service))
                 .serve(grpc_addr)
                 .await
             {

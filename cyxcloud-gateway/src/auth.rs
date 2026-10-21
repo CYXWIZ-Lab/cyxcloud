@@ -87,6 +87,26 @@ fn default_user_type() -> String {
     "user".to_string()
 }
 
+/// Namespace for user ids derived from CyxWiz API account ids (UUID v5).
+/// Fixed for ever: changing it would hand every account new, empty storage.
+pub const CYXWIZ_USER_NAMESPACE: Uuid = Uuid::from_u128(0x7c1e_4f2a_9b3d_4e6f_8a51_c2d3_e4f5_0617);
+
+/// The CyxCloud user id behind a token subject. CyxCloud's own tokens carry a
+/// UUID; a CyxWiz API sign-in token carries the API's user id (a Mongo
+/// ObjectId), which maps to one stable UUID so the same account owns the same
+/// datasets whether it arrives from the website, the Engine or a node
+/// (TOFIX164).
+pub fn user_uuid_for_subject(sub: &str) -> Uuid {
+    Uuid::parse_str(sub).unwrap_or_else(|_| Uuid::new_v5(&CYXWIZ_USER_NAMESPACE, sub.as_bytes()))
+}
+
+impl Claims {
+    /// The CyxCloud user id of this token's subject (see user_uuid_for_subject).
+    pub fn user_uuid(&self) -> Uuid {
+        user_uuid_for_subject(&self.sub)
+    }
+}
+
 /// Token type for different authentication flows
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenType {
@@ -637,4 +657,17 @@ mod tests {
         assert!(AuthService::has_permission(&claims, "storage:read"));
         assert!(AuthService::has_permission(&claims, "anything"));
     }
+
+    #[test]
+    fn api_subjects_map_to_one_stable_uuid_and_uuids_pass_through() {
+        let a = user_uuid_for_subject("6ac29f910171abdbcfdf8a04");
+        let b = user_uuid_for_subject("6ac29f910171abdbcfdf8a04");
+        let other = user_uuid_for_subject("6ac29f910171abdbcfdf8a05");
+        assert_eq!(a, b);
+        assert_ne!(a, other);
+        assert_eq!(a.get_version(), Some(uuid::Version::Sha1));
+        let own = Uuid::new_v4();
+        assert_eq!(user_uuid_for_subject(&own.to_string()), own);
+    }
+
 }

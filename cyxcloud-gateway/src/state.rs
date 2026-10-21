@@ -23,7 +23,7 @@ use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use crate::auth::{AuthConfig, AuthService};
+use crate::auth::{AuthConfig, AuthService, Claims};
 #[cfg(feature = "blockchain")]
 use crate::blockchain::{BlockchainConfig, CyxCloudBlockchainClient};
 use crate::node_client::{ChunkMeta, NodeClient, NodeClientConfig};
@@ -325,6 +325,19 @@ impl AppState {
     }
 
     /// Get authentication service reference
+    /// The CyxCloud user id for a validated token, with its users row in
+    /// place (buckets reference users). Without a metadata store the id is
+    /// derived only.
+    pub async fn user_for_claims(&self, claims: &Claims) -> Result<Uuid, String> {
+        let id = claims.user_uuid();
+        if let Some(ref meta) = self.metadata {
+            meta.ensure_user(id)
+                .await
+                .map_err(|e| format!("could not record the user: {}", e))?;
+        }
+        Ok(id)
+    }
+
     pub fn auth_service(&self) -> &AuthService {
         &self.auth
     }

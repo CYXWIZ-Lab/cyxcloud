@@ -504,6 +504,12 @@ impl MetadataService {
         Ok(user)
     }
 
+    /// The users row for an account identified by a UUID the caller already
+    /// trusts (a validated token), created on first sight.
+    pub async fn ensure_user(&self, id: Uuid) -> Result<User> {
+        Ok(self.db.ensure_user(id).await?)
+    }
+
     // =========================================================================
     // BUCKET OPERATIONS
     // =========================================================================
