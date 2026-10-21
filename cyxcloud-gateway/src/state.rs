@@ -155,6 +155,15 @@ pub struct AppState {
     use_memory: bool,
 }
 
+/// Why a stored file cannot be served: which chunk, and the reason.
+pub fn chunk_failure_text(index: usize, count: usize, why: &str, detail: &str) -> String {
+    let mut text = format!("chunk {} of {} could not be served: {}", index + 1, count, why);
+    if !detail.is_empty() {
+        text.push_str(&format!(" ({})", detail));
+    }
+    text
+}
+
 /// What storing an object produced.
 #[derive(Debug, Clone)]
 pub struct PutOutcome {
@@ -1120,182 +1129,193 @@ impl AppState {
                 .map_err(|e| S3Error::Internal(e.to_string()))?
                 .ok_or_else(|| S3Error::NoSuchKey(key.to_string()))?;
 
-            // Get all shard records for this file
-            let shard_records = meta
-                .get_file_chunks(file.id)
-                .await
-                .map_err(|e| S3Error::Internal(e.to_string()))?;
-
-            if shard_records.is_empty() {
-                return Err(S3Error::Internal("No shards found for file".to_string()));
-            }
-
-            let num_chunks = file.chunk_count as usize;
-            info!(
-                bucket = bucket,
-                key = key,
-                file_id = %file.id,
-                shards = shard_records.len(),
-                chunks = num_chunks,
-                "Retrieving object with erasure decoding"
-            );
-
-            // Group shard records by chunk_index
-            let mut chunk_shards: HashMap<i32, Vec<&cyxcloud_metadata::Chunk>> = HashMap::new();
-            for shard in &shard_records {
-                chunk_shards
-                    .entry(shard.chunk_index)
-                    .or_default()
-                    .push(shard);
-            }
-
-            // Batch-fetch all chunk locations for this file (avoids N+1 queries)
-            let all_locations = meta
-                .get_file_chunk_locations(file.id)
-                .await
-                .map_err(|e| S3Error::Internal(e.to_string()))?;
-
-            // Create erasure decoder
-            let erasure_decoder = ErasureEncoder::new().map_err(|e| {
-                S3Error::Internal(format!("Failed to create erasure decoder: {}", e))
-            })?;
-
-            // Decode each chunk using erasure coding
-            let mut decoded_chunks: Vec<(i32, Bytes)> = Vec::with_capacity(num_chunks);
-
-            for chunk_idx in 0..num_chunks as i32 {
-                let shards = chunk_shards.get(&chunk_idx).ok_or_else(|| {
-                    S3Error::Internal(format!("No shards found for chunk {}", chunk_idx))
-                })?;
-
-                // Retrieve shards from storage nodes
-                // We need at least DATA_SHARDS (10) out of TOTAL_SHARDS (14)
-                let mut shard_opts: Vec<Option<ShardData>> = vec![None; TOTAL_SHARDS];
-                let mut retrieved_count = 0;
-
-                for shard_record in shards {
-                    if retrieved_count >= DATA_SHARDS {
-                        // We have enough shards, no need to retrieve more
-                        break;
-                    }
-
-                    let shard_idx = shard_record.shard_index as usize;
-                    if shard_idx >= TOTAL_SHARDS {
-                        warn!(shard_index = shard_idx, "Invalid shard index, skipping");
-                        continue;
-                    }
-
-                    // Look up node addresses from batch-fetched map
-                    let addresses = all_locations
-                        .get(&shard_record.chunk_id)
-                        .cloned()
-                        .unwrap_or_default();
-
-                    if addresses.is_empty() {
-                        debug!(
-                            chunk_index = chunk_idx,
-                            shard_index = shard_idx,
-                            "No nodes have this shard, will try to reconstruct"
-                        );
-                        continue;
-                    }
-
-                    // Retrieve shard from any available node
-                    match self
-                        .node_client
-                        .get_chunk_from_any(&addresses, &shard_record.chunk_id)
-                        .await
-                    {
-                        Ok(data) => {
-                            debug!(
-                                chunk_index = chunk_idx,
-                                shard_index = shard_idx,
-                                size = data.len(),
-                                "Shard retrieved"
-                            );
-                            shard_opts[shard_idx] = Some(ShardData::new(
-                                shard_idx as u8,
-                                data,
-                                shard_record.is_parity,
-                            ));
-                            retrieved_count += 1;
-                        }
-                        Err(e) => {
-                            debug!(
-                                error = %e,
-                                chunk_index = chunk_idx,
-                                shard_index = shard_idx,
-                                "Failed to retrieve shard, will try to reconstruct"
-                            );
-                        }
-                    }
-                }
-
-                // Check if we have enough shards to decode
-                if retrieved_count < DATA_SHARDS {
-                    error!(
-                        chunk_index = chunk_idx,
-                        retrieved = retrieved_count,
-                        required = DATA_SHARDS,
-                        "Insufficient shards for erasure decoding"
-                    );
-                    return Err(S3Error::Internal(format!(
-                        "Insufficient shards for chunk {}: have {}, need {}",
-                        chunk_idx, retrieved_count, DATA_SHARDS
-                    )));
-                }
-
-                // Calculate the original chunk size for this chunk
-                // For the last chunk, it may be smaller
-                let chunk_size = if chunk_idx == (num_chunks as i32 - 1) {
-                    // Last chunk: remaining bytes
-                    let full_chunks_size =
-                        (num_chunks - 1) * file.chunk_size as usize;
-                    file.size_bytes as usize - full_chunks_size
-                } else {
-                    file.chunk_size as usize
-                };
-
-                // Decode shards back to original chunk data
-                let decoded = erasure_decoder
-                    .decode(&shard_opts, chunk_size)
-                    .map_err(|e| {
-                        S3Error::Internal(format!(
-                            "Erasure decoding failed for chunk {}: {}",
-                            chunk_idx, e
-                        ))
-                    })?;
-
-                debug!(
-                    chunk_index = chunk_idx,
-                    decoded_size = decoded.len(),
-                    "Chunk decoded successfully"
-                );
-                decoded_chunks.push((chunk_idx, decoded));
-            }
-
-            // Sort by chunk index and concatenate
-            decoded_chunks.sort_by_key(|(idx, _)| *idx);
-
-            let mut result = Vec::with_capacity(file.size_bytes as usize);
-            for (_, chunk_data) in decoded_chunks {
-                result.extend_from_slice(&chunk_data);
-            }
-
-            // Trim to exact original size (should already be correct, but be safe)
-            result.truncate(file.size_bytes as usize);
-
-            info!(
-                bucket = bucket,
-                key = key,
-                size = result.len(),
-                "Object retrieved and decoded successfully"
-            );
-
-            return Ok(Bytes::from(result));
+            return self.read_file(&file).await;
         }
 
         Err(S3Error::NoSuchKey(key.to_string()))
+    }
+
+    /// The bytes of a stored file, erasure-decoded chunk by chunk from the
+    /// storage nodes: what S3 GET returns and what StreamData sends. A chunk
+    /// that cannot be rebuilt fails with its position ("chunk 2 of 3 ...").
+    pub async fn read_file(&self, file: &cyxcloud_metadata::File) -> S3Result<Bytes> {
+        // Get all shard records for this file
+        let meta = self
+            .metadata
+            .as_ref()
+            .ok_or_else(|| S3Error::Internal("No metadata store".to_string()))?;
+        let shard_records = meta
+            .get_file_chunks(file.id)
+            .await
+            .map_err(|e| S3Error::Internal(e.to_string()))?;
+
+        if shard_records.is_empty() {
+            return Err(S3Error::Internal("No shards found for file".to_string()));
+        }
+
+        let num_chunks = file.chunk_count as usize;
+        info!(
+            path = %file.path,
+            file_id = %file.id,
+            shards = shard_records.len(),
+            chunks = num_chunks,
+            "Retrieving object with erasure decoding"
+        );
+
+        // Group shard records by chunk_index
+        let mut chunk_shards: HashMap<i32, Vec<&cyxcloud_metadata::Chunk>> = HashMap::new();
+        for shard in &shard_records {
+            chunk_shards
+                .entry(shard.chunk_index)
+                .or_default()
+                .push(shard);
+        }
+
+        // Batch-fetch all chunk locations for this file (avoids N+1 queries)
+        let all_locations = meta
+            .get_file_chunk_locations(file.id)
+            .await
+            .map_err(|e| S3Error::Internal(e.to_string()))?;
+
+        // Create erasure decoder
+        let erasure_decoder = ErasureEncoder::new().map_err(|e| {
+            S3Error::Internal(format!("Failed to create erasure decoder: {}", e))
+        })?;
+
+        // Decode each chunk using erasure coding
+        let mut decoded_chunks: Vec<(i32, Bytes)> = Vec::with_capacity(num_chunks);
+
+        for chunk_idx in 0..num_chunks as i32 {
+            let shards = chunk_shards.get(&chunk_idx).ok_or_else(|| {
+                S3Error::Internal(format!("No shards found for chunk {}", chunk_idx))
+            })?;
+
+            // Retrieve shards from storage nodes
+            // We need at least DATA_SHARDS (10) out of TOTAL_SHARDS (14)
+            let mut shard_opts: Vec<Option<ShardData>> = vec![None; TOTAL_SHARDS];
+            let mut retrieved_count = 0;
+
+            for shard_record in shards {
+                if retrieved_count >= DATA_SHARDS {
+                    // We have enough shards, no need to retrieve more
+                    break;
+                }
+
+                let shard_idx = shard_record.shard_index as usize;
+                if shard_idx >= TOTAL_SHARDS {
+                    warn!(shard_index = shard_idx, "Invalid shard index, skipping");
+                    continue;
+                }
+
+                // Look up node addresses from batch-fetched map
+                let addresses = all_locations
+                    .get(&shard_record.chunk_id)
+                    .cloned()
+                    .unwrap_or_default();
+
+                if addresses.is_empty() {
+                    debug!(
+                        chunk_index = chunk_idx,
+                        shard_index = shard_idx,
+                        "No nodes have this shard, will try to reconstruct"
+                    );
+                    continue;
+                }
+
+                // Retrieve shard from any available node
+                match self
+                    .node_client
+                    .get_chunk_from_any(&addresses, &shard_record.chunk_id)
+                    .await
+                {
+                    Ok(data) => {
+                        debug!(
+                            chunk_index = chunk_idx,
+                            shard_index = shard_idx,
+                            size = data.len(),
+                            "Shard retrieved"
+                        );
+                        shard_opts[shard_idx] = Some(ShardData::new(
+                            shard_idx as u8,
+                            data,
+                            shard_record.is_parity,
+                        ));
+                        retrieved_count += 1;
+                    }
+                    Err(e) => {
+                        debug!(
+                            error = %e,
+                            chunk_index = chunk_idx,
+                            shard_index = shard_idx,
+                            "Failed to retrieve shard, will try to reconstruct"
+                        );
+                    }
+                }
+            }
+
+            // Check if we have enough shards to decode
+            if retrieved_count < DATA_SHARDS {
+                error!(
+                    chunk_index = chunk_idx,
+                    retrieved = retrieved_count,
+                    required = DATA_SHARDS,
+                    "Insufficient shards for erasure decoding"
+                );
+                return Err(S3Error::Internal(chunk_failure_text(
+                    chunk_idx as usize,
+                    num_chunks,
+                    "not enough shards are held by online nodes",
+                    &format!("have {}, need {}", retrieved_count, DATA_SHARDS),
+                )));
+            }
+
+            // Calculate the original chunk size for this chunk
+            // For the last chunk, it may be smaller
+            let chunk_size = if chunk_idx == (num_chunks as i32 - 1) {
+                // Last chunk: remaining bytes
+                let full_chunks_size =
+                    (num_chunks - 1) * file.chunk_size as usize;
+                file.size_bytes as usize - full_chunks_size
+            } else {
+                file.chunk_size as usize
+            };
+
+            // Decode shards back to original chunk data
+            let decoded = erasure_decoder
+                .decode(&shard_opts, chunk_size)
+                .map_err(|e| {
+                    S3Error::Internal(format!(
+                        "Erasure decoding failed for chunk {}: {}",
+                        chunk_idx, e
+                    ))
+                })?;
+
+            debug!(
+                chunk_index = chunk_idx,
+                decoded_size = decoded.len(),
+                "Chunk decoded successfully"
+            );
+            decoded_chunks.push((chunk_idx, decoded));
+        }
+
+        // Sort by chunk index and concatenate
+        decoded_chunks.sort_by_key(|(idx, _)| *idx);
+
+        let mut result = Vec::with_capacity(file.size_bytes as usize);
+        for (_, chunk_data) in decoded_chunks {
+            result.extend_from_slice(&chunk_data);
+        }
+
+        // Trim to exact original size (should already be correct, but be safe)
+        result.truncate(file.size_bytes as usize);
+
+        info!(
+            path = %file.path,
+            size = result.len(),
+            "Object retrieved and decoded successfully"
+        );
+
+        Ok(Bytes::from(result))
     }
 
     /// Get object range

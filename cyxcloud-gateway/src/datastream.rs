@@ -182,7 +182,9 @@ impl DataStreamServiceImpl {
     /// Convert internal DatasetFile to proto DatasetFileInfo
     fn dataset_file_to_proto(file: &DatasetFile) -> DatasetFileInfo {
         DatasetFileInfo {
-            id: file.id.to_string(),
+            // The file's own id: what StreamData and UploadFile speak of
+            // (not the dataset_files row id).
+            id: file.file_id.to_string(),
             path_in_dataset: file.path_in_dataset.clone(),
             size_bytes: file.size_bytes,
             content_hash: file.content_hash.clone(),

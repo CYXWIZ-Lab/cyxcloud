@@ -408,13 +408,7 @@ pub fn token_allows_stream(scopes: &[String]) -> bool {
 /// The status a stream ends with when chunk `index` of `count` cannot be
 /// served: data loss, never a silent skip.
 pub fn chunk_failure(index: usize, count: usize, why: &str, detail: &str) -> Status {
-    let mut message = format!("chunk {} of {} could not be served: {}", index + 1, count, why);
-    if !detail.is_empty() {
-        message.push_str(" (");
-        message.push_str(detail);
-        message.push(')');
-    }
-    Status::data_loss(message)
+    Status::data_loss(crate::state::chunk_failure_text(index, count, why, detail))
 }
 
 /// gRPC Data Service implementation for ML training data streaming
@@ -499,83 +493,35 @@ impl DataService for DataServiceImpl {
             .ok_or_else(|| Status::not_found(format!("Dataset not found: {}", dataset_id)))?;
         let expected_hash = file.content_hash.clone();
 
-        let chunks = metadata.get_file_chunks(file_uuid).await.map_err(|e| {
-            error!(error = %e, "Failed to get file chunks");
-            Status::internal(format!("Failed to get dataset chunks: {}", e))
-        })?;
-        if chunks.is_empty() {
-            return Err(Status::not_found("Dataset has no chunks"));
-        }
-
         info!(
             dataset_id = %dataset_id,
-            chunk_count = chunks.len(),
+            size_bytes = file.size_bytes,
             token_id = %token.id,
-            "Found dataset chunks, starting stream"
+            "Streaming file"
         );
 
         let (tx, rx) = mpsc::channel(req.prefetch.max(1) as usize);
-        let metadata_clone = self.state.metadata_service_arc();
-        let node_client = self.state.node_client_arc();
+        let state = self.state.clone();
         let batch_bytes = (req.batch_size.max(1) as usize) * 1024;
 
         tokio::spawn(async move {
             use sha2::Digest;
-            let mut file_hasher = blake3::Hasher::new();
-            let mut stream_hasher = sha2::Sha256::new();
-            let mut total_bytes: u64 = 0;
-            let mut batch_index: u64 = 0;
-            let mut batch_data: Vec<u8> = Vec::with_capacity(batch_bytes);
-            let chunk_count = chunks.len();
-
-            for (i, chunk) in chunks.iter().enumerate() {
-                let locations = match metadata_clone.as_ref() {
-                    Some(meta) => match meta.get_chunk_locations(&chunk.chunk_id).await {
-                        Ok(locations) => locations,
-                        Err(e) => {
-                            let _ = tx.send(Err(chunk_failure(i, chunk_count, "its locations could not be read", &e.to_string()))).await;
-                            return;
-                        }
-                    },
-                    None => Vec::new(),
-                };
-                if locations.is_empty() {
-                    let _ = tx.send(Err(chunk_failure(i, chunk_count, "no storage node holds it", ""))).await;
+            // The same erasure decoding as S3 GET; a chunk that cannot be
+            // rebuilt ends the stream with its position instead of a skip.
+            let data = match state.read_file(&file).await {
+                Ok(data) => data,
+                Err(e) => {
+                    let text = match e {
+                        crate::s3_api::S3Error::Internal(text) => text,
+                        other => other.to_string(),
+                    };
+                    let _ = tx.send(Err(Status::data_loss(text))).await;
                     return;
                 }
-                let data = match node_client.get_chunk_from_any(&locations, &chunk.chunk_id).await {
-                    Ok(data) => data,
-                    Err(e) => {
-                        let _ = tx.send(Err(chunk_failure(i, chunk_count, "no storage node could serve it", &e.to_string()))).await;
-                        return;
-                    }
-                };
-                file_hasher.update(&data);
-                stream_hasher.update(&data);
-                total_bytes += data.len() as u64;
-                batch_data.extend_from_slice(&data);
-
-                let is_last = i + 1 == chunk_count;
-                if batch_data.len() >= batch_bytes && !is_last {
-                    let message = DataChunk {
-                        batch_index,
-                        data: std::mem::take(&mut batch_data),
-                        is_last: false,
-                        stream_sha256: String::new(),
-                        total_bytes: 0,
-                    };
-                    if tx.send(Ok(message)).await.is_err() {
-                        debug!("Client disconnected, stopping stream");
-                        return;
-                    }
-                    batch_index += 1;
-                }
-            }
-
-            // Everything was read: the assembled bytes must be the stored file.
-            let assembled = file_hasher.finalize();
-            if assembled.as_bytes() != expected_hash.as_slice() {
-                error!(dataset_id = %dataset_id, "Assembled bytes do not match the stored content hash");
+            };
+            // The decoded bytes must be the stored file.
+            if blake3::hash(&data).as_bytes() != expected_hash.as_slice() {
+                error!(dataset_id = %dataset_id, "Decoded bytes do not match the stored content hash");
                 let _ = tx
                     .send(Err(Status::data_loss(
                         "the assembled file does not match its stored content hash",
@@ -583,9 +529,29 @@ impl DataService for DataServiceImpl {
                     .await;
                 return;
             }
+            let mut stream_hasher = sha2::Sha256::new();
+            stream_hasher.update(&data);
+            let total_bytes = data.len() as u64;
+            let mut batch_index: u64 = 0;
+            let mut offset = 0usize;
+            while data.len() - offset > batch_bytes {
+                let message = DataChunk {
+                    batch_index,
+                    data: data[offset..offset + batch_bytes].to_vec(),
+                    is_last: false,
+                    stream_sha256: String::new(),
+                    total_bytes: 0,
+                };
+                if tx.send(Ok(message)).await.is_err() {
+                    debug!("Client disconnected, stopping stream");
+                    return;
+                }
+                offset += batch_bytes;
+                batch_index += 1;
+            }
             let trailer = DataChunk {
                 batch_index,
-                data: batch_data,
+                data: data[offset..].to_vec(),
                 is_last: true,
                 stream_sha256: hex::encode(stream_hasher.finalize()),
                 total_bytes,
