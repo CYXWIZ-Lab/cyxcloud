@@ -78,12 +78,12 @@ redis = { workspace = true }
 # Blockchain (Solana) - optional, requires OpenSSL on Windows
 solana-sdk = { workspace = true, optional = true }
 solana-client = { workspace = true, optional = true }
-sha2 = { version = "0.10", optional = true }
+sha2 = "0.10"
 
 [features]
 default = []
 # Enable blockchain integration (requires OpenSSL on Windows)
-blockchain = ["solana-sdk", "solana-client", "sha2"]
+blockchain = ["solana-sdk", "solana-client"]
 
 [dev-dependencies]
 reqwest = { version = "0.11", features = ["json"] }

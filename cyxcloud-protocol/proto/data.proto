@@ -30,6 +30,10 @@ message StreamDataRequest {
 
   // Optional: start from specific epoch
   int32 start_epoch = 5;
+
+  // Dataset access token (DataStreamService.CreateAccessToken); required.
+  // The token's dataset must contain the requested file.
+  string access_token = 6;
 }
 
 // Streamed data chunk
@@ -42,6 +46,14 @@ message DataChunk {
 
   // Whether this is the last chunk in epoch
   bool is_last = 3;
+
+  // On the last chunk: SHA-256 (hex) of every byte streamed, in order, and
+  // the byte count. The receiver verifies before it uses the file. The
+  // gateway only reaches the last chunk after checking the assembled bytes
+  // against the file's stored content hash; a missing or unreadable chunk
+  // ends the stream with an error instead.
+  string stream_sha256 = 4;
+  uint64 total_bytes = 5;
 }
 
 // Request for dataset info

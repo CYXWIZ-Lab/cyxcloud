@@ -398,6 +398,25 @@ impl NodeService for NodeServiceImpl {
 // DATA SERVICE IMPLEMENTATION
 // =============================================================================
 
+
+/// A dataset access token may stream a file when it carries the "stream" or
+/// "read" scope (CreateAccessToken grants both by default).
+pub fn token_allows_stream(scopes: &[String]) -> bool {
+    scopes.iter().any(|s| s == "stream" || s == "read")
+}
+
+/// The status a stream ends with when chunk `index` of `count` cannot be
+/// served: data loss, never a silent skip.
+pub fn chunk_failure(index: usize, count: usize, why: &str, detail: &str) -> Status {
+    let mut message = format!("chunk {} of {} could not be served: {}", index + 1, count, why);
+    if !detail.is_empty() {
+        message.push_str(" (");
+        message.push_str(detail);
+        message.push(')');
+    }
+    Status::data_loss(message)
+}
+
 /// gRPC Data Service implementation for ML training data streaming
 pub struct DataServiceImpl {
     state: Arc<AppState>,
@@ -433,28 +452,57 @@ impl DataService for DataServiceImpl {
         let dataset_id = req.dataset_id.clone();
         tracing::Span::current().record("dataset_id", &dataset_id);
 
-        info!(
-            dataset_id = %dataset_id,
-            batch_size = req.batch_size,
-            shuffle = req.shuffle,
-            prefetch = req.prefetch,
-            "Starting data stream"
-        );
-
         let metadata = self
             .metadata()
             .ok_or_else(|| Status::unavailable("Metadata service not configured"))?;
 
-        // Parse dataset ID as UUID (file ID)
+        // The file to stream (StreamData names a file by its UUID).
         let file_uuid = Uuid::parse_str(&dataset_id)
             .map_err(|e| Status::invalid_argument(format!("Invalid dataset_id: {}", e)))?;
 
-        // Get file chunks from metadata
+        // Whole-file streams are ordered; shuffling only makes sense for
+        // sample batches, which this service does not produce.
+        if req.shuffle {
+            return Err(Status::invalid_argument(
+                "StreamData sends a file in order; shuffle is not supported",
+            ));
+        }
+
+        // Every stream presents a dataset access token for a dataset that
+        // contains the file (TOFIX164): no token, no bytes.
+        if req.access_token.is_empty() {
+            return Err(Status::unauthenticated("Dataset access token required"));
+        }
+        let token_hash = blake3::hash(req.access_token.as_bytes()).as_bytes().to_vec();
+        let token = metadata
+            .database()
+            .validate_data_access_token(&token_hash)
+            .await
+            .map_err(|e| Status::internal(format!("Database error: {}", e)))?
+            .ok_or_else(|| Status::unauthenticated("Dataset access token is invalid, expired or revoked"))?;
+        if !token_allows_stream(&token.scopes) {
+            return Err(Status::permission_denied("Token does not allow streaming"));
+        }
+        let dataset_files = metadata
+            .database()
+            .get_dataset_files(token.dataset_id)
+            .await
+            .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
+        if !dataset_files.iter().any(|f| f.file_id == file_uuid) {
+            return Err(Status::permission_denied("Token does not cover this file"));
+        }
+
+        let file = metadata
+            .get_file(file_uuid)
+            .await
+            .map_err(|e| Status::internal(format!("Database error: {}", e)))?
+            .ok_or_else(|| Status::not_found(format!("Dataset not found: {}", dataset_id)))?;
+        let expected_hash = file.content_hash.clone();
+
         let chunks = metadata.get_file_chunks(file_uuid).await.map_err(|e| {
             error!(error = %e, "Failed to get file chunks");
             Status::internal(format!("Failed to get dataset chunks: {}", e))
         })?;
-
         if chunks.is_empty() {
             return Err(Status::not_found("Dataset has no chunks"));
         }
@@ -462,104 +510,88 @@ impl DataService for DataServiceImpl {
         info!(
             dataset_id = %dataset_id,
             chunk_count = chunks.len(),
+            token_id = %token.id,
             "Found dataset chunks, starting stream"
         );
 
-        // Create channel for streaming
         let (tx, rx) = mpsc::channel(req.prefetch.max(1) as usize);
-
-        // Get references we need for the streaming task
         let metadata_clone = self.state.metadata_service_arc();
         let node_client = self.state.node_client_arc();
-        let shuffle = req.shuffle;
-        let batch_size = req.batch_size as usize;
+        let batch_bytes = (req.batch_size.max(1) as usize) * 1024;
 
-        // Spawn task to stream chunks
         tokio::spawn(async move {
-            // Optionally shuffle chunk indices
-            let chunk_indices: Vec<usize> = if shuffle {
-                use rand::seq::SliceRandom;
-                let mut indices: Vec<usize> = (0..chunks.len()).collect();
-                let mut rng = rand::thread_rng();
-                indices.shuffle(&mut rng);
-                indices
-            } else {
-                (0..chunks.len()).collect()
-            };
-
+            use sha2::Digest;
+            let mut file_hasher = blake3::Hasher::new();
+            let mut stream_hasher = sha2::Sha256::new();
+            let mut total_bytes: u64 = 0;
             let mut batch_index: u64 = 0;
-            let mut batch_data = Vec::with_capacity(batch_size);
+            let mut batch_data: Vec<u8> = Vec::with_capacity(batch_bytes);
+            let chunk_count = chunks.len();
 
-            for (i, &chunk_idx) in chunk_indices.iter().enumerate() {
-                let chunk = &chunks[chunk_idx];
-                let is_last = i == chunk_indices.len() - 1;
-
-                // Get chunk locations from metadata
-                let locations = if let Some(ref meta) = metadata_clone {
-                    meta.get_chunk_locations(&chunk.chunk_id)
-                        .await
-                        .unwrap_or_default()
-                } else {
-                    Vec::new()
-                };
-
-                if locations.is_empty() {
-                    warn!(
-                        chunk_id = %hex::encode(&chunk.chunk_id),
-                        "No locations found for chunk, skipping"
-                    );
-                    continue;
-                }
-
-                // Retrieve chunk data from storage node
-                match node_client
-                    .get_chunk_from_any(&locations, &chunk.chunk_id)
-                    .await
-                {
-                    Ok(data) => {
-                        batch_data.extend_from_slice(&data);
-
-                        // Send batch when we have enough or at the end
-                        let should_send = batch_data.len() >= batch_size * 1024 || is_last;
-
-                        if should_send {
-                            let chunk_response = DataChunk {
-                                batch_index,
-                                data: std::mem::take(&mut batch_data),
-                                is_last,
-                            };
-
-                            if tx.send(Ok(chunk_response)).await.is_err() {
-                                debug!("Client disconnected, stopping stream");
-                                break;
-                            }
-
-                            batch_index += 1;
+            for (i, chunk) in chunks.iter().enumerate() {
+                let locations = match metadata_clone.as_ref() {
+                    Some(meta) => match meta.get_chunk_locations(&chunk.chunk_id).await {
+                        Ok(locations) => locations,
+                        Err(e) => {
+                            let _ = tx.send(Err(chunk_failure(i, chunk_count, "its locations could not be read", &e.to_string()))).await;
+                            return;
                         }
-                    }
+                    },
+                    None => Vec::new(),
+                };
+                if locations.is_empty() {
+                    let _ = tx.send(Err(chunk_failure(i, chunk_count, "no storage node holds it", ""))).await;
+                    return;
+                }
+                let data = match node_client.get_chunk_from_any(&locations, &chunk.chunk_id).await {
+                    Ok(data) => data,
                     Err(e) => {
-                        warn!(
-                            chunk_id = %hex::encode(&chunk.chunk_id),
-                            error = %e,
-                            "Failed to retrieve chunk"
-                        );
-                        // Continue with other chunks
+                        let _ = tx.send(Err(chunk_failure(i, chunk_count, "no storage node could serve it", &e.to_string()))).await;
+                        return;
                     }
+                };
+                file_hasher.update(&data);
+                stream_hasher.update(&data);
+                total_bytes += data.len() as u64;
+                batch_data.extend_from_slice(&data);
+
+                let is_last = i + 1 == chunk_count;
+                if batch_data.len() >= batch_bytes && !is_last {
+                    let message = DataChunk {
+                        batch_index,
+                        data: std::mem::take(&mut batch_data),
+                        is_last: false,
+                        stream_sha256: String::new(),
+                        total_bytes: 0,
+                    };
+                    if tx.send(Ok(message)).await.is_err() {
+                        debug!("Client disconnected, stopping stream");
+                        return;
+                    }
+                    batch_index += 1;
                 }
             }
 
-            // Send any remaining data
-            if !batch_data.is_empty() {
+            // Everything was read: the assembled bytes must be the stored file.
+            let assembled = file_hasher.finalize();
+            if assembled.as_bytes() != expected_hash.as_slice() {
+                error!(dataset_id = %dataset_id, "Assembled bytes do not match the stored content hash");
                 let _ = tx
-                    .send(Ok(DataChunk {
-                        batch_index,
-                        data: batch_data,
-                        is_last: true,
-                    }))
+                    .send(Err(Status::data_loss(
+                        "the assembled file does not match its stored content hash",
+                    )))
                     .await;
+                return;
             }
-
-            debug!(dataset_id = %dataset_id, "Data stream completed");
+            let trailer = DataChunk {
+                batch_index,
+                data: batch_data,
+                is_last: true,
+                stream_sha256: hex::encode(stream_hasher.finalize()),
+                total_bytes,
+            };
+            let _ = tx.send(Ok(trailer)).await;
+            debug!(dataset_id = %dataset_id, total_bytes, "Data stream completed");
         });
 
         let stream = ReceiverStream::new(rx);
@@ -886,6 +918,26 @@ pub mod data_service {
 
 #[cfg(test)]
 mod tests {
+    use super::{chunk_failure, token_allows_stream};
+
+    #[test]
+    fn stream_scope_is_read_or_stream() {
+        assert!(token_allows_stream(&["read".to_string(), "stream".to_string()]));
+        assert!(token_allows_stream(&["stream".to_string()]));
+        assert!(token_allows_stream(&["read".to_string()]));
+        assert!(!token_allows_stream(&["write".to_string()]));
+        assert!(!token_allows_stream(&[]));
+    }
+
+    #[test]
+    fn a_missing_chunk_is_data_loss_with_its_position() {
+        let status = chunk_failure(2, 7, "no storage node holds it", "");
+        assert_eq!(status.code(), tonic::Code::DataLoss);
+        assert_eq!(status.message(), "chunk 3 of 7 could not be served: no storage node holds it");
+        let detailed = chunk_failure(0, 1, "no storage node could serve it", "connection refused");
+        assert!(detailed.message().ends_with("(connection refused)"));
+    }
+
     use crate::auth::Claims;
 
     #[test]
