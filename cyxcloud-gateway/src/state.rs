@@ -155,6 +155,15 @@ pub struct AppState {
     use_memory: bool,
 }
 
+/// What storing an object produced.
+#[derive(Debug, Clone)]
+pub struct PutOutcome {
+    /// Hex content hash (database) or MD5 (memory), as S3 reports it.
+    pub etag: String,
+    /// The file record, when the gateway has a metadata store.
+    pub file_id: Option<Uuid>,
+}
+
 /// Bucket state for in-memory storage
 struct BucketState {
     objects: HashMap<String, StoredObject>,
@@ -553,32 +562,34 @@ impl AppState {
         }
     }
 
+    /// The bucket `name` owned by `owner`, created if missing (the owner's
+    /// users row too). An existing bucket is left as it is.
+    pub async fn ensure_bucket_for(&self, name: &str, owner: Uuid) -> S3Result<()> {
+        if self.bucket_exists(name).await? {
+            return Ok(());
+        }
+        if self.use_memory {
+            return self.create_memory_bucket(name).await;
+        }
+        if let Some(ref meta) = self.metadata {
+            meta.ensure_user(owner)
+                .await
+                .map_err(|e| S3Error::Internal(e.to_string()))?;
+            meta.create_bucket(name, owner)
+                .await
+                .map_err(|e| S3Error::Internal(e.to_string()))?;
+            info!(bucket = name, owner = %owner, "Bucket created (database)");
+            return Ok(());
+        }
+        Err(S3Error::Internal(
+            "No storage backend available".to_string(),
+        ))
+    }
+
     /// Create a bucket
     pub async fn create_bucket(&self, name: &str) -> S3Result<()> {
         if self.use_memory {
-            let mut buckets = self.memory_buckets.write().await;
-
-            if buckets.contains_key(name) {
-                return Err(S3Error::BucketAlreadyExists(name.to_string()));
-            }
-
-            if buckets.len() >= MAX_MEMORY_BUCKETS {
-                return Err(S3Error::Internal(format!(
-                    "Maximum number of in-memory buckets ({}) reached",
-                    MAX_MEMORY_BUCKETS
-                )));
-            }
-
-            buckets.insert(
-                name.to_string(),
-                BucketState {
-                    objects: HashMap::new(),
-                    created_at: chrono::Utc::now(),
-                },
-            );
-
-            info!(bucket = name, "Bucket created (memory)");
-            return Ok(());
+            return self.create_memory_bucket(name).await;
         }
 
         // Use metadata service
@@ -606,6 +617,34 @@ impl AppState {
                 "No storage backend available".to_string(),
             ))
         }
+    }
+
+    async fn create_memory_bucket(&self, name: &str) -> S3Result<()> {
+        {
+            let mut buckets = self.memory_buckets.write().await;
+
+            if buckets.contains_key(name) {
+                return Err(S3Error::BucketAlreadyExists(name.to_string()));
+            }
+
+            if buckets.len() >= MAX_MEMORY_BUCKETS {
+                return Err(S3Error::Internal(format!(
+                    "Maximum number of in-memory buckets ({}) reached",
+                    MAX_MEMORY_BUCKETS
+                )));
+            }
+
+            buckets.insert(
+                name.to_string(),
+                BucketState {
+                    objects: HashMap::new(),
+                    created_at: chrono::Utc::now(),
+                },
+            );
+
+            info!(bucket = name, "Bucket created (memory)");
+        }
+        Ok(())
     }
 
     /// Delete a bucket
@@ -688,6 +727,23 @@ impl AppState {
         data: Bytes,
         content_type: &str,
     ) -> S3Result<String> {
+        Ok(self
+            .put_object_as(self.user_id, bucket, key, data, content_type)
+            .await?
+            .etag)
+    }
+
+    /// Stores an object owned by `owner` (an authenticated user) and reports
+    /// the file record it made, which a dataset can then reference. The
+    /// in-memory store keeps no file records (file_id is None there).
+    pub async fn put_object_as(
+        &self,
+        owner: Uuid,
+        bucket: &str,
+        key: &str,
+        data: Bytes,
+        content_type: &str,
+    ) -> S3Result<PutOutcome> {
         if self.use_memory {
             let new_size = data.len();
 
@@ -740,7 +796,7 @@ impl AppState {
             drop(buckets);
             self.publish_file_created(bucket, key, 0).await;
 
-            return Ok(etag);
+            return Ok(PutOutcome { etag, file_id: None });
         }
 
         // Use metadata service + node storage with erasure coding
@@ -812,7 +868,7 @@ impl AppState {
                 data_shards: DATA_SHARDS as i32,
                 parity_shards: PARITY_SHARDS as i32,
                 chunk_size: DEFAULT_CHUNK_SIZE as i32,
-                owner_id: Some(self.user_id),
+                owner_id: Some(owner),
                 bucket: Some(bucket.to_string()),
                 content_type: Some(content_type.to_string()),
                 metadata: None,
@@ -1027,7 +1083,10 @@ impl AppState {
             self.publish_file_created(bucket, key, data.len() as u64)
                 .await;
 
-            return Ok(etag);
+            return Ok(PutOutcome {
+                etag,
+                file_id: Some(file.id),
+            });
         }
 
         Err(S3Error::Internal(

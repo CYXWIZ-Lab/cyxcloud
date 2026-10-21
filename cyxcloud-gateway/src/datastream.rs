@@ -14,22 +14,118 @@ use cyxcloud_metadata::{
     DatasetFile, MetadataService, PublicDataset, TrustLevel,
 };
 use cyxcloud_protocol::datastream::{
-    data_stream_service_server::DataStreamService, AccessTokenResponse, BatchResponse,
-    CreateAccessTokenRequest, CreateDatasetRequest, CreateDatasetResponse, DatasetFileInfo,
-    DatasetInfo, DatasetInfoResponse, FileVerification, GetDatasetInfoRequest,
-    ListDatasetsRequest, ListDatasetsResponse, ListPublicDatasetsRequest,
-    ListPublicDatasetsResponse, PublicDatasetInfo, PublicDatasetMatch, RevokeAccessTokenRequest,
-    RevokeAccessTokenResponse, ShareDatasetRequest, ShareDatasetResponse, StreamBatchesRequest,
-    TrustLevel as ProtoTrustLevel, VerificationResult, VerifyDatasetRequest,
+    data_stream_service_server::DataStreamService, upload_file_request, AccessTokenResponse,
+    BatchResponse, CreateAccessTokenRequest, CreateDatasetRequest, CreateDatasetResponse,
+    DatasetFileInfo, DatasetInfo, DatasetInfoResponse, DeleteDatasetRequest,
+    DeleteDatasetResponse, FileVerification, GetDatasetInfoRequest, ListDatasetsRequest,
+    ListDatasetsResponse, ListPublicDatasetsRequest, ListPublicDatasetsResponse,
+    PublicDatasetInfo, PublicDatasetMatch, RevokeAccessTokenRequest, RevokeAccessTokenResponse,
+    ShareDatasetRequest, ShareDatasetResponse, StreamBatchesRequest,
+    TrustLevel as ProtoTrustLevel, UploadFileMetadata, UploadFileRequest, UploadFileResponse,
+    VerificationResult, VerifyDatasetRequest,
 };
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::Stream;
-use tonic::{Request, Response, Status};
+use tonic::{Request, Response, Status, Streaming};
 use tracing::{debug, info, instrument};
 use uuid::Uuid;
+
+/// Largest file UploadFile accepts, like the HTTP body limit of the S3 API.
+pub const MAX_UPLOAD_BYTES: i64 = 256 * 1024 * 1024;
+
+/// The bucket that holds a user's own uploads.
+pub fn user_bucket_name(user_id: Uuid) -> String {
+    format!("u-{}", user_id.simple())
+}
+
+/// A file name that is one path segment: no separators, no empty name.
+pub fn upload_object_key(filename: &str) -> Result<String, Status> {
+    let name = filename.trim();
+    if name.is_empty() {
+        return Err(Status::invalid_argument("filename is empty"));
+    }
+    if name.contains('/') || name.contains('\\') || name == "." || name == ".." {
+        return Err(Status::invalid_argument(format!(
+            "filename '{}' must be a plain file name, not a path",
+            name
+        )));
+    }
+    Ok(name.to_string())
+}
+
+/// Collects an UploadFile stream: the metadata first, then chunks that add
+/// up to exactly the announced size (and hash, when one is announced).
+pub struct UploadAssembler {
+    key: String,
+    size_bytes: i64,
+    content_type: String,
+    declared_hash: Vec<u8>,
+    data: Vec<u8>,
+}
+
+impl UploadAssembler {
+    pub fn start(metadata: &UploadFileMetadata) -> Result<Self, Status> {
+        let key = upload_object_key(&metadata.filename)?;
+        if metadata.size_bytes <= 0 {
+            return Err(Status::invalid_argument("size_bytes must be positive"));
+        }
+        if metadata.size_bytes > MAX_UPLOAD_BYTES {
+            return Err(Status::invalid_argument(format!(
+                "the file is {} bytes; UploadFile takes at most {} bytes",
+                metadata.size_bytes, MAX_UPLOAD_BYTES
+            )));
+        }
+        if !metadata.content_hash.is_empty() && metadata.content_hash.len() != 32 {
+            return Err(Status::invalid_argument(
+                "content_hash must be a 32-byte BLAKE3 hash or empty",
+            ));
+        }
+        Ok(Self {
+            key,
+            size_bytes: metadata.size_bytes,
+            content_type: if metadata.content_type.is_empty() {
+                "application/octet-stream".to_string()
+            } else {
+                metadata.content_type.clone()
+            },
+            declared_hash: metadata.content_hash.clone(),
+            data: Vec::with_capacity(metadata.size_bytes as usize),
+        })
+    }
+
+    pub fn push(&mut self, chunk: &[u8]) -> Result<(), Status> {
+        if self.data.len() as i64 + chunk.len() as i64 > self.size_bytes {
+            return Err(Status::invalid_argument(format!(
+                "more than the announced {} bytes were sent",
+                self.size_bytes
+            )));
+        }
+        self.data.extend_from_slice(chunk);
+        Ok(())
+    }
+
+    /// The assembled file: (object key, bytes, content type).
+    pub fn finish(self) -> Result<(String, bytes::Bytes, String), Status> {
+        if self.data.len() as i64 != self.size_bytes {
+            return Err(Status::invalid_argument(format!(
+                "received {} bytes, the metadata announced {}",
+                self.data.len(),
+                self.size_bytes
+            )));
+        }
+        if !self.declared_hash.is_empty()
+            && blake3::hash(&self.data).as_bytes() != self.declared_hash.as_slice()
+        {
+            return Err(Status::invalid_argument(
+                "the received bytes do not match the announced content_hash",
+            ));
+        }
+        Ok((self.key, bytes::Bytes::from(self.data), self.content_type))
+    }
+}
 
 /// gRPC DataStream Service implementation
 pub struct DataStreamServiceImpl {
@@ -899,5 +995,172 @@ impl DataStreamService for DataStreamServiceImpl {
         Ok(Response::new(ListPublicDatasetsResponse {
             datasets: filtered,
         }))
+    }
+
+    // =========================================================================
+    // UPLOAD FILE
+    // =========================================================================
+
+    #[instrument(skip(self, request))]
+    async fn upload_file(
+        &self,
+        request: Request<Streaming<UploadFileRequest>>,
+    ) -> Result<Response<UploadFileResponse>, Status> {
+        // The claims are taken before the stream is: a Streaming request is
+        // not Sync, so it cannot be borrowed across the user lookup's await.
+        let claims = request.require_auth()?.clone();
+        let user_id = self
+            .state
+            .user_for_claims(&claims)
+            .await
+            .map_err(Status::internal)?;
+        let mut stream = request.into_inner();
+
+        let first = stream
+            .message()
+            .await?
+            .ok_or_else(|| Status::invalid_argument("UploadFile ended before its metadata"))?;
+        let metadata = match first.request {
+            Some(upload_file_request::Request::Metadata(metadata)) => metadata,
+            _ => {
+                return Err(Status::invalid_argument(
+                    "the first UploadFile message must be the file metadata",
+                ))
+            }
+        };
+        let mut assembler = UploadAssembler::start(&metadata)?;
+        while let Some(message) = stream.message().await? {
+            match message.request {
+                Some(upload_file_request::Request::Chunk(chunk)) => assembler.push(&chunk)?,
+                Some(upload_file_request::Request::Metadata(_)) => {
+                    return Err(Status::invalid_argument("file metadata was sent twice"))
+                }
+                None => return Err(Status::invalid_argument("empty UploadFile message")),
+            }
+        }
+        let (key, data, content_type) = assembler.finish()?;
+        let size = data.len();
+
+        // Into the caller's own bucket, owned by the caller.
+        let bucket = user_bucket_name(user_id);
+        self.state
+            .ensure_bucket_for(&bucket, user_id)
+            .await
+            .map_err(|e| Status::internal(format!("bucket {}: {}", bucket, e)))?;
+        let outcome = self
+            .state
+            .put_object_as(user_id, &bucket, &key, data, &content_type)
+            .await
+            .map_err(|e| {
+                let text = e.to_string();
+                if text.contains("No storage nodes available") {
+                    Status::unavailable("no storage node is online to hold the file")
+                } else {
+                    Status::internal(format!("could not store the file: {}", text))
+                }
+            })?;
+        let file_id = outcome.file_id.ok_or_else(|| {
+            Status::failed_precondition(
+                "this gateway stores objects in memory only; an uploaded file cannot become a dataset here",
+            )
+        })?;
+
+        info!(user_id = %user_id, bucket = %bucket, key = %key, file_id = %file_id, size, "File uploaded");
+        Ok(Response::new(UploadFileResponse {
+            file_id: file_id.to_string(),
+            success: true,
+            error: String::new(),
+        }))
+    }
+
+    // =========================================================================
+    // DELETE DATASET
+    // =========================================================================
+
+    #[instrument(skip(self, request), fields(dataset_id))]
+    async fn delete_dataset(
+        &self,
+        request: Request<DeleteDatasetRequest>,
+    ) -> Result<Response<DeleteDatasetResponse>, Status> {
+        let user_id = self.user_id(&request).await?;
+        let req = request.into_inner();
+        tracing::Span::current().record("dataset_id", &req.dataset_id);
+        let metadata = self.metadata()?;
+
+        let dataset_id = Uuid::parse_str(&req.dataset_id)
+            .map_err(|e| Status::invalid_argument(format!("Invalid dataset_id: {}", e)))?;
+        let dataset = metadata
+            .database()
+            .get_dataset(dataset_id)
+            .await
+            .map_err(|e| Status::internal(format!("Database error: {}", e)))?
+            .ok_or_else(|| Status::not_found("Dataset not found"))?;
+        if dataset.owner_id != user_id {
+            return Err(Status::permission_denied("Only the dataset's owner can delete it"));
+        }
+        metadata
+            .database()
+            .delete_dataset(dataset_id)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to delete dataset: {}", e)))?;
+
+        info!(dataset_id = %dataset_id, user_id = %user_id, "Dataset deleted (its files stay in the bucket)");
+        Ok(Response::new(DeleteDatasetResponse {
+            success: true,
+            error: String::new(),
+        }))
+    }
+}
+
+#[cfg(test)]
+mod upload_tests {
+    use super::*;
+
+    fn meta(size: i64, hash: Vec<u8>) -> UploadFileMetadata {
+        UploadFileMetadata {
+            filename: "tokens.arrow".to_string(),
+            size_bytes: size,
+            content_type: String::new(),
+            content_hash: hash,
+        }
+    }
+
+    #[test]
+    fn an_upload_arrives_whole_or_not_at_all() {
+        let data = b"0123456789".to_vec();
+        let hash = blake3::hash(&data).as_bytes().to_vec();
+        let mut ok = UploadAssembler::start(&meta(10, hash.clone())).unwrap();
+        ok.push(&data[..4]).unwrap();
+        ok.push(&data[4..]).unwrap();
+        let (key, bytes, content_type) = ok.finish().unwrap();
+        assert_eq!(key, "tokens.arrow");
+        assert_eq!(&bytes[..], &data[..]);
+        assert_eq!(content_type, "application/octet-stream");
+
+        let mut short = UploadAssembler::start(&meta(10, vec![])).unwrap();
+        short.push(&data[..4]).unwrap();
+        assert_eq!(short.finish().unwrap_err().code(), tonic::Code::InvalidArgument);
+
+        let mut long = UploadAssembler::start(&meta(4, vec![])).unwrap();
+        assert_eq!(long.push(&data).unwrap_err().code(), tonic::Code::InvalidArgument);
+
+        let mut wrong = UploadAssembler::start(&meta(10, vec![7u8; 32])).unwrap();
+        wrong.push(&data).unwrap();
+        let err = wrong.finish().unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert!(err.message().contains("content_hash"));
+    }
+
+    #[test]
+    fn the_metadata_is_checked_before_any_byte() {
+        assert!(UploadAssembler::start(&meta(0, vec![])).is_err());
+        assert!(UploadAssembler::start(&meta(MAX_UPLOAD_BYTES + 1, vec![])).is_err());
+        assert!(UploadAssembler::start(&meta(1, vec![1, 2, 3])).is_err());
+        assert!(upload_object_key("a/b").is_err());
+        assert!(upload_object_key("..").is_err());
+        assert!(upload_object_key("   ").is_err());
+        assert_eq!(upload_object_key(" tokens.arrow ").unwrap(), "tokens.arrow");
+        let user = Uuid::parse_str("2f1c7f8e-7d3a-4b4e-9c2d-1a2b3c4d5e6f").unwrap();
+        assert_eq!(user_bucket_name(user), "u-2f1c7f8e7d3a4b4e9c2d1a2b3c4d5e6f");
     }
 }

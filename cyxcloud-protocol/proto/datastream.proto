@@ -30,6 +30,13 @@ service DataStreamService {
 
     // List public datasets (MNIST, CIFAR, ImageNet, etc.)
     rpc ListPublicDatasets(ListPublicDatasetsRequest) returns (ListPublicDatasetsResponse);
+
+    // Upload a file (metadata first, then chunks) into the caller's own
+    // bucket; the file_id can then go into CreateDataset (TOFIX164).
+    rpc UploadFile(stream UploadFileRequest) returns (UploadFileResponse);
+
+    // Delete a dataset the caller owns (its files stay in the bucket)
+    rpc DeleteDataset(DeleteDatasetRequest) returns (DeleteDatasetResponse);
 }
 
 // Trust levels for datasets
@@ -236,4 +243,41 @@ message PublicDatasetInfo {
     repeated string verified_by = 8;
     bool cached = 9;                // True if cached in CyxCloud
     string cached_dataset_id = 10;  // ID if cached
+}
+
+// ============================================================================
+// FILE UPLOAD
+// ============================================================================
+
+message UploadFileRequest {
+    oneof request {
+        UploadFileMetadata metadata = 1;  // First message: file metadata
+        bytes chunk = 2;                  // Subsequent messages: file chunks
+    }
+}
+
+message UploadFileMetadata {
+    string filename = 1;
+    int64 size_bytes = 2;
+    string content_type = 3;          // MIME type
+    bytes content_hash = 4;           // Blake3 hash for verification (optional)
+}
+
+message UploadFileResponse {
+    string file_id = 1;               // UUID of uploaded file
+    bool success = 2;
+    string error = 3;                 // Error message if failed
+}
+
+// ============================================================================
+// DELETE DATASET
+// ============================================================================
+
+message DeleteDatasetRequest {
+    string dataset_id = 1;
+}
+
+message DeleteDatasetResponse {
+    bool success = 1;
+    string error = 2;
 }
