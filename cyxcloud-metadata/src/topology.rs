@@ -163,6 +163,11 @@ impl PlacementEngine {
         let mut decisions = Vec::with_capacity(num_shards);
         let mut dc_usage: HashMap<String, usize> = HashMap::new();
         let mut rack_usage: HashMap<(String, i32), usize> = HashMap::new();
+        // Shards of this placement already given to each node (by id). Nodes
+        // that know nothing about their datacenter or rack get no diversity
+        // bonus, so without this count the same best-scored node took every
+        // shard of every chunk and erasure coding protected nothing.
+        let mut node_usage: HashMap<String, usize> = HashMap::new();
 
         for shard_index in 0..num_shards {
             let selected = self.select_for_shard(
@@ -171,10 +176,12 @@ impl PlacementEngine {
                 origin,
                 &dc_usage,
                 &rack_usage,
+                &node_usage,
             );
 
             // Update usage tracking
             for node in &selected {
+                *node_usage.entry(node.id.clone()).or_default() += 1;
                 if let Some(dc) = &node.datacenter {
                     *dc_usage.entry(dc.clone()).or_default() += 1;
                 }
@@ -201,7 +208,12 @@ impl PlacementEngine {
         decisions
     }
 
-    /// Select nodes for a single shard
+    /// Select nodes for a single shard.
+    ///
+    /// Nodes that hold fewer shards of this placement come first (durability:
+    /// a lost node then costs the fewest shards); the placement score breaks
+    /// ties (low utilization, proximity, datacenter and rack diversity,
+    /// bandwidth).
     fn select_for_shard(
         &self,
         nodes: &[PlacementNode],
@@ -209,6 +221,7 @@ impl PlacementEngine {
         origin: Option<&PlacementNode>,
         dc_usage: &HashMap<String, usize>,
         rack_usage: &HashMap<(String, i32), usize>,
+        node_usage: &HashMap<String, usize>,
     ) -> Vec<PlacementNode> {
         if count >= nodes.len() {
             return nodes.to_vec();
@@ -223,8 +236,13 @@ impl PlacementEngine {
             })
             .collect();
 
-        // Sort by score descending
-        scored_nodes.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        // Fewest shards already taken first, then score descending
+        let taken = |node: &PlacementNode| node_usage.get(&node.id).copied().unwrap_or(0);
+        scored_nodes.sort_by(|a, b| {
+            taken(a.1)
+                .cmp(&taken(b.1))
+                .then_with(|| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal))
+        });
 
         // Select top N nodes with diversity constraints
         let mut selected = Vec::with_capacity(count);
@@ -514,6 +532,88 @@ mod tests {
         for decision in &decisions {
             assert_eq!(decision.nodes.len(), 3);
         }
+    }
+
+    /// A node that reports no datacenter, rack or region (every node today).
+    fn make_plain_node(id: &str, total_gb: u64, util: f64) -> PlacementNode {
+        let total = total_gb * 1024 * 1024 * 1024;
+        PlacementNode {
+            id: id.to_string(),
+            grpc_address: format!("{}:50051", id),
+            datacenter: None,
+            rack: None,
+            region: None,
+            latitude: None,
+            longitude: None,
+            storage_total: total,
+            storage_used: (total as f64 * util) as u64,
+            bandwidth_mbps: 1000,
+        }
+    }
+
+    fn shards_per_node(decisions: &[PlacementDecision]) -> HashMap<String, usize> {
+        let mut counts: HashMap<String, usize> = HashMap::new();
+        for d in decisions {
+            assert_eq!(d.nodes.len(), 1, "one replica per shard");
+            *counts.entry(d.nodes[0].id.clone()).or_default() += 1;
+        }
+        counts
+    }
+
+    /// 2026-10-22: the dev PC's node (50 GB) and the HP's node (700 GB), no
+    /// topology on either. All 14 shards of every chunk landed on the first
+    /// node; the HP held nothing, so the 4 parity shards protected nothing.
+    #[test]
+    fn two_plain_nodes_share_the_shards_of_a_chunk() {
+        let engine = PlacementEngine::new(PlacementConfig::default());
+        let nodes = vec![make_plain_node("pc", 50, 0.0), make_plain_node("hp", 700, 0.0)];
+
+        let decisions = engine.select_nodes(&nodes, 14, 1, None);
+
+        assert_eq!(decisions.len(), 14);
+        let counts = shards_per_node(&decisions);
+        assert_eq!(counts.get("pc").copied().unwrap_or(0), 7);
+        assert_eq!(counts.get("hp").copied().unwrap_or(0), 7);
+        // and they alternate, so a partial upload is spread too
+        assert_ne!(decisions[0].nodes[0].id, decisions[1].nodes[0].id);
+    }
+
+    /// With four plain nodes no node holds more shards than the parity budget
+    /// (4), so losing any one node keeps every chunk readable.
+    #[test]
+    fn four_plain_nodes_keep_one_node_loss_within_the_parity_budget() {
+        let engine = PlacementEngine::new(PlacementConfig::default());
+        let nodes = vec![
+            make_plain_node("a", 100, 0.6),
+            make_plain_node("b", 100, 0.1),
+            make_plain_node("c", 100, 0.3),
+            make_plain_node("d", 100, 0.0),
+        ];
+
+        let decisions = engine.select_nodes(&nodes, 14, 1, None);
+
+        let counts = shards_per_node(&decisions);
+        assert_eq!(counts.len(), 4);
+        assert!(counts.values().all(|&n| n <= 4), "{:?}", counts);
+        // the emptiest node goes first when the counts tie
+        assert_eq!(decisions[0].nodes[0].id, "d");
+    }
+
+    /// Nodes with a known datacenter keep their diversity rules and also spread.
+    #[test]
+    fn topology_nodes_spread_single_replica_shards() {
+        let engine = PlacementEngine::new(PlacementConfig::default());
+        let nodes = vec![
+            make_test_node("n1", "dc1", 1, 0.1),
+            make_test_node("n2", "dc1", 2, 0.2),
+            make_test_node("n3", "dc2", 1, 0.3),
+        ];
+
+        let decisions = engine.select_nodes(&nodes, 14, 1, None);
+
+        let counts = shards_per_node(&decisions);
+        assert_eq!(counts.len(), 3);
+        assert!(counts.values().all(|&n| n <= 5), "{:?}", counts);
     }
 
     #[test]

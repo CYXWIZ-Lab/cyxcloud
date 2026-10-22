@@ -16,6 +16,12 @@ use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
+/// How often a daemon retries a login that never reached the API before giving
+/// up (2026-10-22: the HP's first login hit the 10 s client timeout against a
+/// debug-build API whose Argon2 check takes 4 s cold, and the node exited).
+const NON_INTERACTIVE_LOGIN_ATTEMPTS: u32 = 6;
+const NON_INTERACTIVE_LOGIN_RETRY: Duration = Duration::from_secs(5);
+
 /// Machine service for CyxWiz API integration
 pub struct MachineService {
     config: NodeConfig,
@@ -372,14 +378,31 @@ impl MachineService {
             return Ok(false); // Logged in but not registered
         }
 
-        // 2. Try environment variable credentials (non-interactive login)
+        // 2. Try environment variable credentials (non-interactive login).
+        // A daemon has nobody to retype anything: a transport failure (the
+        // API still starting, a slow first login, a network blip) is retried;
+        // a refused credential is not.
         if self.config.cyxwiz_api.has_credentials() {
             info!("Attempting non-interactive login using environment variables");
-            match self.non_interactive_login().await {
-                Ok(()) => return Ok(false), // Logged in, not registered yet
-                Err(e) => {
-                    error!(error = %e, "Non-interactive login failed");
-                    // Fall through to interactive if available
+            for attempt in 1..=NON_INTERACTIVE_LOGIN_ATTEMPTS {
+                match self.non_interactive_login().await {
+                    Ok(()) => return Ok(false), // Logged in, not registered yet
+                    Err(e @ crate::cyxwiz_api_client::ApiError::RequestFailed(_))
+                        if attempt < NON_INTERACTIVE_LOGIN_ATTEMPTS =>
+                    {
+                        warn!(
+                            error = %e,
+                            attempt,
+                            attempts = NON_INTERACTIVE_LOGIN_ATTEMPTS,
+                            retry_in_secs = NON_INTERACTIVE_LOGIN_RETRY.as_secs(),
+                            "Non-interactive login did not reach the CyxWiz API; retrying"
+                        );
+                        tokio::time::sleep(NON_INTERACTIVE_LOGIN_RETRY).await;
+                    }
+                    Err(e) => {
+                        error!(error = %e, attempt, "Non-interactive login failed");
+                        break; // Fall through to interactive if available
+                    }
                 }
             }
         }
