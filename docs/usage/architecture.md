@@ -1,0 +1,107 @@
+# How CyxCloud fits together
+
+The pieces, who is a client, what joins the storage, and how a node runs.
+Written from the code on branch `distributed-training`, 2026-10-22.
+
+## The pieces
+
+| Crate / process | Role | Runs where |
+| --- | --- | --- |
+| `cyxcloud-gateway` | The manager, and the only thing clients talk to. Owns the catalogue (through `cyxcloud-metadata`), splits and encodes files, places shards on nodes, rebuilds files on read, issues dataset access tokens, serves the S3 API, the dataset REST API and the three gRPC services (NodeService, DataService, DataStreamService). | One process per cloud. Local dev: the dev PC, gRPC 50060, HTTP 8180 (`deploy/local/run-service.ps1 gateway`). |
+| `cyxcloud-metadata` | The gateway's memory: Postgres tables for users, buckets, files, chunks, chunk locations, nodes, datasets, dataset files, access tokens, shares; a Redis cache; the placement engine; health and quorum helpers. A library inside the gateway. | Postgres and Redis (containers in local dev). |
+| `cyxcloud-node` | A member of the distributed storage. Holds shards on its disk (RocksDB through `cyxcloud-storage`), serves store-shard and get-shard over gRPC to the gateway, registers and heartbeats with the gateway, signs in to the CyxWiz API as a machine. | Every storage machine. |
+| `cyxcloud-rebalancer` | A daemon inside the gateway process. Every 60 s (`REBALANCER_SCAN_INTERVAL`) it scans chunks whose shard count is under target and plans moves or repairs between nodes. | With the gateway. |
+| `cyxcloud-network` | Node-to-node layer: gRPC for shard transfer, libp2p Kademlia for peer discovery. Not on the gateway's data path today. | Library in the node. |
+| `cyxcloud-protocol` | The `.proto` files: `node.proto` (register, heartbeat, store, get), `data.proto` (StreamData: one whole file, see `stream_file.md`), `datastream.proto` (datasets, tokens, upload, delete, see `datasets_from_the_engine.md`). | Shared; the Engine compiles verbatim copies. |
+| `cyxcloud-cli` | A client: login, dataset list, config. | Any machine. |
+
+## Who is a client, who joins
+
+Clients never hold data for others:
+
+- The CyxWiz Engine (`DataStreamClient`): lists datasets, uploads files, creates datasets, mints access tokens.
+- The CyxWiz server node (`CloudDatasetFetcher`): streams one file with a token when it trains.
+- The web app: uploads through the S3 API.
+- The CLI.
+
+Joining the storage means running `cyxcloud-node`. The gateway is the manager; nodes are the members; everything else is a client.
+
+## What happens to a file
+
+1. An upload reaches the gateway, which records a file row with the file's BLAKE3 content hash (`UploadFile`, or S3 PUT).
+2. The file is cut into 4 MB chunks (`DEFAULT_CHUNK_SIZE`). Each chunk is Reed-Solomon encoded into 10 data shards plus 4 parity shards (`DATA_SHARDS`, `PARITY_SHARDS`).
+3. The placement engine picks an online node per shard; the gateway pushes the shards out; every shard gets a chunk row and a location row.
+4. A read fetches at least 10 of the 14 shards per chunk from whichever nodes hold them, decodes, concatenates and checks the hash before answering (`AppState::read_file`, shared by S3 GET and StreamData).
+5. A node that goes dark leaves chunks under target; the rebalancer plans a repair onto other nodes.
+
+With one node, all 14 shards of every chunk sit on it, and the rebalancer logs that it cannot repair anything. With two nodes, placement spreads shards across both.
+
+## Running a node
+
+### As a daemon (the HP, 2026-10-22)
+
+```
+~/cyxwiz/run-node.sh
+```
+
+The script sets the sign-in credentials from a mode-600 env file (`CYXWIZ_EMAIL`, `CYXWIZ_PASSWORD`, `CYXWIZ_API_URL`) and runs:
+
+```
+cyxcloud-node --config ~/cyxwiz/config/node.toml
+```
+
+The config:
+
+```toml
+[node]
+name = "hp-linux"
+[storage]
+data_dir = "/home/mrcj/cyxwiz/node-data"
+max_capacity_gb = 700
+compression = true
+[network]
+bind_address = "0.0.0.0"
+grpc_port = 50051          # shard traffic from the gateway
+p2p_port = 4001            # libp2p discovery
+public_address = "192.168.1.180"   # what the gateway dials back
+[metrics]
+enabled = false
+[central]
+address = "http://192.168.1.116:50060"   # the gateway's gRPC
+register = true
+heartbeat_interval_secs = 30
+[cyxwiz_api]
+base_url = "http://192.168.1.116:3002"   # sign-in as a machine
+register = true
+```
+
+Without the env file the node prompts for the login on its console. A
+systemd unit around the script is the next step; there is none in the repo
+yet.
+
+### In Docker (Dockerfile.node)
+
+```
+docker build -f Dockerfile.node -t cyxcloud-node .
+docker run -d --name cyxcloud-node \
+  -p 50051:50051 -p 4001:4001 \
+  -v /path/on/the/disk:/data \
+  -e NODE_NAME=hp-linux -e STORAGE_CAPACITY_GB=700 \
+  -e CENTRAL_SERVER_ADDR=http://192.168.1.116:50060 \
+  -e CYXWIZ_API_URL=http://192.168.1.116:3002 \
+  -e CYXWIZ_EMAIL=... -e CYXWIZ_PASSWORD=... \
+  cyxcloud-node
+```
+
+The image compiles the node in its build stage. `docker-compose.yml` has two
+node services (`cyxcloud-node1`, `cyxcloud-node2`) for a local cluster;
+`scripts/run_cluster.sh` starts one.
+
+## Known weaknesses (tracked in TOFIX171)
+
+- The gateway is the single manager and the single data path: every byte goes through it twice.
+- Node-to-node transfer and peer discovery exist as code; nothing routes through them.
+- Reads do not re-check shard content hashes against the shard ids a node returns.
+- The S3 API has no authentication.
+- Node registration is JWT-free by design, with no rate limit.
+- The rebalancer's 60 s scans and the metadata pool (10 connections) can starve requests.
