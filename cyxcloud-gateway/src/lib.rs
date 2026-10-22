@@ -20,6 +20,7 @@ mod datastream;
 mod grpc_api;
 mod grpc_auth;
 pub mod metrics;
+pub mod node_registration;
 mod node_client;
 mod node_monitor;
 mod payment_daemon;

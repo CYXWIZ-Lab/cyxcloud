@@ -433,13 +433,10 @@ async fn test_auth_from_state() {
 /// database URL configured the gateway must stop, not pretend.
 #[tokio::test]
 async fn a_configured_database_that_is_down_stops_the_gateway() {
-    let config = cyxcloud_gateway::GatewayConfig {
-        database_url: Some("postgres://nobody:none@127.0.0.1:1/none".to_string()),
-        redis_url: None,
-        use_memory_storage: false,
-        database_connect_wait: std::time::Duration::from_secs(1),
-        ..Default::default()
-    };
+    let config = cyxcloud_gateway::GatewayConfig::with_database(
+        "postgres://nobody:none@127.0.0.1:1/none",
+    )
+    .with_database_connect_wait(std::time::Duration::from_secs(1));
 
     let started = std::time::Instant::now();
     let result = AppState::with_config(config).await;

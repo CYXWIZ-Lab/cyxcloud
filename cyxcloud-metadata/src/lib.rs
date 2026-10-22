@@ -288,10 +288,16 @@ impl MetadataService {
                 version: None,
                 wallet_address: None,
                 public_key: None,
+                access_secret: None,
             })
             .await?;
 
         Ok(node)
+    }
+
+    /// The node registered under this peer id (the id the node calls itself)
+    pub async fn get_node_by_peer_id(&self, peer_id: &str) -> Result<Option<Node>> {
+        Ok(self.db.get_node_by_peer_id(peer_id).await?)
     }
 
     /// Get online nodes

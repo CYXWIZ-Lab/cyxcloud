@@ -29,6 +29,7 @@ mod grpc_auth;
 mod metrics;
 mod node_client;
 mod node_monitor;
+mod node_registration;
 mod payment_daemon;
 mod public_registry;
 mod rebalancer_daemon;
@@ -197,6 +198,7 @@ async fn main() -> anyhow::Result<()> {
             .await
             .expect("Failed to initialize application state"),
     );
+    state.load_node_secrets().await;
 
     // Start node lifecycle monitor (background task)
     if state.metadata_service().is_some() {

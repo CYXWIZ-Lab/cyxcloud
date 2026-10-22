@@ -1604,6 +1604,7 @@ dependencies = [
  "bytes",
  "chrono",
  "criterion",
+ "ed25519-dalek 2.2.0",
  "proptest",
  "rand 0.8.5",
  "rayon",

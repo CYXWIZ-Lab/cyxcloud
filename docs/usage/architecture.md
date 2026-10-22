@@ -38,6 +38,13 @@ The placement engine hands each shard to the online node that holds the fewest s
 
 What a node loss costs: a chunk needs any 10 of its 14 shards. With one node everything is on it; with two nodes each holds 7, so losing either makes every file unreadable until it is back (the gateway answers at once with `DATA_LOSS: not enough shards are held by online nodes (have 7, need 10)`). From four nodes on, no node holds more than 4 shards of a chunk and one node can be lost without data loss. A node that restarts keeps its identity (saved credentials and node id; the gateway matches it by peer id), so its shards stay its own.
 
+## Who a node is, and who may talk to it
+
+- **Identity.** On first start a node makes an Ed25519 key at `~/.cyxcloud/node/key` (owner-only). Its node id is derived from the public key (the first 16 bytes of its BLAKE3 hash, as hex), so the id cannot be chosen or copied: a registration carries the public key and a signature over the node id, its listen address and a timestamp (300 s of skew allowed), and the gateway accepts a known id only with the key it was registered with. A `[node] id` in the config that is not the key's id stops the node.
+- **Node token.** `RegisterNode` answers with a node token; heartbeats, metric reports and drains must carry it and act only on that node. A user's sign-in token is refused for node RPCs.
+- **Access secret.** The node also makes `~/.cyxcloud/node/access_secret` and hands it to the gateway at registration. Every chunk RPC to the node (store, get, delete, stream, verify) must present it as `authorization: Bearer <secret>`; anything else on the network is refused with UNAUTHENTICATED before storage is touched. The gateway and the rebalancer learn the secrets from the `nodes` table when they start and when a node registers.
+- Not yet: TLS on the node's own port (the secret travels in clear on the local network until TOFIX176 P2's mTLS lands; the gateway's TLS covers node-to-gateway when enabled).
+
 ## Running a node
 
 ### As a daemon (the HP, 2026-10-22)
@@ -114,5 +121,5 @@ node services (`cyxcloud-node1`, `cyxcloud-node2`) for a local cluster;
 - Fewer than four nodes cannot survive a node loss (see above); the rebalancer cannot repair what it has no spare node for.
 - Node-to-node transfer and peer discovery exist as code; nothing routes through them.
 - The S3 API has no authentication.
-- Node registration is JWT-free by design, with no rate limit.
+- Node registration is JWT-free by design (it is signed instead), with no rate limit yet.
 - The rebalancer's 60 s scans and the metadata pool (10 connections) can starve requests.

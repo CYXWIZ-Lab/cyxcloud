@@ -151,8 +151,8 @@ impl Database {
     pub async fn create_node(&self, node: CreateNode) -> Result<Node> {
         let result = sqlx::query_as::<_, Node>(
             r#"
-            INSERT INTO nodes (peer_id, grpc_address, storage_total, storage_reserved, bandwidth_mbps, datacenter, region, version, wallet_address, public_key, status)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'online')
+            INSERT INTO nodes (peer_id, grpc_address, storage_total, storage_reserved, bandwidth_mbps, datacenter, region, version, wallet_address, public_key, access_secret, status)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'online')
             ON CONFLICT (peer_id) DO UPDATE SET
                 grpc_address = EXCLUDED.grpc_address,
                 storage_total = EXCLUDED.storage_total,
@@ -163,6 +163,7 @@ impl Database {
                 version = EXCLUDED.version,
                 wallet_address = COALESCE(EXCLUDED.wallet_address, nodes.wallet_address),
                 public_key = COALESCE(EXCLUDED.public_key, nodes.public_key),
+                access_secret = COALESCE(EXCLUDED.access_secret, nodes.access_secret),
                 status = 'online',
                 last_heartbeat = NOW(),
                 first_offline_at = NULL
@@ -179,6 +180,7 @@ impl Database {
         .bind(&node.version)
         .bind(&node.wallet_address)
         .bind(&node.public_key)
+        .bind(&node.access_secret)
         .fetch_one(&self.pool)
         .await?;
 

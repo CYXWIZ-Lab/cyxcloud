@@ -349,7 +349,7 @@ async fn create_api_key(
         ));
     }
     let expires_days = req.expires_in_days.unwrap_or(365);
-    if expires_days < 1 || expires_days > 3650 {
+    if !(1..=3650).contains(&expires_days) {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(ApiError::new(

@@ -123,6 +123,8 @@ pub struct Node {
     // Identity/Payment
     pub wallet_address: Option<String>,
     pub public_key: Option<String>,
+    /// Secret the gateway presents on chunk RPCs to this node (TOFIX176 P2)
+    pub access_secret: Option<String>,
 }
 
 impl Node {
@@ -151,6 +153,7 @@ pub struct CreateNode {
     // Identity/Payment
     pub wallet_address: Option<String>,
     pub public_key: Option<String>,
+    pub access_secret: Option<String>,
 }
 
 /// File metadata

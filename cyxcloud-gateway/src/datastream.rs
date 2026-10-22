@@ -315,7 +315,7 @@ impl DataStreamService for DataStreamServiceImpl {
                 (0..files.len()).collect()
             };
 
-            let total_batches = (files.len() + batch_size - 1) / batch_size;
+            let total_batches = files.len().div_ceil(batch_size);
             let mut batch_index: u64 = 0;
             let mut current_batch_items: Vec<Vec<u8>> = Vec::with_capacity(batch_size);
             let mut current_batch_hashes: Vec<Vec<u8>> = Vec::with_capacity(batch_size);
@@ -988,7 +988,7 @@ impl DataStreamService for DataStreamServiceImpl {
         } else {
             datasets
                 .iter()
-                .map(|d| Self::public_dataset_to_proto(d))
+                .map(Self::public_dataset_to_proto)
                 .collect()
         };
 

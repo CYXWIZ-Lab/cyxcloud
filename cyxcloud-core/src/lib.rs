@@ -12,12 +12,17 @@ pub mod circuit_breaker;
 pub mod crypto;
 pub mod erasure;
 pub mod error;
+pub mod node_identity;
 pub mod tls;
 
 pub use chunk::{reassemble_chunks, split_into_chunks, Chunk, ChunkId, ChunkMetadata};
 pub use crypto::{decrypt, encrypt, ContentHash, EncryptedData, EncryptionKey};
 pub use erasure::{ErasureConfig, ErasureEncoder, ShardData};
 pub use error::{CyxCloudError, Result};
+pub use node_identity::{
+    load_or_generate_access_secret, node_id_from_public_key, NodeIdentityError, NodeKey,
+    RegistrationProof,
+};
 
 /// Default erasure coding configuration
 /// - 10 data shards: minimum required to reconstruct

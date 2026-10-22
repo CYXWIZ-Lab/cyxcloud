@@ -95,6 +95,10 @@ pub struct NodeClient {
 
     /// Connection pool: node_address -> pooled connection
     connections: RwLock<HashMap<String, PooledConnection>>,
+
+    /// Per-node access secrets: node_address -> what the node expects in
+    /// `authorization: Bearer <secret>` (nodes.access_secret)
+    secrets: RwLock<HashMap<String, String>>,
 }
 
 impl NodeClient {
@@ -103,7 +107,27 @@ impl NodeClient {
         Self {
             config,
             connections: RwLock::new(HashMap::new()),
+            secrets: RwLock::new(HashMap::new()),
         }
+    }
+
+    /// Remember the secret the node at `address` expects on chunk RPCs.
+    pub async fn set_access_secret(&self, address: &str, secret: &str) {
+        self.secrets
+            .write()
+            .await
+            .insert(address.to_string(), secret.to_string());
+    }
+
+    /// Wrap a message in a request that carries the node's access secret.
+    async fn authorized<T>(&self, address: &str, inner: T) -> tonic::Request<T> {
+        let mut request = tonic::Request::new(inner);
+        if let Some(secret) = self.secrets.read().await.get(address) {
+            if let Ok(value) = format!("Bearer {}", secret).parse() {
+                request.metadata_mut().insert("authorization", value);
+            }
+        }
+        request
     }
 
     /// Get or create a connection to a storage node
@@ -208,7 +232,9 @@ impl NodeClient {
             metadata: proto_metadata,
         };
 
-        let response = client.store_chunk(request).await?;
+        let response = client
+            .store_chunk(self.authorized(node_address, request).await)
+            .await?;
         let inner = response.into_inner();
 
         if inner.success {
@@ -232,7 +258,9 @@ impl NodeClient {
             chunk_id: chunk_id.to_vec(),
         };
 
-        let response = client.get_chunk(request).await?;
+        let response = client
+            .get_chunk(self.authorized(node_address, request).await)
+            .await?;
         let inner = response.into_inner();
 
         if inner.found {

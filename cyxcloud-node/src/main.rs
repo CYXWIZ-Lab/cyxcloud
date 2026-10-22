@@ -279,11 +279,14 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Create heartbeat service for Gateway registration
-    let heartbeat_service = Arc::new(HeartbeatService::new(
+    let heartbeat_service = Arc::new(
+        HeartbeatService::new(
         config.clone(),
         node_metrics.clone(),
         storage.clone(),
-    ));
+    )
+            .map_err(|e| anyhow::anyhow!("Node identity: {}", e))?,
+    );
 
     // Set JWT token for Gateway authentication
     if let Some(token) = jwt_token {
@@ -348,7 +351,16 @@ async fn main() -> anyhow::Result<()> {
     let grpc_addr = config.network.grpc_addr();
     info!(addr = %grpc_addr, "Starting gRPC server...");
 
-    let grpc_server = start_grpc_server(grpc_addr, storage.clone(), config.node.id.clone());
+    let access_secret = cyxcloud_core::load_or_generate_access_secret(
+        &cyxcloud_node::config::node_access_secret_path(),
+    )
+    .map_err(|e| anyhow::anyhow!("Node access secret: {}", e))?;
+    let grpc_server = start_grpc_server(
+        grpc_addr,
+        storage.clone(),
+        config.node.id.clone(),
+        access_secret,
+    );
 
     // Print startup summary
     info!("========================================");
@@ -409,12 +421,14 @@ async fn start_grpc_server(
     addr: std::net::SocketAddr,
     storage: Arc<RocksDbBackend>,
     node_id: String,
+    access_secret: String,
 ) -> anyhow::Result<()> {
     use cyxcloud_network::grpc_server::ChunkServiceImpl;
     use cyxcloud_protocol::ChunkServiceServer;
     use tonic::transport::Server;
 
-    let chunk_service = ChunkServiceImpl::new(storage, node_id);
+    // Only the gateway this node registered with knows the secret (TOFIX176 P2)
+    let chunk_service = ChunkServiceImpl::new(storage, node_id).with_access_secret(access_secret);
 
     Server::builder()
         .add_service(ChunkServiceServer::new(chunk_service))

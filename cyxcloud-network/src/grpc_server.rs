@@ -99,12 +99,50 @@ pub struct ChunkServiceImpl {
     storage: Arc<RocksDbBackend>,
     /// Node ID for logging
     node_id: String,
+    /// What a caller must present (`authorization: Bearer <secret>`) to touch
+    /// chunks on this node: the secret this node handed its gateway at
+    /// registration. None = open (tests and local clusters only).
+    access_secret: Option<String>,
 }
 
 impl ChunkServiceImpl {
     /// Create a new ChunkService with the given storage backend
     pub fn new(storage: Arc<RocksDbBackend>, node_id: String) -> Self {
-        Self { storage, node_id }
+        Self {
+            storage,
+            node_id,
+            access_secret: None,
+        }
+    }
+
+    /// Require this secret on every chunk RPC (TOFIX176 P2).
+    pub fn with_access_secret(mut self, secret: impl Into<String>) -> Self {
+        self.access_secret = Some(secret.into());
+        self
+    }
+
+    /// Refuse a chunk RPC that does not carry this node's access secret.
+    fn authorize<T>(&self, request: &Request<T>) -> Result<(), Status> {
+        let Some(expected) = &self.access_secret else {
+            return Ok(());
+        };
+        let presented = request
+            .metadata()
+            .get("authorization")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "))
+            .unwrap_or("");
+        if !constant_time_eq(presented.as_bytes(), expected.as_bytes()) {
+            warn!(
+                node_id = %self.node_id,
+                remote = ?request.remote_addr(),
+                "Chunk RPC refused: not this node's gateway (no or wrong access secret)"
+            );
+            return Err(Status::unauthenticated(
+                "this node accepts chunk RPCs from its gateway only",
+            ));
+        }
+        Ok(())
     }
 
     /// Convert bytes to ChunkId
@@ -134,6 +172,7 @@ impl ChunkService for ChunkServiceImpl {
         &self,
         request: Request<StoreChunkRequest>,
     ) -> Result<Response<StoreChunkResponse>, Status> {
+        self.authorize(&request)?;
         let req = request.into_inner();
         let chunk_id = Self::bytes_to_chunk_id(&req.chunk_id)?;
         let data_len = req.data.len();
@@ -181,6 +220,7 @@ impl ChunkService for ChunkServiceImpl {
         &self,
         request: Request<GetChunkRequest>,
     ) -> Result<Response<GetChunkResponse>, Status> {
+        self.authorize(&request)?;
         let req = request.into_inner();
         let chunk_id = Self::bytes_to_chunk_id(&req.chunk_id)?;
 
@@ -229,6 +269,7 @@ impl ChunkService for ChunkServiceImpl {
         &self,
         request: Request<DeleteChunkRequest>,
     ) -> Result<Response<DeleteChunkResponse>, Status> {
+        self.authorize(&request)?;
         let req = request.into_inner();
         let chunk_id = Self::bytes_to_chunk_id(&req.chunk_id)?;
 
@@ -258,6 +299,7 @@ impl ChunkService for ChunkServiceImpl {
         &self,
         request: Request<StreamChunksRequest>,
     ) -> Result<Response<Self::StreamChunksStream>, Status> {
+        self.authorize(&request)?;
         let req = request.into_inner();
         let chunk_ids: Vec<ChunkId> = req
             .chunk_ids
@@ -307,6 +349,7 @@ impl ChunkService for ChunkServiceImpl {
         &self,
         request: Request<VerifyChunkRequest>,
     ) -> Result<Response<VerifyChunkResponse>, Status> {
+        self.authorize(&request)?;
         let req = request.into_inner();
         let chunk_id = Self::bytes_to_chunk_id(&req.chunk_id)?;
 
@@ -341,6 +384,14 @@ impl ChunkService for ChunkServiceImpl {
             }
         }
     }
+}
+
+/// Equal without leaking where the first difference is.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 /// Start the gRPC server
@@ -437,6 +488,64 @@ mod tests {
         let inner = get_response.into_inner();
         assert!(inner.found);
         assert_eq!(inner.data, data.to_vec());
+    }
+
+    fn bearer<T>(inner: T, secret: &str) -> Request<T> {
+        let mut request = Request::new(inner);
+        request
+            .metadata_mut()
+            .insert("authorization", format!("Bearer {}", secret).parse().unwrap());
+        request
+    }
+
+    /// The node hands its gateway a secret at registration; chunk RPCs
+    /// without it (anyone on the network) are refused before touching storage.
+    #[tokio::test]
+    async fn chunk_rpcs_need_the_access_secret() {
+        let (storage, _dir) = create_test_storage();
+        let service = ChunkServiceImpl::new(storage, "test-node".to_string())
+            .with_access_secret("the-gateway-knows-this");
+        let data = b"a shard";
+        let chunk_id = ChunkId::from_data(data);
+        let store = || StoreChunkRequest {
+            chunk_id: chunk_id.as_bytes().to_vec(),
+            data: data.to_vec(),
+            metadata: None,
+        };
+
+        let no_header = service.store_chunk(Request::new(store())).await.unwrap_err();
+        assert_eq!(no_header.code(), tonic::Code::Unauthenticated);
+
+        let wrong = service
+            .store_chunk(bearer(store(), "guess"))
+            .await
+            .unwrap_err();
+        assert_eq!(wrong.code(), tonic::Code::Unauthenticated);
+
+        let ok = service
+            .store_chunk(bearer(store(), "the-gateway-knows-this"))
+            .await
+            .unwrap();
+        assert!(ok.into_inner().success);
+
+        let get = GetChunkRequest {
+            chunk_id: chunk_id.as_bytes().to_vec(),
+        };
+        let read_refused = service.get_chunk(Request::new(get.clone())).await.unwrap_err();
+        assert_eq!(read_refused.code(), tonic::Code::Unauthenticated);
+        let read = service
+            .get_chunk(bearer(get, "the-gateway-knows-this"))
+            .await
+            .unwrap();
+        assert_eq!(read.into_inner().data, data.to_vec());
+    }
+
+    #[test]
+    fn constant_time_eq_compares_whole_values() {
+        assert!(constant_time_eq(b"abc", b"abc"));
+        assert!(!constant_time_eq(b"abc", b"abd"));
+        assert!(!constant_time_eq(b"abc", b"ab"));
+        assert!(constant_time_eq(b"", b""));
     }
 
     #[tokio::test]

@@ -64,8 +64,19 @@ impl Default for ChunkClientConfig {
 pub struct ChunkClient {
     /// Connection pool: address -> client
     clients: Arc<RwLock<HashMap<String, ChunkServiceClient<Channel>>>>,
+    /// Per-node access secrets: address -> secret the node expects
+    secrets: Arc<RwLock<HashMap<String, String>>>,
     /// Configuration
     config: ChunkClientConfig,
+}
+
+type AuthHeader = Option<tonic::metadata::MetadataValue<tonic::metadata::Ascii>>;
+
+fn with_auth<T>(mut request: tonic::Request<T>, auth: &AuthHeader) -> tonic::Request<T> {
+    if let Some(value) = auth {
+        request.metadata_mut().insert("authorization", value.clone());
+    }
+    request
 }
 
 impl ChunkClient {
@@ -78,8 +89,24 @@ impl ChunkClient {
     pub fn with_config(config: ChunkClientConfig) -> Self {
         Self {
             clients: Arc::new(RwLock::new(HashMap::new())),
+            secrets: Arc::new(RwLock::new(HashMap::new())),
             config,
         }
+    }
+
+    /// Remember the secret the node at `addr` expects on chunk RPCs
+    /// (nodes.access_secret, handed over at registration).
+    pub fn set_access_secret(&self, addr: &str, secret: &str) {
+        self.secrets
+            .write()
+            .insert(addr.to_string(), secret.to_string());
+    }
+
+    fn auth_header(&self, addr: &str) -> AuthHeader {
+        self.secrets
+            .read()
+            .get(addr)
+            .and_then(|s| format!("Bearer {}", s).parse().ok())
     }
 
     /// Get or create a client for the given address
@@ -206,15 +233,17 @@ impl ChunkClient {
     pub async fn store_chunk(&self, addr: &str, chunk_id: ChunkId, data: Bytes) -> Result<()> {
         debug!(size = data.len(), "Storing chunk on remote node");
 
+        let auth = self.auth_header(addr);
         self.with_retry(addr, |mut client| {
+            let auth = auth.clone();
             let chunk_id = chunk_id;
             let data = data.clone();
             async move {
-                let request = tonic::Request::new(StoreChunkRequest {
+                let request = with_auth(tonic::Request::new(StoreChunkRequest {
                     chunk_id: chunk_id.as_bytes().to_vec(),
                     data: data.to_vec(),
                     metadata: None,
-                });
+                }), &auth);
 
                 let response = client
                     .store_chunk(request)
@@ -240,12 +269,14 @@ impl ChunkClient {
     pub async fn get_chunk(&self, addr: &str, chunk_id: ChunkId) -> Result<Option<Bytes>> {
         debug!("Getting chunk from remote node");
 
+        let auth = self.auth_header(addr);
         self.with_retry(addr, |mut client| {
+            let auth = auth.clone();
             let chunk_id = chunk_id;
             async move {
-                let request = tonic::Request::new(GetChunkRequest {
+                let request = with_auth(tonic::Request::new(GetChunkRequest {
                     chunk_id: chunk_id.as_bytes().to_vec(),
-                });
+                }), &auth);
 
                 let response = client
                     .get_chunk(request)
@@ -268,12 +299,14 @@ impl ChunkClient {
     pub async fn delete_chunk(&self, addr: &str, chunk_id: ChunkId) -> Result<bool> {
         debug!("Deleting chunk from remote node");
 
+        let auth = self.auth_header(addr);
         self.with_retry(addr, |mut client| {
+            let auth = auth.clone();
             let chunk_id = chunk_id;
             async move {
-                let request = tonic::Request::new(DeleteChunkRequest {
+                let request = with_auth(tonic::Request::new(DeleteChunkRequest {
                     chunk_id: chunk_id.as_bytes().to_vec(),
-                });
+                }), &auth);
 
                 let response = client.delete_chunk(request).await.map_err(|e| {
                     CyxCloudError::Network(format!("DeleteChunk RPC failed: {}", e))
@@ -290,12 +323,14 @@ impl ChunkClient {
     pub async fn verify_chunk(&self, addr: &str, chunk_id: ChunkId) -> Result<(bool, u64)> {
         debug!("Verifying chunk on remote node");
 
+        let auth = self.auth_header(addr);
         self.with_retry(addr, |mut client| {
+            let auth = auth.clone();
             let chunk_id = chunk_id;
             async move {
-                let request = tonic::Request::new(VerifyChunkRequest {
+                let request = with_auth(tonic::Request::new(VerifyChunkRequest {
                     chunk_id: chunk_id.as_bytes().to_vec(),
-                });
+                }), &auth);
 
                 let response = client.verify_chunk(request).await.map_err(|e| {
                     CyxCloudError::Network(format!("VerifyChunk RPC failed: {}", e))
@@ -317,12 +352,14 @@ impl ChunkClient {
     ) -> Result<Vec<(ChunkId, Bytes)>> {
         debug!("Streaming chunks from remote node");
 
+        let auth = self.auth_header(addr);
         self.with_retry(addr, |mut client| {
+            let auth = auth.clone();
             let chunk_ids = chunk_ids.clone();
             async move {
-                let request = tonic::Request::new(StreamChunksRequest {
+                let request = with_auth(tonic::Request::new(StreamChunksRequest {
                     chunk_ids: chunk_ids.iter().map(|id| id.as_bytes().to_vec()).collect(),
-                });
+                }), &auth);
 
                 let mut stream = client
                     .stream_chunks(request)

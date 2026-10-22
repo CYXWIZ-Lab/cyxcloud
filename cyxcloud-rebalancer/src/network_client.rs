@@ -42,6 +42,9 @@ impl GrpcNetworkClient {
         addrs.clear();
 
         for node in nodes {
+            if let Some(secret) = &node.access_secret {
+                self.chunk_client.set_access_secret(&node.grpc_address, secret);
+            }
             addrs.insert(node.peer_id, node.grpc_address);
         }
 
@@ -115,6 +118,9 @@ impl NetworkClient for GrpcNetworkClient {
             .into_iter()
             .map(|n| {
                 let id = n.peer_id.clone();
+                if let Some(secret) = &n.access_secret {
+                    self.chunk_client.set_access_secret(&n.grpc_address, secret);
+                }
                 addrs.insert(n.peer_id, n.grpc_address);
                 id
             })

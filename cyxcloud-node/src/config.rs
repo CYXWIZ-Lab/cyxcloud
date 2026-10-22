@@ -3,7 +3,6 @@
 //! Supports loading from TOML files and environment variables.
 
 use serde::{Deserialize, Serialize};
-use serde_json;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -116,6 +115,13 @@ impl NodeConfig {
                     self.storage.data_dir, e
                 ))
             })?;
+        }
+
+        if self.node.id.is_empty() {
+            return Err(ConfigError::ValidationError(format!(
+                "no node identity: the node key at {} could not be read or created",
+                node_key_path().display()
+            )));
         }
 
         // Validate ports are sensible
@@ -236,29 +242,28 @@ impl Default for NodeIdentity {
     }
 }
 
-/// Generate or load persistent node ID.
-/// Checks ~/.cyxcloud/node_credentials.json first, generates new UUID if not found.
+/// The node id is owned by the node's key (~/.cyxcloud/node/key): derived
+/// from its public key, the same on every start, and provable to the gateway
+/// (TOFIX176 P2). The key is made on first start. Empty when the key cannot
+/// be read; `validate` refuses to run then.
 fn generate_node_id() -> String {
-    // Try to load saved node ID from credentials file
-    let creds_path = node_credentials_path();
-    if creds_path.exists() {
-        if let Ok(content) = std::fs::read_to_string(&creds_path) {
-            // Parse JSON and extract node_id field
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-                if let Some(node_id) = json.get("node_id").and_then(|v| v.as_str()) {
-                    if !node_id.is_empty() {
-                        tracing::debug!(node_id = %node_id, "Loaded persistent node ID from credentials");
-                        return node_id.to_string();
-                    }
-                }
-            }
+    match cyxcloud_core::NodeKey::load_or_generate(&node_key_path()) {
+        Ok(key) => key.node_id(),
+        Err(e) => {
+            tracing::error!(error = %e, "Could not load or create the node key");
+            String::new()
         }
     }
+}
 
-    // Generate new node ID
-    let new_id = uuid::Uuid::new_v4().to_string();
-    tracing::info!(node_id = %new_id, "Generated new node ID (will be persisted on login)");
-    new_id
+/// The node's Ed25519 key (~/.cyxcloud/node/key)
+pub fn node_key_path() -> std::path::PathBuf {
+    cyxcloud_config_dir().join("node").join("key")
+}
+
+/// The secret the gateway must present on chunk RPCs (~/.cyxcloud/node/access_secret)
+pub fn node_access_secret_path() -> std::path::PathBuf {
+    cyxcloud_config_dir().join("node").join("access_secret")
 }
 
 fn default_node_name() -> String {

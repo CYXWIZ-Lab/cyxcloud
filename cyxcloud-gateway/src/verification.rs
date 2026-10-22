@@ -344,7 +344,7 @@ impl VerificationService {
         // Check if dataset has a signature
         let signature_bytes = dataset
             .signature
-            .ok_or_else(|| VerificationError::InvalidSignature)?;
+            .ok_or(VerificationError::InvalidSignature)?;
 
         // Parse signature
         let sig_array: [u8; 64] = signature_bytes
@@ -433,7 +433,7 @@ mod tests {
 
     #[test]
     fn test_manifest_hash_deterministic() {
-        let files = vec![
+        let files = [
             DatasetFile {
                 id: Uuid::new_v4(),
                 dataset_id: Uuid::new_v4(),

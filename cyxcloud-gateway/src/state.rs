@@ -84,6 +84,12 @@ impl Default for GatewayConfig {
 
 impl GatewayConfig {
     /// Create config for production with database
+    /// How long start-up waits for the metadata database before giving up
+    pub fn with_database_connect_wait(mut self, wait: std::time::Duration) -> Self {
+        self.database_connect_wait = wait;
+        self
+    }
+
     pub fn with_database(database_url: impl Into<String>) -> Self {
         Self {
             database_url: Some(database_url.into()),
@@ -1367,6 +1373,29 @@ impl AppState {
         );
 
         Ok(Bytes::from(result))
+    }
+
+    /// Give the node client every registered node's access secret, so the
+    /// gateway can talk to nodes that registered before it (re)started.
+    pub async fn load_node_secrets(&self) {
+        let Some(meta) = &self.metadata else {
+            return;
+        };
+        match meta.database().get_all_nodes().await {
+            Ok(nodes) => {
+                let mut loaded = 0usize;
+                for node in nodes {
+                    if let Some(secret) = &node.access_secret {
+                        self.node_client
+                            .set_access_secret(&node.grpc_address, secret)
+                            .await;
+                        loaded += 1;
+                    }
+                }
+                info!(nodes = loaded, "Loaded node access secrets");
+            }
+            Err(e) => warn!(error = %e, "Could not load node access secrets"),
+        }
     }
 
     /// Count a corrupt shard against the node that served it

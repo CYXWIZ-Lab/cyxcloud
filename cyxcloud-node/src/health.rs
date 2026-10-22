@@ -170,6 +170,10 @@ impl HealthChecker {
 /// Heartbeat service for central server registration
 pub struct HeartbeatService {
     node_id: String,
+    /// The key that owns `node_id`; signs every registration
+    key: cyxcloud_core::NodeKey,
+    /// What the gateway must present on chunk RPCs to this node
+    access_secret: String,
     config: NodeConfig,
     metrics: NodeMetrics,
     storage: Arc<RocksDbBackend>,
@@ -185,9 +189,27 @@ pub struct HeartbeatService {
 }
 
 impl HeartbeatService {
-    /// Create a new heartbeat service
-    pub fn new(config: NodeConfig, metrics: NodeMetrics, storage: Arc<RocksDbBackend>) -> Self {
+    /// Create a new heartbeat service. Fails when the node key or access
+    /// secret cannot be read or created, or when the configured node id is
+    /// not the key's.
+    pub fn new(
+        config: NodeConfig,
+        metrics: NodeMetrics,
+        storage: Arc<RocksDbBackend>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let key = cyxcloud_core::NodeKey::load_or_generate(&crate::config::node_key_path())?;
+        let access_secret = cyxcloud_core::load_or_generate_access_secret(
+            &crate::config::node_access_secret_path(),
+        )?;
         let node_id = config.node.id.clone();
+        if node_id != key.node_id() {
+            return Err(format!(
+                "node id {} in the configuration is not the id of the node key ({}); remove [node] id, the key decides",
+                node_id,
+                key.node_id()
+            )
+            .into());
+        }
         let grpc_address = format!(
             "{}:{}",
             config
@@ -209,8 +231,10 @@ impl HeartbeatService {
         let command_executor =
             CommandExecutor::new(node_id.clone(), storage.clone(), metrics.clone());
 
-        Self {
+        Ok(Self {
             node_id,
+            key,
+            access_secret,
             config,
             metrics,
             storage,
@@ -221,7 +245,7 @@ impl HeartbeatService {
             credentials_wallet: RwLock::new(None),
             system: RwLock::new(system),
             command_executor,
-        }
+        })
     }
 
     /// Set the JWT token for Gateway authentication
@@ -407,12 +431,18 @@ impl HeartbeatService {
         // Get wallet address (credentials wallet takes priority over config)
         let wallet_address = self.get_wallet_address().await;
 
-        // Build registration request
+        // Build registration request, signed by the node key
+        let signed_at = chrono::Utc::now().timestamp();
         let register_req = RegisterNodeRequest {
             node_id: self.node_id.clone(),
+            proof: Some(cyxcloud_protocol::node::NodeProof {
+                timestamp: signed_at,
+                signature: self.key.sign_registration(&self.grpc_address, signed_at),
+            }),
+            access_secret: self.access_secret.clone(),
             info: Some(NodeInfo {
                 node_id: self.node_id.clone(),
-                public_key: String::new(), // TODO: Add key support
+                public_key: self.key.public_key_hex(),
                 wallet_address: wallet_address.clone(),
                 listen_addrs: vec![self.grpc_address.clone()],
                 location: Some(NodeLocation {
@@ -483,10 +513,11 @@ impl HeartbeatService {
 
     /// Send heartbeat to central server
     async fn send_heartbeat(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Get JWT token for authentication
-        let jwt_token = self.jwt_token.read().await.clone();
+        // Node RPCs carry the node token the gateway issued at registration;
+        // without one the heartbeat fails and the caller re-registers.
+        let jwt_token = self.auth_token.read().await.clone();
         if jwt_token.is_none() {
-            return Err("JWT token not set - login to CyxWiz API first".into());
+            return Err("not registered with the gateway yet (no node token)".into());
         }
 
         let mut client = self.connect().await?;

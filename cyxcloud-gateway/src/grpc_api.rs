@@ -5,6 +5,7 @@
 //! - DataService: Streaming data access for ML training pipelines
 
 use crate::node_client::NodeClient;
+use crate::node_registration::check_registration;
 use crate::AppState;
 use cyxcloud_metadata::{CreateNode, MetadataService, Node};
 use cyxcloud_protocol::data::{
@@ -98,6 +99,21 @@ impl NodeService for NodeServiceImpl {
             Status::unavailable("Metadata service not configured")
         })?;
 
+        // The node must prove it holds the key its id was derived from, and a
+        // node already on file keeps the key it registered with (TOFIX176 P2).
+        let existing = metadata.get_node_by_peer_id(&node_id).await.map_err(|e| {
+            error!(error = %e, node_id = %node_id, "Could not look up the node");
+            Status::internal("Could not look up the node")
+        })?;
+        let verified = check_registration(
+            &req,
+            existing.as_ref().and_then(|n| n.public_key.as_deref()),
+            chrono::Utc::now().timestamp(),
+        )
+        .inspect_err(|status| {
+            warn!(node_id = %node_id, reason = %status.message(), "Node registration refused");
+        })?;
+
         // Extract node info from request
         let info = req
             .info
@@ -132,11 +148,8 @@ impl NodeService for NodeServiceImpl {
             } else {
                 Some(info.wallet_address.clone())
             },
-            public_key: if info.public_key.is_empty() {
-                None
-            } else {
-                Some(info.public_key.clone())
-            },
+            public_key: Some(verified.public_key_hex.clone()),
+            access_secret: verified.access_secret.clone(),
         };
 
         // Log wallet if provided
@@ -156,6 +169,12 @@ impl NodeService for NodeServiceImpl {
                     grpc_addr = %node.grpc_address,
                     "Node registered successfully"
                 );
+                if let Some(secret) = &node.access_secret {
+                    self.state
+                        .node_client()
+                        .set_access_secret(&node.grpc_address, secret)
+                        .await;
+                }
 
                 // Generate a proper JWT token for the node
                 let auth_token = self
@@ -198,6 +217,7 @@ impl NodeService for NodeServiceImpl {
         &self,
         request: Request<HeartbeatRequest>,
     ) -> Result<Response<HeartbeatResponse>, Status> {
+        let token_node = node_from_token(&request)?;
         let req = request.into_inner();
         let node_id_str = req.node_id.clone();
         tracing::Span::current().record("node_id", &node_id_str);
@@ -207,6 +227,9 @@ impl NodeService for NodeServiceImpl {
         let metadata = self
             .metadata()
             .ok_or_else(|| Status::unavailable("Metadata service not configured"))?;
+
+        // A node token speaks for one node only
+        same_node(metadata, &node_id_str, token_node).await?;
 
         // Use peer_id directly - the node sends its own ID which is stored as peer_id
         // Update heartbeat with recovery-aware logic
@@ -333,8 +356,12 @@ impl NodeService for NodeServiceImpl {
         &self,
         request: Request<ReportMetricsRequest>,
     ) -> Result<Response<ReportMetricsResponse>, Status> {
+        let token_node = node_from_token(&request)?;
         let req = request.into_inner();
         tracing::Span::current().record("node_id", &req.node_id);
+        if let Some(metadata) = self.metadata() {
+            same_node(metadata, &req.node_id, token_node).await?;
+        }
 
         debug!(
             node_id = %req.node_id,
@@ -353,6 +380,7 @@ impl NodeService for NodeServiceImpl {
         &self,
         request: Request<DrainNodeRequest>,
     ) -> Result<Response<DrainNodeResponse>, Status> {
+        let token_node = node_from_token(&request)?;
         let req = request.into_inner();
         tracing::Span::current().record("node_id", &req.node_id);
 
@@ -369,6 +397,11 @@ impl NodeService for NodeServiceImpl {
         // Parse node UUID
         let node_uuid = Uuid::parse_str(&req.node_id)
             .map_err(|e| Status::invalid_argument(format!("Invalid node_id format: {}", e)))?;
+        if node_uuid != token_node {
+            return Err(Status::permission_denied(
+                "a node may only drain itself: the token belongs to another node",
+            ));
+        }
 
         // Update node status to draining
         match metadata
@@ -392,6 +425,39 @@ impl NodeService for NodeServiceImpl {
             }
         }
     }
+}
+
+/// The node a request's token was issued to (RegisterNodeResponse.auth_token).
+/// A user token or no token is not enough for node RPCs.
+fn node_from_token<T>(request: &Request<T>) -> Result<Uuid, Status> {
+    let claims = request
+        .extensions()
+        .get::<Claims>()
+        .ok_or_else(|| Status::unauthenticated("a node token is required"))?;
+    if claims.user_type != "node" {
+        return Err(Status::permission_denied(
+            "node RPCs need the node token from RegisterNode, not a user token",
+        ));
+    }
+    Uuid::parse_str(&claims.sub)
+        .map_err(|_| Status::unauthenticated("the node token names no node"))
+}
+
+/// The request's node (by the id the node calls itself) must be the node the
+/// token was issued to.
+async fn same_node(metadata: &MetadataService, peer_id: &str, token_node: Uuid) -> Result<(), Status> {
+    let node = metadata
+        .get_node_by_peer_id(peer_id)
+        .await
+        .map_err(|e| Status::internal(format!("Could not look up node: {}", e)))?
+        .ok_or_else(|| Status::not_found(format!("node {} is not registered", peer_id)))?;
+    if node.id != token_node {
+        warn!(peer_id = %peer_id, token_node = %token_node, "Node token used for another node");
+        return Err(Status::permission_denied(
+            "the token belongs to another node",
+        ));
+    }
+    Ok(())
 }
 
 // =============================================================================
