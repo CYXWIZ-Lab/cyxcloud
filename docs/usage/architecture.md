@@ -34,7 +34,9 @@ Joining the storage means running `cyxcloud-node`. The gateway is the manager; n
 4. A read fetches at least 10 of the 14 shards per chunk from whichever nodes hold them, decodes, concatenates and checks the hash before answering (`AppState::read_file`, shared by S3 GET and StreamData).
 5. A node that goes dark leaves chunks under target; the rebalancer plans a repair onto other nodes.
 
-With one node, all 14 shards of every chunk sit on it, and the rebalancer logs that it cannot repair anything. With two nodes, placement spreads shards across both.
+The placement engine hands each shard to the online node that holds the fewest shards of the chunk so far; ties go to the best score (least used storage, proximity to the uploader when known, datacenter and rack diversity, bandwidth). Measured 2026-10-22 with this PC's node and the HP's: a 9 MB file (3 chunks) landed 7 + 7 shards per chunk on the two nodes and streamed back intact.
+
+What a node loss costs: a chunk needs any 10 of its 14 shards. With one node everything is on it; with two nodes each holds 7, so losing either makes every file unreadable until it is back (the gateway answers at once with `DATA_LOSS: not enough shards are held by online nodes (have 7, need 10)`). From four nodes on, no node holds more than 4 shards of a chunk and one node can be lost without data loss. A node that restarts keeps its identity (saved credentials and node id; the gateway matches it by peer id), so its shards stay its own.
 
 ## Running a node
 
@@ -75,8 +77,17 @@ base_url = "http://192.168.1.116:3002"   # sign-in as a machine
 register = true
 ```
 
-Without the env file the node prompts for the login on its console. A
-systemd unit around the script is the next step; there is none in the repo
+Without the env file the node prompts for the login on its console. A login
+that does not reach the API (API starting, slow link) is retried 6 times, 5 s
+apart; a refused credential stops the node. Start it detached and read its
+log without colour codes or secrets:
+
+```
+setsid nohup ~/cyxwiz/run-node.sh > ~/cyxwiz/node.log 2>&1 < /dev/null &
+sed "s/\x1b\[[0-9;]*m//g" ~/cyxwiz/node.log | grep -v -i password
+```
+
+A systemd unit around the script is the next step; there is none in the repo
 yet.
 
 ### In Docker (Dockerfile.node)
@@ -100,6 +111,7 @@ node services (`cyxcloud-node1`, `cyxcloud-node2`) for a local cluster;
 ## Known weaknesses (tracked in TOFIX171)
 
 - The gateway is the single manager and the single data path: every byte goes through it twice.
+- Fewer than four nodes cannot survive a node loss (see above); the rebalancer cannot repair what it has no spare node for.
 - Node-to-node transfer and peer discovery exist as code; nothing routes through them.
 - Reads do not re-check shard content hashes against the shard ids a node returns.
 - The S3 API has no authentication.
