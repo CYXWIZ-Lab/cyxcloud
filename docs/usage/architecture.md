@@ -31,7 +31,7 @@ Joining the storage means running `cyxcloud-node`. The gateway is the manager; n
 1. An upload reaches the gateway, which records a file row with the file's BLAKE3 content hash (`UploadFile`, or S3 PUT).
 2. The file is cut into 4 MB chunks (`DEFAULT_CHUNK_SIZE`). Each chunk is Reed-Solomon encoded into 10 data shards plus 4 parity shards (`DATA_SHARDS`, `PARITY_SHARDS`).
 3. The placement engine picks an online node per shard; the gateway pushes the shards out; every shard gets a chunk row and a location row.
-4. A read fetches at least 10 of the 14 shards per chunk from whichever nodes hold them, decodes, concatenates and checks the hash before answering (`AppState::read_file`, shared by S3 GET and StreamData).
+4. A read fetches at least 10 of the 14 shards per chunk from whichever nodes hold them. Every shard's bytes must hash to its id: a node that answers with other bytes is skipped, counted against (`nodes.failure_count`) and logged, and the shard is taken from another node. The decoded file must hash to what was recorded at upload, or the read fails with a clear error (`AppState::read_file`, shared by S3 GET and StreamData). The node refuses to serve a stored shard that no longer hashes to its id (`DATA_LOSS`).
 5. A node that goes dark leaves chunks under target; the rebalancer plans a repair onto other nodes.
 
 The placement engine hands each shard to the online node that holds the fewest shards of the chunk so far; ties go to the best score (least used storage, proximity to the uploader when known, datacenter and rack diversity, bandwidth). Measured 2026-10-22 with this PC's node and the HP's: a 9 MB file (3 chunks) landed 7 + 7 shards per chunk on the two nodes and streamed back intact.
@@ -113,7 +113,6 @@ node services (`cyxcloud-node1`, `cyxcloud-node2`) for a local cluster;
 - The gateway is the single manager and the single data path: every byte goes through it twice.
 - Fewer than four nodes cannot survive a node loss (see above); the rebalancer cannot repair what it has no spare node for.
 - Node-to-node transfer and peer discovery exist as code; nothing routes through them.
-- Reads do not re-check shard content hashes against the shard ids a node returns.
 - The S3 API has no authentication.
 - Node registration is JWT-free by design, with no rate limit.
 - The rebalancer's 60 s scans and the metadata pool (10 connections) can starve requests.

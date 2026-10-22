@@ -262,6 +262,26 @@ impl Database {
     }
 
     /// Increment node failure count
+    /// Count a corrupt shard served by the node at this gRPC address.
+    /// Returns the new failure count, or None when no node has that address.
+    pub async fn increment_node_failures_by_address(
+        &self,
+        grpc_address: &str,
+    ) -> Result<Option<i32>> {
+        let result = sqlx::query_scalar::<_, i32>(
+            r#"
+            UPDATE nodes
+            SET failure_count = failure_count + 1
+            WHERE grpc_address = $1
+            RETURNING failure_count
+            "#,
+        )
+        .bind(grpc_address)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(result)
+    }
+
     pub async fn increment_node_failures(&self, node_id: Uuid) -> Result<i32> {
         let result = sqlx::query_scalar::<_, i32>(
             r#"

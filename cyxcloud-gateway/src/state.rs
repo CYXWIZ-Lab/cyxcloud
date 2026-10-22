@@ -1222,18 +1222,23 @@ impl AppState {
                     continue;
                 }
 
-                // Retrieve shard from any available node
-                match self
+                // Retrieve the shard from any node that holds it; every node's
+                // bytes are checked against the shard id, liars are counted.
+                let fetch = self
                     .node_client
-                    .get_chunk_from_any(&addresses, &shard_record.chunk_id)
-                    .await
-                {
-                    Ok(data) => {
+                    .get_chunk_from_any_reporting(&addresses, &shard_record.chunk_id)
+                    .await;
+                for node in &fetch.corrupt_nodes {
+                    self.record_corrupt_shard(meta, node, &shard_record.chunk_id)
+                        .await;
+                }
+                match fetch.data {
+                    Some(data) => {
                         debug!(
                             chunk_index = chunk_idx,
                             shard_index = shard_idx,
                             size = data.len(),
-                            "Shard retrieved"
+                            "Shard retrieved and verified"
                         );
                         shard_opts[shard_idx] = Some(ShardData::new(
                             shard_idx as u8,
@@ -1242,9 +1247,9 @@ impl AppState {
                         ));
                         retrieved_count += 1;
                     }
-                    Err(e) => {
+                    None => {
                         debug!(
-                            error = %e,
+                            error = ?fetch.last_error,
                             chunk_index = chunk_idx,
                             shard_index = shard_idx,
                             "Failed to retrieve shard, will try to reconstruct"
@@ -1309,13 +1314,62 @@ impl AppState {
         // Trim to exact original size (should already be correct, but be safe)
         result.truncate(file.size_bytes as usize);
 
+        // The whole file must hash to what was recorded at upload: shard-level
+        // checks catch a lying node, this catches everything else (a wrong
+        // record, a decoding bug, a shard that hashes right but belongs elsewhere).
+        if !file.content_hash.is_empty() {
+            let actual = ContentHash::compute(&result);
+            if actual.as_bytes() != file.content_hash.as_slice() {
+                error!(
+                    path = %file.path,
+                    file_id = %file.id,
+                    expected = %hex::encode(&file.content_hash),
+                    actual = %actual.to_hex(),
+                    "Assembled file does not match its recorded hash"
+                );
+                return Err(S3Error::Internal(format!(
+                    "assembled file {} does not match its recorded hash (expected {}, got {}): a node served bad data or the record is wrong",
+                    file.path,
+                    hex::encode(&file.content_hash),
+                    actual.to_hex()
+                )));
+            }
+        }
+
         info!(
             path = %file.path,
             size = result.len(),
-            "Object retrieved and decoded successfully"
+            "Object retrieved, decoded and verified"
         );
 
         Ok(Bytes::from(result))
+    }
+
+    /// Count a corrupt shard against the node that served it
+    async fn record_corrupt_shard(
+        &self,
+        meta: &cyxcloud_metadata::MetadataService,
+        node_address: &str,
+        chunk_id: &[u8],
+    ) {
+        match meta.record_node_corruption(node_address).await {
+            Ok(Some(failures)) => warn!(
+                node = %node_address,
+                chunk_id = %hex::encode(chunk_id),
+                failures,
+                "Node served a corrupt shard; failure recorded"
+            ),
+            Ok(None) => warn!(
+                node = %node_address,
+                chunk_id = %hex::encode(chunk_id),
+                "Node served a corrupt shard; no node record has that address"
+            ),
+            Err(e) => error!(
+                error = %e,
+                node = %node_address,
+                "Could not record the corrupt shard against the node"
+            ),
+        }
     }
 
     /// Get object range

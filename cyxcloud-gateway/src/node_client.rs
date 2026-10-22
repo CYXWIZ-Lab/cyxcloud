@@ -6,6 +6,7 @@
 #![allow(unused_imports)]
 
 use bytes::Bytes;
+use cyxcloud_core::chunk::ChunkId;
 use cyxcloud_protocol::chunk::{
     chunk_service_client::ChunkServiceClient, ChunkMetadata as ProtoChunkMetadata, GetChunkRequest,
     StoreChunkRequest,
@@ -27,6 +28,11 @@ pub enum NodeClientError {
 
     #[error("Chunk not found: {0}")]
     ChunkNotFound(String),
+
+    /// The node answered, but the bytes do not hash to the chunk id asked for:
+    /// bit rot, a bug, or a node lying. Never decoded, always counted against the node.
+    #[error("Corrupt shard from {node}: data does not match chunk id {chunk_id}")]
+    CorruptShard { node: String, chunk_id: String },
 
     #[error("No nodes available")]
     NoNodesAvailable,
@@ -230,7 +236,20 @@ impl NodeClient {
         let inner = response.into_inner();
 
         if inner.found {
-            debug!(node = %node_address, chunk_id = %hex::encode(chunk_id), "Chunk retrieved");
+            // Shard ids are content hashes: a node is believed only when the bytes prove it.
+            if ChunkId::from_data(&inner.data).as_bytes() != chunk_id {
+                warn!(
+                    node = %node_address,
+                    chunk_id = %hex::encode(chunk_id),
+                    size = inner.data.len(),
+                    "Node returned data that does not hash to the requested chunk id"
+                );
+                return Err(NodeClientError::CorruptShard {
+                    node: node_address.to_string(),
+                    chunk_id: hex::encode(chunk_id),
+                });
+            }
+            debug!(node = %node_address, chunk_id = %hex::encode(chunk_id), "Chunk retrieved and verified");
             Ok(Bytes::from(inner.data))
         } else {
             Err(NodeClientError::ChunkNotFound(hex::encode(chunk_id)))
@@ -280,23 +299,45 @@ impl NodeClient {
         node_addresses: &[String],
         chunk_id: &[u8],
     ) -> Result<Bytes, NodeClientError> {
-        if node_addresses.is_empty() {
-            return Err(NodeClientError::NoNodesAvailable);
+        let fetch = self.get_chunk_from_any_reporting(node_addresses, chunk_id).await;
+        match fetch.data {
+            Some(data) => Ok(data),
+            None => Err(fetch
+                .last_error
+                .unwrap_or(NodeClientError::ChunkNotFound(hex::encode(chunk_id)))),
         }
+    }
 
-        let mut last_error = None;
+    /// Retrieve a chunk from any available node and say which nodes served
+    /// corrupt bytes on the way, so the caller can count it against them.
+    pub async fn get_chunk_from_any_reporting(
+        &self,
+        node_addresses: &[String],
+        chunk_id: &[u8],
+    ) -> ShardFetch {
+        let mut fetch = ShardFetch::default();
+        if node_addresses.is_empty() {
+            fetch.last_error = Some(NodeClientError::NoNodesAvailable);
+            return fetch;
+        }
 
         for address in node_addresses {
             match self.get_chunk(address, chunk_id).await {
-                Ok(data) => return Ok(data),
+                Ok(data) => {
+                    fetch.data = Some(data);
+                    return fetch;
+                }
                 Err(e) => {
+                    if matches!(e, NodeClientError::CorruptShard { .. }) {
+                        fetch.corrupt_nodes.push(address.clone());
+                    }
                     warn!(node = %address, error = %e, "Failed to get chunk from node");
-                    last_error = Some(e);
+                    fetch.last_error = Some(e);
                 }
             }
         }
 
-        Err(last_error.unwrap_or(NodeClientError::ChunkNotFound(hex::encode(chunk_id))))
+        fetch
     }
 
     /// Close a specific connection
@@ -318,6 +359,17 @@ impl NodeClient {
     pub async fn pool_size(&self) -> usize {
         self.connections.read().await.len()
     }
+}
+
+/// Outcome of asking several nodes for one shard
+#[derive(Debug, Default)]
+pub struct ShardFetch {
+    /// The verified bytes, if any node had them
+    pub data: Option<Bytes>,
+    /// Nodes that answered with bytes that do not hash to the chunk id
+    pub corrupt_nodes: Vec<String>,
+    /// The last failure seen (only meaningful when `data` is None)
+    pub last_error: Option<NodeClientError>,
 }
 
 /// Simplified chunk metadata for client operations
@@ -372,5 +424,136 @@ mod tests {
         assert_eq!(meta.size, 100);
         assert_eq!(meta.index, 0);
         assert_eq!(meta.total_chunks, 1);
+    }
+}
+
+#[cfg(test)]
+mod fake_node_tests {
+    //! A storage node is a stranger's machine: these tests stand up a node
+    //! that answers GetChunk with whatever bytes it likes.
+    use super::*;
+    use cyxcloud_protocol::chunk::chunk_service_server::{ChunkService, ChunkServiceServer};
+    use cyxcloud_protocol::chunk::{
+        ChunkData, DeleteChunkRequest, DeleteChunkResponse, GetChunkResponse, StoreChunkResponse,
+        StreamChunksRequest, VerifyChunkRequest, VerifyChunkResponse,
+    };
+    use tonic::transport::server::TcpIncoming;
+    use tonic::{Request, Response, Status};
+
+    struct FakeNode {
+        answer: Vec<u8>,
+    }
+
+    #[tonic::async_trait]
+    impl ChunkService for FakeNode {
+        async fn store_chunk(
+            &self,
+            _r: Request<StoreChunkRequest>,
+        ) -> Result<Response<StoreChunkResponse>, Status> {
+            Err(Status::unimplemented("fake node"))
+        }
+        async fn get_chunk(
+            &self,
+            _r: Request<GetChunkRequest>,
+        ) -> Result<Response<GetChunkResponse>, Status> {
+            Ok(Response::new(GetChunkResponse {
+                data: self.answer.clone(),
+                metadata: None,
+                found: true,
+            }))
+        }
+        async fn delete_chunk(
+            &self,
+            _r: Request<DeleteChunkRequest>,
+        ) -> Result<Response<DeleteChunkResponse>, Status> {
+            Err(Status::unimplemented("fake node"))
+        }
+        type StreamChunksStream = tokio_stream::wrappers::ReceiverStream<Result<ChunkData, Status>>;
+        async fn stream_chunks(
+            &self,
+            _r: Request<StreamChunksRequest>,
+        ) -> Result<Response<Self::StreamChunksStream>, Status> {
+            Err(Status::unimplemented("fake node"))
+        }
+        async fn verify_chunk(
+            &self,
+            _r: Request<VerifyChunkRequest>,
+        ) -> Result<Response<VerifyChunkResponse>, Status> {
+            Err(Status::unimplemented("fake node"))
+        }
+    }
+
+    async fn serve(answer: &[u8]) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let incoming = TcpIncoming::from_listener(listener, true, None).unwrap();
+        let node = FakeNode {
+            answer: answer.to_vec(),
+        };
+        tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(ChunkServiceServer::new(node))
+                .serve_with_incoming(incoming)
+                .await
+                .unwrap();
+        });
+        addr.to_string()
+    }
+
+    #[tokio::test]
+    async fn a_node_returning_wrong_bytes_is_a_corrupt_shard() {
+        let good = b"the shard as it was written".to_vec();
+        let id = ChunkId::from_data(&good).as_bytes().to_vec();
+        let liar = serve(b"tampered bytes").await;
+        let client = NodeClient::new(NodeClientConfig::default());
+
+        let err = client.get_chunk(&liar, &id).await.unwrap_err();
+
+        assert!(matches!(err, NodeClientError::CorruptShard { .. }), "{err}");
+    }
+
+    #[tokio::test]
+    async fn an_honest_node_is_verified_and_served() {
+        let good = b"the shard as it was written".to_vec();
+        let id = ChunkId::from_data(&good).as_bytes().to_vec();
+        let honest = serve(&good).await;
+        let client = NodeClient::new(NodeClientConfig::default());
+
+        let data = client.get_chunk(&honest, &id).await.unwrap();
+
+        assert_eq!(data, Bytes::from(good));
+    }
+
+    #[tokio::test]
+    async fn a_corrupt_node_is_skipped_and_reported() {
+        let good = b"the shard as it was written".to_vec();
+        let id = ChunkId::from_data(&good).as_bytes().to_vec();
+        let liar = serve(b"tampered bytes").await;
+        let honest = serve(&good).await;
+        let client = NodeClient::new(NodeClientConfig::default());
+
+        let fetch = client
+            .get_chunk_from_any_reporting(&[liar.clone(), honest], &id)
+            .await;
+
+        assert_eq!(fetch.data, Some(Bytes::from(good)));
+        assert_eq!(fetch.corrupt_nodes, vec![liar]);
+    }
+
+    #[tokio::test]
+    async fn only_liars_means_no_data_and_every_liar_named() {
+        let good = b"the shard as it was written".to_vec();
+        let id = ChunkId::from_data(&good).as_bytes().to_vec();
+        let liar_a = serve(b"tampered").await;
+        let liar_b = serve(b"also tampered").await;
+        let client = NodeClient::new(NodeClientConfig::default());
+
+        let fetch = client
+            .get_chunk_from_any_reporting(&[liar_a.clone(), liar_b.clone()], &id)
+            .await;
+
+        assert!(fetch.data.is_none());
+        assert_eq!(fetch.corrupt_nodes, vec![liar_a, liar_b]);
+        assert!(matches!(fetch.last_error, Some(NodeClientError::CorruptShard { .. })));
     }
 }

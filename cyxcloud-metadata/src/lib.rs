@@ -476,6 +476,12 @@ impl MetadataService {
         Ok(chunks)
     }
 
+    /// A node served a shard whose bytes do not hash to its id: count it
+    /// against the node. Returns the node's failure count, None if unknown.
+    pub async fn record_node_corruption(&self, grpc_address: &str) -> Result<Option<i32>> {
+        Ok(self.db.increment_node_failures_by_address(grpc_address).await?)
+    }
+
     /// Get under-replicated chunks
     pub async fn get_under_replicated_chunks(
         &self,

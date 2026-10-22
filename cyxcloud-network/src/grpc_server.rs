@@ -188,7 +188,20 @@ impl ChunkService for ChunkServiceImpl {
 
         match self.storage.get(chunk_id) {
             Ok(Some(data)) => {
-                debug!(chunk_id = %chunk_id, size = data.len(), "Chunk found");
+                // What left the disk must still hash to its id: bit rot or a
+                // tampered store is refused here, not discovered by the reader.
+                if ChunkId::from_data(&data) != chunk_id {
+                    error!(
+                        chunk_id = %chunk_id,
+                        size = data.len(),
+                        "Stored chunk does not hash to its id; refusing to serve it"
+                    );
+                    return Err(Status::data_loss(format!(
+                        "chunk {} is corrupt on this node",
+                        chunk_id
+                    )));
+                }
+                debug!(chunk_id = %chunk_id, size = data.len(), "Chunk found and verified");
                 Ok(Response::new(GetChunkResponse {
                     data: data.to_vec(),
                     metadata: None, // TODO: Store and retrieve metadata
@@ -424,6 +437,25 @@ mod tests {
         let inner = get_response.into_inner();
         assert!(inner.found);
         assert_eq!(inner.data, data.to_vec());
+    }
+
+    #[tokio::test]
+    async fn a_corrupt_stored_chunk_is_not_served() {
+        let (storage, _dir) = create_test_storage();
+        let chunk_id = ChunkId::from_data(b"the shard as written");
+        // bit rot: the store holds other bytes under the id
+        storage.put(chunk_id, Bytes::from_static(b"rotten")).unwrap();
+        let service = ChunkServiceImpl::new(storage, "test-node".to_string());
+
+        let err = service
+            .get_chunk(Request::new(GetChunkRequest {
+                chunk_id: chunk_id.as_bytes().to_vec(),
+            }))
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.code(), tonic::Code::DataLoss);
+        assert!(err.message().contains("corrupt"));
     }
 
     #[tokio::test]
