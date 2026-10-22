@@ -323,6 +323,7 @@ impl DataStreamClient {
 }
 
 /// Verify a batch response
+#[allow(clippy::result_large_err)] // DataStreamError carries a tonic::Status; boxing it is TOFIX175 clean-up
 fn verify_batch(batch: &BatchResponse, _max_trust_level: i32) -> DataStreamResult<VerifiedBatch> {
     // Verify item hashes
     if batch.items.len() != batch.item_hashes.len() {

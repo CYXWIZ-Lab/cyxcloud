@@ -3,7 +3,7 @@
 //! Run with: cargo bench --package cyxcloud-core
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use cyxcloud_core::erasure::{ErasureConfig, ErasureEncoder};
+use cyxcloud_core::erasure::ErasureEncoder;
 
 /// Generate test data of specified size
 fn generate_data(size: usize) -> Vec<u8> {

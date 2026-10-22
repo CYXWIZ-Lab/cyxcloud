@@ -177,6 +177,7 @@ async fn main() -> anyhow::Result<()> {
         database_url: cli.database_url,
         redis_url: cli.redis_url,
         use_memory_storage: cli.memory_only,
+        database_connect_wait: GatewayConfig::default().database_connect_wait,
         enable_blockchain: cli.enable_blockchain,
         solana_rpc_url: Some(cli.solana_rpc_url),
         keypair_path: cli.keypair_path,
@@ -187,6 +188,7 @@ async fn main() -> anyhow::Result<()> {
         database_url: cli.database_url,
         redis_url: cli.redis_url,
         use_memory_storage: cli.memory_only,
+        database_connect_wait: GatewayConfig::default().database_connect_wait,
     };
 
     // Create shared application state

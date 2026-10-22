@@ -423,3 +423,27 @@ async fn test_auth_from_state() {
     let claims = auth.validate_token(&token).await.expect("Should validate");
     assert_eq!(claims.sub, "state-user");
 }
+
+// ============================================================================
+// Start-up: no silent fallback to memory
+// ============================================================================
+
+/// 2026-10-22: a pool time-out at start-up made the gateway run from memory
+/// and refuse every node with "Metadata service not configured". With a
+/// database URL configured the gateway must stop, not pretend.
+#[tokio::test]
+async fn a_configured_database_that_is_down_stops_the_gateway() {
+    let config = cyxcloud_gateway::GatewayConfig {
+        database_url: Some("postgres://nobody:none@127.0.0.1:1/none".to_string()),
+        redis_url: None,
+        use_memory_storage: false,
+        database_connect_wait: std::time::Duration::from_secs(1),
+        ..Default::default()
+    };
+
+    let started = std::time::Instant::now();
+    let result = AppState::with_config(config).await;
+
+    assert!(result.is_err(), "the gateway must not start from memory");
+    assert!(started.elapsed() < std::time::Duration::from_secs(30));
+}

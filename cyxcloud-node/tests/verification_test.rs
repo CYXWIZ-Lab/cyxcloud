@@ -292,7 +292,7 @@ fn test_hash_hex_encoding() {
 #[test]
 fn test_manifest_hash() {
     // Simulate dataset files
-    let files = vec![
+    let files = [
         ("train/image_001.jpg", vec![1u8; 100]),
         ("train/image_002.jpg", vec![2u8; 100]),
         ("test/image_001.jpg", vec![3u8; 100]),

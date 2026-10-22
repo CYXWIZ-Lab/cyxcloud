@@ -48,6 +48,10 @@ pub struct GatewayConfig {
     /// Use in-memory storage (for development/testing)
     pub use_memory_storage: bool,
 
+    /// How long to keep retrying the metadata database at start-up before
+    /// giving up. A gateway with a database URL never runs from memory.
+    pub database_connect_wait: std::time::Duration,
+
     /// Enable blockchain integration
     #[cfg(feature = "blockchain")]
     pub enable_blockchain: bool,
@@ -67,6 +71,7 @@ impl Default for GatewayConfig {
             database_url: None,
             redis_url: None,
             use_memory_storage: true, // Default to memory for easy development
+            database_connect_wait: std::time::Duration::from_secs(60),
             #[cfg(feature = "blockchain")]
             enable_blockchain: false,
             #[cfg(feature = "blockchain")]
@@ -84,6 +89,7 @@ impl GatewayConfig {
             database_url: Some(database_url.into()),
             redis_url: None,
             use_memory_storage: false,
+            database_connect_wait: std::time::Duration::from_secs(60),
             #[cfg(feature = "blockchain")]
             enable_blockchain: false,
             #[cfg(feature = "blockchain")]
@@ -114,6 +120,7 @@ impl GatewayConfig {
             database_url,
             redis_url,
             use_memory_storage: use_memory,
+            database_connect_wait: std::time::Duration::from_secs(60),
             #[cfg(feature = "blockchain")]
             enable_blockchain,
             #[cfg(feature = "blockchain")]
@@ -214,20 +221,37 @@ impl AppState {
                     ..Default::default()
                 };
 
-                match MetadataService::new(meta_config).await {
-                    Ok(service) => {
-                        info!("Connected to metadata database");
-                        // Run migrations
-                        if let Err(e) = service.migrate().await {
-                            warn!(error = %e, "Failed to run migrations");
+                // 2026-10-22: a pool time-out at start-up made the gateway fall
+                // back to memory and refuse every node silently. Retry while the
+                // database comes up; if it does not, stop with the reason.
+                let deadline = std::time::Instant::now() + config.database_connect_wait;
+                let service = loop {
+                    match MetadataService::new(meta_config.clone()).await {
+                        Ok(service) => break service,
+                        Err(e) if std::time::Instant::now() < deadline => {
+                            warn!(
+                                error = %e,
+                                retry_in_secs = 2,
+                                "Metadata database not reachable yet; retrying"
+                            );
+                            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                         }
-                        Some(Arc::new(service))
+                        Err(e) => {
+                            error!(
+                                error = %e,
+                                waited_secs = config.database_connect_wait.as_secs(),
+                                "Metadata database unreachable; refusing to start without it"
+                            );
+                            return Err(e);
+                        }
                     }
-                    Err(e) => {
-                        warn!(error = %e, "Failed to connect to database, falling back to memory");
-                        None
-                    }
+                };
+                info!("Connected to metadata database");
+                // Run migrations
+                if let Err(e) = service.migrate().await {
+                    warn!(error = %e, "Failed to run migrations");
                 }
+                Some(Arc::new(service))
             } else {
                 None
             }

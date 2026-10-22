@@ -80,7 +80,7 @@ fn test_epoch_tracking() {
     let num_epochs = 3;
 
     let mut current_epoch = 0u32;
-    let mut epoch_batches = 0u64;
+    let mut epoch_batches: u64;
     let mut global_batches = 0u64;
 
     // Simulate multi-epoch training
@@ -100,7 +100,7 @@ fn test_epoch_tracking() {
             if batch.is_epoch_end {
                 assert_eq!(
                     epoch_batches,
-                    batches_per_epoch as u64,
+                    batches_per_epoch,
                     "Epoch {} should have {} batches",
                     epoch,
                     batches_per_epoch
@@ -112,7 +112,7 @@ fn test_epoch_tracking() {
     assert_eq!(current_epoch, num_epochs - 1);
     assert_eq!(
         global_batches,
-        (batches_per_epoch as u64 * num_epochs as u64)
+        (batches_per_epoch * num_epochs as u64)
     );
 
     println!("Epoch tracking: OK");
@@ -328,7 +328,7 @@ fn test_simulated_training_loop() {
         println!("Epoch {}/{} complete", epoch + 1, num_epochs);
     }
 
-    assert_eq!(total_batches, num_epochs as u64 * batches_per_epoch as u64);
+    assert_eq!(total_batches, num_epochs as u64 * batches_per_epoch);
     assert_eq!(total_items, total_batches * batch_size as u64);
     println!(
         "Processed {} batches, {} items, {} bytes",

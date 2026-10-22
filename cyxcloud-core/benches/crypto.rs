@@ -154,7 +154,7 @@ fn bench_encrypt_roundtrip(c: &mut Criterion) {
 
 /// Benchmark key generation
 fn bench_key_generation(c: &mut Criterion) {
-    c.bench_function("key_generate", |b| b.iter(|| EncryptionKey::generate()));
+    c.bench_function("key_generate", |b| b.iter(EncryptionKey::generate));
 }
 
 /// Benchmark hash verification

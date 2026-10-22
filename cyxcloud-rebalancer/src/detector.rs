@@ -461,9 +461,11 @@ mod tests {
 
     #[test]
     fn test_scan_result_summary() {
-        let mut result = ScanResult::default();
-        result.total_scanned = 100;
-        result.duration = Duration::from_millis(500);
+        let mut result = ScanResult {
+            total_scanned: 100,
+            duration: Duration::from_millis(500),
+            ..Default::default()
+        };
         result.under_replicated.push(ChunkIssue {
             chunk_id: vec![1, 2, 3],
             health: ChunkHealth::UnderReplicated {

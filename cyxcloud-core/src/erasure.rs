@@ -345,8 +345,8 @@ mod tests {
 
         // Remove 5 shards (one more than maximum)
         let mut shard_opts: Vec<Option<ShardData>> = shards.into_iter().map(Some).collect();
-        for i in 0..5 {
-            shard_opts[i] = None;
+        for slot in shard_opts.iter_mut().take(5) {
+            *slot = None;
         }
 
         // Should fail

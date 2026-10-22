@@ -73,7 +73,7 @@ fn bench_get_latency(c: &mut Criterion) {
     ] {
         // Pre-populate with data
         let data = Bytes::from(generate_data(size));
-        let ids: Vec<ChunkId> = (0..100).map(|i| generate_chunk_id(i)).collect();
+        let ids: Vec<ChunkId> = (0..100).map(generate_chunk_id).collect();
         for id in &ids {
             backend.put(*id, data.clone()).unwrap();
         }
@@ -140,7 +140,7 @@ fn bench_read_throughput(c: &mut Criterion) {
 
     let data = Bytes::from(generate_data(chunk_size));
     let ids: Vec<ChunkId> = (0..chunks_per_iter as u64)
-        .map(|i| generate_chunk_id(i))
+        .map(generate_chunk_id)
         .collect();
 
     for id in &ids {
@@ -173,7 +173,7 @@ fn bench_mixed_workload(c: &mut Criterion) {
     let data = Bytes::from(generate_data(chunk_size));
 
     // Pre-populate with some data
-    let pre_ids: Vec<ChunkId> = (0..100).map(|i| generate_chunk_id(i)).collect();
+    let pre_ids: Vec<ChunkId> = (0..100).map(generate_chunk_id).collect();
     for id in &pre_ids {
         backend.put(*id, data.clone()).unwrap();
     }
@@ -224,7 +224,7 @@ fn bench_memory_backend(c: &mut Criterion) {
     });
 
     // Pre-populate for read test
-    let ids: Vec<ChunkId> = (10000..10100).map(|i| generate_chunk_id(i)).collect();
+    let ids: Vec<ChunkId> = (10000..10100).map(generate_chunk_id).collect();
     for id in &ids {
         backend.put(*id, data.clone()).unwrap();
     }
@@ -282,8 +282,8 @@ fn bench_exists(c: &mut Criterion) {
 
     // Pre-populate
     let data = Bytes::from_static(b"test data");
-    let existing_ids: Vec<ChunkId> = (0..100).map(|i| generate_chunk_id(i)).collect();
-    let missing_ids: Vec<ChunkId> = (1000..1100).map(|i| generate_chunk_id(i)).collect();
+    let existing_ids: Vec<ChunkId> = (0..100).map(generate_chunk_id).collect();
+    let missing_ids: Vec<ChunkId> = (1000..1100).map(generate_chunk_id).collect();
 
     for id in &existing_ids {
         backend.put(*id, data.clone()).unwrap();

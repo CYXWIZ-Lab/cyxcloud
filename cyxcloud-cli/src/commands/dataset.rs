@@ -160,7 +160,7 @@ pub async fn list_public(client: &GatewayClient, config: ListPublicConfig) -> Re
             "{:<20}  {:<10}  {:<15}  {:<30}  {}",
             truncate(&dataset.name, 20),
             truncate(&dataset.version, 10),
-            truncate(&dataset.license.as_deref().unwrap_or("-"), 15),
+            truncate(dataset.license.as_deref().unwrap_or("-"), 15),
             truncate(&verified_by, 30),
             cached_icon
         ))?;

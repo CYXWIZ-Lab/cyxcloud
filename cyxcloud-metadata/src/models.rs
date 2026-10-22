@@ -910,7 +910,7 @@ pub struct DatasetShare {
 
 impl DatasetShare {
     pub fn is_valid(&self) -> bool {
-        self.expires_at.map_or(true, |exp| exp > Utc::now())
+        self.expires_at.is_none_or(|exp| exp > Utc::now())
     }
 
     pub fn can_read(&self) -> bool {
