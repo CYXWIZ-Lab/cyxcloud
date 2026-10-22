@@ -1,75 +1,111 @@
 name: CI
 
+# Every branch and every pull request: a branch that is never built is a
+# branch nobody can trust (TOFIX175 step 2).
 on:
   push:
-    branches: [main]
+    branches: ["**"]
+    tags-ignore: ["v*"]   # tags go through release.yml
   pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUSTFLAGS: "-D warnings"
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
-    name: Test
-    runs-on: ubuntu-latest
+    name: Build and test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install dependencies
+      - name: Install build dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libssl-dev pkg-config protobuf-compiler
+          sudo apt-get install -y libssl-dev pkg-config protobuf-compiler clang
+
+      - name: Install build dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install protobuf
+
+      - name: Install build dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: choco install protoc --no-progress -y
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          shared-key: ci-${{ matrix.os }}
 
       - name: Build
-        run: cargo build --workspace
+        run: cargo build --workspace --locked
 
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
 
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-
-      - name: Install dependencies
+      - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libssl-dev pkg-config protobuf-compiler
-
+          sudo apt-get install -y libssl-dev pkg-config protobuf-compiler clang
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-ubuntu-latest
       - name: Clippy
-        run: cargo clippy --workspace -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   fmt:
     name: Format
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-
       - name: Check formatting
         run: cargo fmt --all -- --check
+
+  # Advisories are reported on every run but do not fail the build yet: on
+  # 2026-10-22 the lock file carried 53 known vulnerabilities (old rustls,
+  # quinn-proto, aws-lc-sys, sqlx 0.7, curve25519-dalek 3 ...). The dependency
+  # refresh is TOFIX175 step 7; when it lands, remove `continue-on-error`.
+  audit:
+    name: Security advisories (cargo audit, advisory only until TOFIX175 step 7)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  deny:
+    name: Licences, bans, sources (cargo deny)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses bans sources
+          arguments: --all-features
