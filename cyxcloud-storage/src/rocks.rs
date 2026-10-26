@@ -251,17 +251,8 @@ impl StorageBackendSync for RocksDbBackend {
         let read_latency_total = self.read_latency_total_us.load(Ordering::Relaxed);
         let write_latency_total = self.write_latency_total_us.load(Ordering::Relaxed);
 
-        let avg_read_latency_us = if reads > 0 {
-            read_latency_total / reads
-        } else {
-            0
-        };
-
-        let avg_write_latency_us = if writes > 0 {
-            write_latency_total / writes
-        } else {
-            0
-        };
+        let avg_read_latency_us = read_latency_total.checked_div(reads).unwrap_or(0);
+        let avg_write_latency_us = write_latency_total.checked_div(writes).unwrap_or(0);
 
         let stats = StorageStats {
             chunk_count,
