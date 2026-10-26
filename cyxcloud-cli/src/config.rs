@@ -229,15 +229,6 @@ pub fn save_config(config: &CyxCloudConfig) -> Result<()> {
     Ok(())
 }
 
-/// Create a default config file if it doesn't exist
-pub fn ensure_config_exists() -> Result<()> {
-    let path = config_file_path()?;
-    if !path.exists() {
-        save_config(&CyxCloudConfig::default())?;
-    }
-    Ok(())
-}
-
 /// Load user credentials from file
 pub fn load_credentials() -> Result<Option<Credentials>> {
     let path = credentials_file_path()?;

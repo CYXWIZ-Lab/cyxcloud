@@ -36,13 +36,38 @@ See `node.md`: `cyxcloud node init | start | stop | status | logs`.
 on this machine, and says what to do; exit codes 0 / 1 (you) / 2 (network or
 server).
 
-## Data
+## Datasets
 
-`upload`, `download`, `list`, `delete`, `status` and `dataset ...` are the
-older bucket/key commands on the gateway's S3 and REST APIs. They are being
-replaced by `cyxcloud dataset put | ls | get | info | rm | share` (TOFIX177
-slice 2), the same objects the Engine's Data Input > CyxCloud shows.
+```
+cyxcloud dataset put <FILE|FOLDER>... --name NAME [--description D]
+cyxcloud dataset ls [--shared] [--public] [--filter TEXT]
+cyxcloud dataset info NAME|ID
+cyxcloud dataset get NAME|ID [-o DIR]
+cyxcloud dataset rm NAME|ID [--force]
+cyxcloud dataset verify ID | share ID --with EMAIL
+cyxcloud token create NAME|ID [--ttl 1h]
+```
 
-Known gaps (TOFIX177 slice 2): `cyxcloud register` calls a route the CyxWiz API
-does not have (accounts are created on the web); `logout` only forgets the
-local sign-in (the API has no logout route).
+- These are the same datasets the Engine shows under Data Input > CyxCloud:
+  both use the gateway's gRPC dataset service.
+- `put` uploads each file (every file directly in a folder) in 1 MB pieces with
+  its BLAKE3 hash; the gateway checks the bytes against it, then the files
+  become one dataset.
+- `get` streams each file and checks it against the gateway's SHA-256 before
+  it is moved into place (`*.partial` until then). A file name the server sends
+  is reduced to its last part, so it cannot write outside the folder.
+- A dataset is named by its name or by its id (the first 8 characters are
+  enough when they are unique).
+- `rm` asks first in a terminal; scripts pass `--force`.
+- `token create` prints only the token on stdout (the rest on stderr), for a
+  training node; lifetime 1 minute to 30 days.
+- `verify` and `share` still use the gateway's REST API (share takes an email
+  address).
+
+The older bucket and key commands (`upload`, `download`, `list`, `delete`,
+`status`) are gone: they used the gateway's S3 API, which has no
+authentication yet (TOFIX171). `cyxcloud doctor` replaces `status`.
+
+`register` creates the account through the API (POST /api/users) and then
+signs in; `logout` forgets the local sign-in (the API has no logout route; the
+token expires on its own).

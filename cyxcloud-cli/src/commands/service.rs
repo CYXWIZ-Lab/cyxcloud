@@ -66,6 +66,7 @@ fn systemd_quote(s: &str) -> String {
 }
 
 /// The launchd agent for the node.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))] // used on macOS; tested everywhere
 pub fn launchd_plist(node_bin: &Path, config: &Path, log: &Path, workdir: &Path) -> String {
     let x = |p: &Path| xml_escape(&p.to_string_lossy());
     format!(
@@ -108,6 +109,7 @@ pub fn launchd_plist(node_bin: &Path, config: &Path, log: &Path, workdir: &Path)
     )
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")

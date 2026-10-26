@@ -143,19 +143,14 @@ pub async fn login(cyxwiz_client: &CyxWizClient, config: LoginConfig) -> Result<
     Ok(())
 }
 
-/// Run the logout command
-pub async fn logout(cyxwiz_client: &CyxWizClient) -> Result<()> {
+/// Run the logout command: forget the sign-in on this machine (the API has
+/// no logout route; the token expires on its own).
+pub async fn logout() -> Result<()> {
     // Load current credentials
-    let creds = match config::load_credentials()? {
-        Some(c) => c,
-        None => {
-            println!("{} Not logged in", style("!").yellow());
-            return Ok(());
-        }
-    };
-
-    // Attempt to revoke token on server (ignore errors)
-    let _ = cyxwiz_client.logout(&creds.access_token).await;
+    if config::load_credentials()?.is_none() {
+        println!("{} Not logged in", style("!").yellow());
+        return Ok(());
+    }
 
     // Delete local credentials
     config::delete_credentials()?;
@@ -285,8 +280,9 @@ pub async fn register(cyxwiz_client: &CyxWizClient, config: RegisterConfig) -> R
         .await
         .map_err(|e| anyhow::anyhow!("Registration failed: {}", e))?;
 
-    // Calculate expiration time (default 24 hours)
-    let expires_at = chrono::Utc::now().timestamp() + 86400;
+    // The token says when it expires; 24 h if it does not
+    let expires_at = crate::server::jwt_expiry(&auth.token)
+        .unwrap_or_else(|| chrono::Utc::now().timestamp() + 86400);
 
     // Save credentials
     let credentials = Credentials {

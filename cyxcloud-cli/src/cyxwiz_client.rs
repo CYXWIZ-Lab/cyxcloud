@@ -24,9 +24,6 @@ pub enum CyxWizError {
 
     #[error("API error: {status} - {message}")]
     Api { status: u16, message: String },
-
-    #[error("Invalid response: {0}")]
-    InvalidResponse(String),
 }
 
 pub type Result<T> = std::result::Result<T, CyxWizError>;
@@ -38,13 +35,12 @@ pub struct LoginRequest {
     pub password: String,
 }
 
-/// Register request payload
+/// Register request payload (the API's POST /api/users)
 #[derive(Debug, Serialize)]
 pub struct RegisterRequest {
     pub email: String,
     pub password: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub username: Option<String>,
+    pub username: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 }
@@ -62,11 +58,6 @@ pub struct AuthUser {
     pub id: String,
     pub email: String,
     pub username: Option<String>,
-    pub name: Option<String>,
-    #[serde(rename = "cyxWallet")]
-    pub cyx_wallet: Option<CyxWallet>,
-    #[serde(rename = "externalWallet")]
-    pub external_wallet: Option<String>,
 }
 
 /// CyxWallet info
@@ -74,14 +65,11 @@ pub struct AuthUser {
 pub struct CyxWallet {
     #[serde(rename = "publicKey")]
     pub public_key: String,
-    #[serde(rename = "createdAt")]
-    pub created_at: Option<String>,
 }
 
 /// User profile response (from the API's /api/users/me)
 #[derive(Debug, Deserialize)]
 pub struct UserProfile {
-    pub id: String,
     pub email: String,
     pub username: Option<String>,
     pub name: Option<String>,
@@ -89,12 +77,6 @@ pub struct UserProfile {
     pub cyx_wallet: Option<CyxWallet>,
     #[serde(rename = "externalWallet")]
     pub external_wallet: Option<String>,
-}
-
-/// Refresh token request
-#[derive(Debug, Serialize)]
-pub struct RefreshRequest {
-    pub refresh_token: String,
 }
 
 /// CyxWiz API client
@@ -146,19 +128,22 @@ impl CyxWizClient {
         }
     }
 
-    /// Register a new account
+    /// Register a new account (the API's POST /api/users), then sign in:
+    /// creating a user returns the user, not a token.
     pub async fn register(
         &self,
         email: &str,
         password: &str,
         username: Option<&str>,
     ) -> Result<AuthResponse> {
-        let url = format!("{}/api/auth/register", self.base_url);
+        let url = format!("{}/api/users", self.base_url);
 
         let request = RegisterRequest {
             email: email.to_string(),
             password: password.to_string(),
-            username: username.map(|s| s.to_string()),
+            username: username
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| email.split('@').next().unwrap_or(email).to_string()),
             name: None,
         };
 
@@ -167,36 +152,9 @@ impl CyxWizClient {
         let status = response.status();
 
         if status.is_success() {
-            let auth: AuthResponse = response.json().await?;
-            Ok(auth)
+            self.login(email, password).await
         } else if status.as_u16() == 409 {
             Err(CyxWizError::EmailAlreadyExists)
-        } else {
-            let message = response.text().await.unwrap_or_default();
-            Err(CyxWizError::Api {
-                status: status.as_u16(),
-                message,
-            })
-        }
-    }
-
-    /// Refresh access token
-    pub async fn refresh_token(&self, refresh_token: &str) -> Result<AuthResponse> {
-        let url = format!("{}/api/auth/refresh", self.base_url);
-
-        let request = RefreshRequest {
-            refresh_token: refresh_token.to_string(),
-        };
-
-        let response = self.client.post(&url).json(&request).send().await?;
-
-        let status = response.status();
-
-        if status.is_success() {
-            let auth: AuthResponse = response.json().await?;
-            Ok(auth)
-        } else if status.as_u16() == 401 {
-            Err(CyxWizError::InvalidCredentials)
         } else {
             let message = response.text().await.unwrap_or_default();
             Err(CyxWizError::Api {
@@ -224,30 +182,6 @@ impl CyxWizClient {
             Ok(profile)
         } else if status.as_u16() == 401 {
             Err(CyxWizError::InvalidCredentials)
-        } else {
-            let message = response.text().await.unwrap_or_default();
-            Err(CyxWizError::Api {
-                status: status.as_u16(),
-                message,
-            })
-        }
-    }
-
-    /// Logout (revoke token)
-    pub async fn logout(&self, token: &str) -> Result<()> {
-        let url = format!("{}/api/auth/logout", self.base_url);
-
-        let response = self
-            .client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", token))
-            .send()
-            .await?;
-
-        let status = response.status();
-
-        if status.is_success() || status.as_u16() == 204 {
-            Ok(())
         } else {
             let message = response.text().await.unwrap_or_default();
             Err(CyxWizError::Api {

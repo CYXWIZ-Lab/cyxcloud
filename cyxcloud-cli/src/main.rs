@@ -7,11 +7,8 @@
 //! - `logout` - Logout from CyxCloud
 //! - `whoami` - Show current user profile
 //! - `register` - Register a new account
-//! - `upload` - Upload a file or directory
-//! - `download` - Download a file or directory
-//! - `list` - List stored files
-//! - `delete` - Delete a file from storage
-//! - `status` - Show storage status
+//! - `dataset put | ls | get | info | rm | verify | share` - Datasets
+//! - `token create` - A dataset access token for a training node
 //! - `config` - Show or edit configuration
 //! - `node` - Set up and run a storage node on this machine
 //! - `doctor` - Check the connection to the server and the node
@@ -20,13 +17,14 @@
 //! Config file: ~/.cyxcloud/config.toml
 //! Credentials: ~/.cyxcloud/credentials.json
 
-#![allow(dead_code)]
+// (dead code is not allowed: no orphans)
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 mod client;
+mod cloud;
 mod commands;
 mod config;
 mod cyxwiz_client;
@@ -34,7 +32,7 @@ mod server;
 mod symbols;
 
 use client::{GatewayClient, TlsConfig};
-use commands::{auth, dataset, delete, doctor, download, list, node, service, status, upload};
+use commands::{auth, dataset, datasets, doctor, node, service};
 use cyxwiz_client::CyxWizClient;
 
 #[derive(Parser)]
@@ -106,95 +104,12 @@ enum Commands {
         username: Option<String>,
     },
 
-    /// Upload a file or directory to storage
-    Upload {
-        /// Path to file or directory
-        path: String,
-
-        /// Target bucket name
-        #[arg(short, long, default_value = "default")]
-        bucket: String,
-
-        /// Key prefix for uploaded files
-        #[arg(short, long)]
-        prefix: Option<String>,
-
-        /// Enable encryption (not yet implemented)
-        #[arg(short, long)]
-        encrypt: bool,
-    },
-
-    /// Download a file or directory from storage
-    Download {
-        /// Bucket name
-        bucket: String,
-
-        /// Object key (if not provided, downloads all with prefix)
-        #[arg(short, long)]
-        key: Option<String>,
-
-        /// Key prefix for bulk download
-        #[arg(long)]
-        prefix: Option<String>,
-
-        /// Output path (file or directory)
-        #[arg(short, long, default_value = ".")]
-        output: String,
-    },
-
-    /// List objects in a bucket
-    List {
-        /// Bucket name
-        bucket: String,
-
-        /// Filter by prefix
-        #[arg(short, long)]
-        prefix: Option<String>,
-
-        /// Show detailed information
-        #[arg(short, long)]
-        long: bool,
-
-        /// Human-readable sizes
-        #[arg(short = 'H', long)]
-        human_readable: bool,
-
-        /// Maximum number of keys to return
-        #[arg(long)]
-        max_keys: Option<i32>,
-    },
-
-    /// Show storage status
-    Status {
-        /// Show specific bucket status
-        #[arg(short, long)]
-        bucket: Option<String>,
-
-        /// Show verbose output
-        #[arg(short, long)]
-        verbose: bool,
-    },
-
-    /// Delete an object from storage
-    Delete {
-        /// Bucket name
-        bucket: String,
-
-        /// Object key to delete
-        key: String,
-
-        /// Delete without confirmation
-        #[arg(short, long)]
-        force: bool,
-    },
-
     /// Show or initialize configuration
     Config {
         #[command(subcommand)]
         command: Option<ConfigCommands>,
     },
 
-    /// Dataset management commands
     /// Set up and run a storage node on this machine (offer disk space)
     Node {
         #[command(subcommand)]
@@ -204,48 +119,69 @@ enum Commands {
     /// Check the connection to the server, the sign-in and the node
     Doctor,
 
+    /// Your datasets: put, ls, get, info, rm, verify, share
     Dataset {
         #[command(subcommand)]
         command: DatasetCommands,
+    },
+
+    /// Dataset access tokens (what a training node streams with)
+    Token {
+        #[command(subcommand)]
+        command: TokenCommands,
     },
 }
 
 #[derive(Subcommand)]
 enum DatasetCommands {
+    /// Upload files (or every file in a folder) as one dataset
+    Put {
+        /// Files or folders
+        #[arg(required = true)]
+        paths: Vec<PathBuf>,
+        /// Dataset name (what the Engine shows)
+        #[arg(short, long)]
+        name: String,
+        /// Description
+        #[arg(short, long)]
+        description: Option<String>,
+    },
+
     /// List your datasets
-    List {
+    Ls {
         /// Include datasets shared with you
         #[arg(short, long)]
         shared: bool,
-
-        /// Maximum number of datasets to return
-        #[arg(long, default_value = "100")]
-        limit: i32,
-    },
-
-    /// List public datasets (MNIST, CIFAR, ImageNet, etc.)
-    ListPublic {
-        /// Filter by name
+        /// Public datasets (MNIST, CIFAR, ...) instead
+        #[arg(long)]
+        public: bool,
+        /// Only names containing this
         #[arg(short, long)]
         filter: Option<String>,
     },
 
-    /// Create a dataset from uploaded files
-    Create {
-        /// Dataset name
-        name: String,
+    /// Download a dataset's files (each one SHA-256 verified)
+    Get {
+        /// Dataset name or id
+        dataset: String,
+        /// Folder to write into
+        #[arg(short, long, default_value = ".")]
+        output: PathBuf,
+    },
 
-        /// Description
+    /// Show a dataset and its files
+    Info {
+        /// Dataset name or id
+        dataset: String,
+    },
+
+    /// Remove a dataset
+    Rm {
+        /// Dataset name or id
+        dataset: String,
+        /// Do not ask
         #[arg(short, long)]
-        description: Option<String>,
-
-        /// Source bucket
-        #[arg(short, long, default_value = "default")]
-        bucket: String,
-
-        /// File prefix filter
-        #[arg(short, long)]
-        prefix: Option<String>,
+        force: bool,
     },
 
     /// Verify dataset integrity
@@ -275,11 +211,17 @@ enum DatasetCommands {
         #[arg(short, long, default_value = "read,stream")]
         permissions: String,
     },
+}
 
-    /// Show dataset information
-    Info {
-        /// Dataset ID
-        dataset_id: String,
+#[derive(Subcommand)]
+enum TokenCommands {
+    /// A read+stream access token for a dataset; prints only the token
+    Create {
+        /// Dataset name or id
+        dataset: String,
+        /// Lifetime: 15m, 1h, 2d (1 minute to 30 days)
+        #[arg(long, default_value = "1h")]
+        ttl: String,
     },
 }
 
@@ -389,6 +331,7 @@ async fn main() -> Result<()> {
     let cfg = config::load_config();
 
     // CLI args override config file
+    let grpc_url = cfg.gateway.grpc_url.clone();
     let gateway_url = cli.gateway.unwrap_or(cfg.gateway.http_url);
     let api_url = cli.api_url.unwrap_or(cfg.auth.api_url);
 
@@ -411,7 +354,7 @@ async fn main() -> Result<()> {
     };
 
     // Create gateway client with auth token and optional TLS
-    let client = GatewayClient::with_tls(&gateway_url, auth_token.clone(), tls_config);
+    let client = GatewayClient::with_tls(&gateway_url, auth_token.clone(), tls_config)?;
 
     match cli.command {
         // Auth commands
@@ -429,7 +372,7 @@ async fn main() -> Result<()> {
         }
 
         Commands::Logout => {
-            auth::logout(&cyxwiz_client).await?;
+            auth::logout().await?;
         }
 
         Commands::Whoami => {
@@ -439,69 +382,6 @@ async fn main() -> Result<()> {
         Commands::Register { email, username } => {
             let config = auth::RegisterConfig { email, username };
             auth::register(&cyxwiz_client, config).await?;
-        }
-
-        // Storage commands (require auth)
-        Commands::Upload {
-            path,
-            bucket,
-            prefix,
-            encrypt,
-        } => {
-            require_auth(&auth_token)?;
-            let config = upload::UploadConfig {
-                path,
-                bucket,
-                prefix,
-                encrypt,
-            };
-            upload::run(&client, config).await?;
-        }
-
-        Commands::Download {
-            bucket,
-            key,
-            prefix,
-            output,
-        } => {
-            require_auth(&auth_token)?;
-            let config = download::DownloadConfig {
-                bucket,
-                key,
-                output,
-                prefix,
-            };
-            download::run(&client, config).await?;
-        }
-
-        Commands::List {
-            bucket,
-            prefix,
-            long,
-            human_readable,
-            max_keys,
-        } => {
-            require_auth(&auth_token)?;
-            let config = list::ListConfig {
-                bucket,
-                prefix,
-                long_format: long,
-                human_readable,
-                max_keys,
-            };
-            list::run(&client, config).await?;
-        }
-
-        Commands::Status { bucket, verbose } => {
-            // Status doesn't require auth (health check)
-            let config = status::StatusConfig { bucket, verbose };
-            status::run(&client, config).await?;
-        }
-
-        Commands::Delete { bucket, key, force } => {
-            require_auth(&auth_token)?;
-            let config = delete::DeleteConfig { bucket, key, force };
-            delete::run(&client, config).await?;
         }
 
         Commands::Config { command } => {
@@ -547,34 +427,6 @@ async fn main() -> Result<()> {
         Commands::Dataset { command } => {
             require_auth(&auth_token)?;
             match command {
-                DatasetCommands::List { shared, limit } => {
-                    let config = dataset::ListConfig {
-                        include_shared: shared,
-                        limit,
-                    };
-                    dataset::list(&client, config).await?;
-                }
-                DatasetCommands::ListPublic { filter } => {
-                    let config = dataset::ListPublicConfig {
-                        name_filter: filter,
-                    };
-                    dataset::list_public(&client, config).await?;
-                }
-                DatasetCommands::Create {
-                    name,
-                    description,
-                    bucket,
-                    prefix,
-                } => {
-                    let config = dataset::CreateConfig {
-                        name,
-                        description,
-                        file_ids: vec![],
-                        bucket,
-                        prefix,
-                    };
-                    dataset::create(&client, config).await?;
-                }
                 DatasetCommands::Verify {
                     dataset_id,
                     check_public,
@@ -602,9 +454,45 @@ async fn main() -> Result<()> {
                     };
                     dataset::share(&client, config).await?;
                 }
-                DatasetCommands::Info { dataset_id } => {
-                    let config = dataset::InfoConfig { dataset_id };
-                    dataset::info(&client, config).await?;
+                other => {
+                    let cloud =
+                        cloud::Cloud::connect(&grpc_url, auth_token.as_deref().unwrap_or(""))
+                            .await?;
+                    match other {
+                        DatasetCommands::Put {
+                            paths,
+                            name,
+                            description,
+                        } => datasets::put(&cloud, paths, name, description).await?,
+                        DatasetCommands::Ls {
+                            shared,
+                            public,
+                            filter,
+                        } => datasets::ls(&cloud, shared, public, filter).await?,
+                        DatasetCommands::Get { dataset, output } => {
+                            datasets::get(&cloud, &dataset, output).await?
+                        }
+                        DatasetCommands::Info { dataset } => {
+                            datasets::info(&cloud, &dataset).await?
+                        }
+                        DatasetCommands::Rm { dataset, force } => {
+                            datasets::rm(&cloud, &dataset, force).await?
+                        }
+                        DatasetCommands::Verify { .. } | DatasetCommands::Share { .. } => {
+                            unreachable!("handled above")
+                        }
+                    }
+                }
+            }
+        }
+
+        Commands::Token { command } => {
+            require_auth(&auth_token)?;
+            let cloud =
+                cloud::Cloud::connect(&grpc_url, auth_token.as_deref().unwrap_or("")).await?;
+            match command {
+                TokenCommands::Create { dataset, ttl } => {
+                    datasets::token_create(&cloud, &dataset, &ttl).await?
                 }
             }
         }
