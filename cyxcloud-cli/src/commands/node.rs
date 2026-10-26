@@ -7,6 +7,7 @@
 //! - node.pid, node.log   the running daemon (`cyxcloud node start`)
 //! - ~/.cyxcloud/node_credentials.json   the account the node earns for
 
+use crate::commands::service;
 use crate::config;
 use crate::server::{self, human_bytes, human_duration};
 use crate::symbols;
@@ -273,7 +274,7 @@ fn configured_status_port() -> Result<u16> {
 // Processes (our own pid file only; the image name is checked before a kill)
 // ============================================================================
 
-fn read_pid() -> Option<u32> {
+pub fn read_pid() -> Option<u32> {
     std::fs::read_to_string(pid_path().ok()?)
         .ok()?
         .trim()
@@ -282,7 +283,7 @@ fn read_pid() -> Option<u32> {
 }
 
 /// True when `pid` is a running cyxcloud-node.
-fn is_our_node(pid: u32) -> bool {
+pub fn is_our_node(pid: u32) -> bool {
     #[cfg(windows)]
     {
         std::process::Command::new("tasklist")
@@ -330,7 +331,7 @@ fn kill(pid: u32, force: bool) -> Result<()> {
 }
 
 /// The cyxcloud-node binary: CYXCLOUD_NODE_BIN, next to this cyxcloud, or on PATH.
-fn node_binary() -> PathBuf {
+pub fn node_binary() -> PathBuf {
     if let Ok(path) = std::env::var("CYXCLOUD_NODE_BIN") {
         return PathBuf::from(path);
     }
@@ -515,6 +516,14 @@ pub async fn start(foreground: bool) -> Result<()> {
         return Ok(());
     }
 
+    if !foreground && service::start_via_service()? {
+        println!(
+            "{} Starting the node through its start-at-boot service",
+            style("*").blue()
+        );
+        return wait_until_registered(port, None).await;
+    }
+
     let binary = node_binary();
     if foreground {
         let status = std::process::Command::new(&binary)
@@ -576,10 +585,18 @@ pub async fn start(foreground: bool) -> Result<()> {
         log.display()
     );
 
-    // Wait until it answers and has registered, or say why not
+    wait_until_registered(port, Some(&mut child)).await
+}
+
+/// Wait until the node answers and has registered, or say why not.
+async fn wait_until_registered(
+    port: u16,
+    mut child: Option<&mut std::process::Child>,
+) -> Result<()> {
+    let log = log_path()?;
     let deadline = std::time::Instant::now() + Duration::from_secs(120);
     loop {
-        if let Ok(Some(code)) = child.try_wait() {
+        if let Some(Ok(Some(code))) = child.as_mut().map(|c| c.try_wait()) {
             let _ = std::fs::remove_file(pid_path()?);
             eprintln!(
                 "{} The node stopped right away ({}). Last log lines:",
@@ -625,6 +642,13 @@ pub async fn start(foreground: bool) -> Result<()> {
 /// `cyxcloud node stop`
 pub async fn stop() -> Result<()> {
     let port = configured_status_port()?;
+    if service::stop_via_service()? {
+        println!(
+            "{} Node stopped (its start-at-boot service starts it again at the next boot or login)",
+            style(symbols::CHECK).green()
+        );
+        return Ok(());
+    }
     let Some(pid) = read_pid() else {
         if fetch_status(port).await.is_some() {
             bail!("a node is running but was not started by `cyxcloud node start` (no pid file); stop it where it was started");
@@ -681,6 +705,17 @@ pub async fn status(watch: bool, json: bool) -> Result<()> {
                         println!("  {:<11} {}", style(label).dim(), value);
                     }
                 }
+                let boot = match service::installed() {
+                    Some(service::Installed::Systemd) => {
+                        "yes (systemd user unit, restarts on failure)"
+                    }
+                    Some(service::Installed::Launchd) => {
+                        "at login (launchd agent, restarts on failure)"
+                    }
+                    Some(service::Installed::WindowsRunKey) => "at logon (Run key)",
+                    None => "no · cyxcloud node service install",
+                };
+                println!("  {:<11} {}", style("at boot").dim(), boot);
             }
             None => {
                 println!(

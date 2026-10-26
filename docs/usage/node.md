@@ -83,11 +83,25 @@ registered, its port accepting connections, offer against free space). Exit
 code 0 all good (warnings allowed), 1 something for you to do, 2 the network or
 the server.
 
+### `cyxcloud node service install | uninstall`
+
+Start the node with the machine. No administrator rights are needed on any OS.
+
+| OS | What is installed | Starts | Restarts on failure |
+| --- | --- | --- | --- |
+| Linux | systemd user unit `~/.config/systemd/user/cyxcloud-node.service` | at boot when lingering is on (`loginctl enable-linger`, tried automatically; else `sudo loginctl enable-linger $USER`), otherwise at login | yes, after 10 s |
+| macOS | launchd agent `~/Library/LaunchAgents/ai.cyxwiz.cyxcloud-node.plist` | at login | yes (KeepAlive) |
+| Windows | Run key value `CyxCloud Node` under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, running `cyxcloud node start` | at logon | no (`cyxcloud node start` again) |
+
+Once a systemd unit or launchd agent is installed, `cyxcloud node start` and
+`stop` go through it. `node status` shows how the node starts (`at boot`).
+On Windows, a scheduled logon task or a real Windows service would need
+administrator rights (and, for a service, a service control handler in the
+daemon); install prints the `netsh` line that opens the node's port for
+other machines, to run as administrator.
+
 ## Not there yet (TOFIX177 slice 2)
 
-- `cyxcloud node service install` (systemd, launchd, Windows service) to start
-  at boot. Until then: `cyxcloud node start` after a reboot, or the daemon
-  section of `architecture.md`.
 - `cyxcloud node upgrade` (signed releases, TOFIX175).
 - Reputation, audits and earnings in `node status` (TOFIX176 P4, P8).
 - Long-lived machine sign-in: the node registers its machine with the

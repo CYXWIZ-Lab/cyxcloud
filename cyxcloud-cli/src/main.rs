@@ -34,7 +34,7 @@ mod server;
 mod symbols;
 
 use client::{GatewayClient, TlsConfig};
-use commands::{auth, dataset, delete, doctor, download, list, node, status, upload};
+use commands::{auth, dataset, delete, doctor, download, list, node, service, status, upload};
 use cyxwiz_client::CyxWizClient;
 
 #[derive(Parser)]
@@ -325,6 +325,11 @@ enum NodeCommands {
         #[arg(long)]
         json: bool,
     },
+    /// Start the node with the machine (systemd, launchd, or the Windows Run key)
+    Service {
+        #[command(subcommand)]
+        command: ServiceCommands,
+    },
     /// Show the node's log
     Logs {
         /// Lines to show
@@ -334,6 +339,14 @@ enum NodeCommands {
         #[arg(short, long)]
         follow: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum ServiceCommands {
+    /// Start the node at boot (Linux), at login (macOS) or at logon (Windows)
+    Install,
+    /// Stop starting the node with the machine
+    Uninstall,
 }
 
 #[derive(Subcommand)]
@@ -520,6 +533,10 @@ async fn main() -> Result<()> {
             NodeCommands::Stop => node::stop().await?,
             NodeCommands::Status { watch, json } => node::status(watch, json).await?,
             NodeCommands::Logs { lines, follow } => node::logs(lines, follow).await?,
+            NodeCommands::Service { command } => match command {
+                ServiceCommands::Install => service::install().await?,
+                ServiceCommands::Uninstall => service::uninstall().await?,
+            },
         },
 
         Commands::Doctor => {
