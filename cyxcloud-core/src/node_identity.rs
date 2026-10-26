@@ -60,8 +60,7 @@ impl NodeKey {
         }
     }
 
-    /// Load the key at `path`, or generate one and save it there (owner-only on
-    /// Unix). The file holds the 32-byte seed as 64 hex characters.
+    /// Load the key at `path`, or generate one and save it there (owner-only). The file holds the 32-byte seed as 64 hex characters.
     pub fn load_or_generate(path: &Path) -> Result<Self, NodeIdentityError> {
         if path.exists() {
             return Self::load(path);
@@ -85,22 +84,13 @@ impl NodeKey {
         Ok(Self::from_seed(&seed))
     }
 
-    /// Save the seed at `path` as hex, owner-only where the OS supports it.
+    /// Save the seed at `path` as hex, readable by the owner only (every OS).
     pub fn save(&self, path: &Path) -> Result<(), NodeIdentityError> {
-        let io = |source| NodeIdentityError::Io {
-            path: path.display().to_string(),
-            source,
-        };
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(io)?;
-        }
-        std::fs::write(path, encode_hex(self.signing.to_bytes().as_ref())).map_err(io)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(io)?;
-        }
-        Ok(())
+        crate::owner_only::write_owner_only(path, encode_hex(self.signing.to_bytes().as_ref()))
+            .map_err(|source| NodeIdentityError::Io {
+                path: path.display().to_string(),
+                source,
+            })
     }
 
     /// The public key, 32 bytes.
@@ -189,7 +179,7 @@ impl RegistrationProof<'_> {
 }
 
 /// Load the node's access secret at `path`, or make one (32 random bytes as
-/// hex, owner-only on Unix). The node hands it to the gateway at registration
+/// hex, owner-only). The node hands it to the gateway at registration
 /// and accepts chunk RPCs that present it.
 pub fn load_or_generate_access_secret(path: &Path) -> Result<String, NodeIdentityError> {
     let io = |source| NodeIdentityError::Io {
@@ -207,15 +197,7 @@ pub fn load_or_generate_access_secret(path: &Path) -> Result<String, NodeIdentit
     let mut bytes = [0u8; 32];
     rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut bytes);
     let secret = encode_hex(&bytes);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(io)?;
-    }
-    std::fs::write(path, &secret).map_err(io)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(io)?;
-    }
+    crate::owner_only::write_owner_only(path, &secret).map_err(io)?;
     Ok(secret)
 }
 

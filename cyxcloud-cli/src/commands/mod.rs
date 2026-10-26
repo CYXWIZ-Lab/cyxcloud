@@ -3,8 +3,10 @@
 pub mod auth;
 pub mod dataset;
 pub mod delete;
+pub mod doctor;
 pub mod download;
 pub mod list;
+pub mod node;
 pub mod status;
 pub mod upload;
 

@@ -186,6 +186,8 @@ pub struct HeartbeatService {
     credentials_wallet: RwLock<Option<String>>,
     system: RwLock<System>,
     command_executor: CommandExecutor,
+    /// Shared with the metrics server's /status
+    health_state: Option<Arc<RwLock<HealthState>>>,
 }
 
 impl HeartbeatService {
@@ -245,7 +247,21 @@ impl HeartbeatService {
             credentials_wallet: RwLock::new(None),
             system: RwLock::new(system),
             command_executor,
+            health_state: None,
         })
+    }
+
+    /// Keep this state's status report current (registration, heartbeats,
+    /// storage, last error).
+    pub fn with_health_state(mut self, state: Arc<RwLock<HealthState>>) -> Self {
+        self.health_state = Some(state);
+        self
+    }
+
+    async fn note(&self, update: impl FnOnce(&mut crate::status::NodeStatusReport)) {
+        if let Some(state) = &self.health_state {
+            update(&mut state.write().await.report);
+        }
     }
 
     /// Set the JWT token for Gateway authentication
@@ -300,8 +316,23 @@ impl HeartbeatService {
 
         // Initial registration
         match self.register().await {
-            Ok(()) => info!(node_id = %self.node_id, "Initial registration successful"),
-            Err(e) => warn!(error = %e, "Failed initial registration with central server"),
+            Ok(()) => {
+                info!(node_id = %self.node_id, "Initial registration successful");
+                self.note(|r| {
+                    r.server.registered = true;
+                    r.server.last_error.clear();
+                })
+                .await;
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed initial registration with central server");
+                let text = format!("registration failed: {}", e);
+                self.note(|r| {
+                    r.server.registered = false;
+                    r.server.last_error = text;
+                })
+                .await;
+            }
         }
 
         loop {
@@ -311,6 +342,13 @@ impl HeartbeatService {
                 Ok(()) => {
                     self.metrics.record_heartbeat(true);
                     debug!(node_id = %self.node_id, "Heartbeat sent successfully");
+                    let now = chrono::Utc::now().timestamp();
+                    self.note(|r| {
+                        r.server.registered = true;
+                        r.server.last_heartbeat_unix = now;
+                        r.server.last_error.clear();
+                    })
+                    .await;
                 }
                 Err(e) => {
                     self.metrics.record_heartbeat(false);
@@ -320,8 +358,26 @@ impl HeartbeatService {
                         "Failed to send heartbeat, attempting re-registration"
                     );
                     // Try to re-register on heartbeat failure
-                    if let Err(reg_err) = self.register().await {
-                        warn!(error = %reg_err, "Re-registration also failed");
+                    match self.register().await {
+                        Ok(()) => {
+                            self.note(|r| {
+                                r.server.registered = true;
+                                r.server.last_error.clear();
+                            })
+                            .await
+                        }
+                        Err(reg_err) => {
+                            warn!(error = %reg_err, "Re-registration also failed");
+                            let text = format!(
+                                "heartbeat failed: {}; re-registration failed: {}",
+                                e, reg_err
+                            );
+                            self.note(|r| {
+                                r.server.registered = false;
+                                r.server.last_error = text;
+                            })
+                            .await;
+                        }
                     }
                 }
             }
@@ -524,6 +580,15 @@ impl HeartbeatService {
 
         // Get current stats
         let stats = self.storage.stats()?;
+        let (disk_free, disk_total) = crate::status::disk_space_for(&self.config.storage.data_dir);
+        self.note(|r| {
+            r.storage.used_bytes = stats.bytes_used;
+            r.storage.offered_bytes = stats.bytes_capacity;
+            r.storage.chunks = stats.chunk_count;
+            r.storage.disk_free_bytes = disk_free;
+            r.storage.disk_total_bytes = disk_total;
+        })
+        .await;
 
         // Collect system metrics (CPU and memory)
         let (cpu_usage, memory_usage) = {

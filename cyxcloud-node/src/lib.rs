@@ -20,6 +20,7 @@ pub mod datastream_client;
 pub mod health;
 pub mod machine_service;
 pub mod metrics;
+pub mod status;
 pub mod symbols;
 pub mod training_executor;
 pub mod verification;

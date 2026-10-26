@@ -1570,6 +1570,7 @@ name = "cyxcloud-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.21.7",
  "bytes",
  "chrono",
  "clap",
@@ -1584,6 +1585,7 @@ dependencies = [
  "rpassword",
  "serde",
  "serde_json",
+ "sysinfo",
  "thiserror 1.0.69",
  "tokio",
  "toml 0.8.23",
@@ -1613,6 +1615,7 @@ dependencies = [
  "rustls 0.22.4",
  "rustls-pemfile 2.2.0",
  "serde",
+ "serde_json",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",

@@ -13,6 +13,8 @@
 //! - `delete` - Delete a file from storage
 //! - `status` - Show storage status
 //! - `config` - Show or edit configuration
+//! - `node` - Set up and run a storage node on this machine
+//! - `doctor` - Check the connection to the server and the node
 //!
 //! # Configuration
 //! Config file: ~/.cyxcloud/config.toml
@@ -28,10 +30,11 @@ mod client;
 mod commands;
 mod config;
 mod cyxwiz_client;
+mod server;
 mod symbols;
 
 use client::{GatewayClient, TlsConfig};
-use commands::{auth, dataset, delete, download, list, status, upload};
+use commands::{auth, dataset, delete, doctor, download, list, node, status, upload};
 use cyxwiz_client::CyxWizClient;
 
 #[derive(Parser)]
@@ -75,6 +78,15 @@ enum Commands {
         /// Email address (will prompt if not provided)
         #[arg(short, long)]
         email: Option<String>,
+    
+        /// Server to sign in to (host name or IP, or an https:// address);
+        /// remembered for every later command
+        #[arg(long)]
+        server: Option<String>,
+
+        /// Read the password from this file's first line (for scripts)
+        #[arg(long)]
+        password_file: Option<PathBuf>,
     },
 
     /// Logout from CyxCloud
@@ -183,6 +195,15 @@ enum Commands {
     },
 
     /// Dataset management commands
+    /// Set up and run a storage node on this machine (offer disk space)
+    Node {
+        #[command(subcommand)]
+        command: NodeCommands,
+    },
+
+    /// Check the connection to the server, the sign-in and the node
+    Doctor,
+
     Dataset {
         #[command(subcommand)]
         command: DatasetCommands,
@@ -263,6 +284,59 @@ enum DatasetCommands {
 }
 
 #[derive(Subcommand)]
+enum NodeCommands {
+    /// Set this machine up as a storage node (where, how much, which account)
+    Init {
+        /// Folder for the shards
+        #[arg(long)]
+        data_dir: Option<PathBuf>,
+        /// Space offered, e.g. 700GB or 1TB
+        #[arg(long)]
+        offer: Option<String>,
+        /// Name shown in lists (default: this machine's host name)
+        #[arg(long)]
+        name: Option<String>,
+        /// Port the server dials for shards (default 50051)
+        #[arg(long)]
+        port: Option<u16>,
+        /// Local port for `cyxcloud node status` (default 9090)
+        #[arg(long)]
+        status_port: Option<u16>,
+        /// Address the server dials (default: this machine's address towards the server)
+        #[arg(long)]
+        public_address: Option<String>,
+        /// Set the node up again (the key and its id are kept)
+        #[arg(long)]
+        force: bool,
+    },
+    /// Start the node in the background (or in this terminal with --foreground)
+    Start {
+        #[arg(long)]
+        foreground: bool,
+    },
+    /// Stop the node started with `cyxcloud node start`
+    Stop,
+    /// Show what the node is doing
+    Status {
+        /// Refresh every 2 s
+        #[arg(long)]
+        watch: bool,
+        /// Print the raw report
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show the node's log
+    Logs {
+        /// Lines to show
+        #[arg(short = 'n', long, default_value = "50")]
+        lines: usize,
+        /// Keep printing new lines
+        #[arg(short, long)]
+        follow: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum ConfigCommands {
     /// Show current configuration
     Show,
@@ -328,8 +402,16 @@ async fn main() -> Result<()> {
 
     match cli.command {
         // Auth commands
-        Commands::Login { email } => {
-            let config = auth::LoginConfig { email };
+        Commands::Login {
+            email,
+            server,
+            password_file,
+        } => {
+            let config = auth::LoginConfig {
+                email,
+                server,
+                password_file,
+            };
             auth::login(&cyxwiz_client, config).await?;
         }
 
@@ -413,6 +495,38 @@ async fn main() -> Result<()> {
             handle_config_command(command)?;
         }
 
+        Commands::Node { command } => match command {
+            NodeCommands::Init {
+                data_dir,
+                offer,
+                name,
+                port,
+                status_port,
+                public_address,
+                force,
+            } => {
+                node::init(node::InitConfig {
+                    data_dir,
+                    offer,
+                    name,
+                    port,
+                    status_port,
+                    public_address,
+                    force,
+                })
+                .await?
+            }
+            NodeCommands::Start { foreground } => node::start(foreground).await?,
+            NodeCommands::Stop => node::stop().await?,
+            NodeCommands::Status { watch, json } => node::status(watch, json).await?,
+            NodeCommands::Logs { lines, follow } => node::logs(lines, follow).await?,
+        },
+
+        Commands::Doctor => {
+            let code = doctor::run(&cyxwiz_client).await?;
+            std::process::exit(code);
+        }
+
         Commands::Dataset { command } => {
             require_auth(&auth_token)?;
             match command {
@@ -490,6 +604,12 @@ fn handle_config_command(command: Option<ConfigCommands>) -> Result<()> {
             println!();
             println!("{}", style("CyxCloud Configuration").bold().underlined());
             println!();
+            println!("{}", style("[server]").cyan());
+            match &cfg.server.host {
+                Some(host) => println!("  host = \"{}\"", host),
+                None => println!("  (not set: cyxcloud login --server HOST)"),
+            }
+            println!();
             println!("{}", style("[gateway]").cyan());
             println!("  http_url = \"{}\"", cfg.gateway.http_url);
             println!("  grpc_url = \"{}\"", cfg.gateway.grpc_url);
@@ -549,6 +669,12 @@ fn handle_config_command(command: Option<ConfigCommands>) -> Result<()> {
             let mut cfg = config::load_config();
 
             match key.as_str() {
+                "server" => {
+                    cfg.set_server(&value).map_err(anyhow::Error::msg)?;
+                    println!("  gateway  {}", cfg.gateway.http_url);
+                    println!("  gRPC     {}", cfg.gateway.grpc_url);
+                    println!("  sign-in  {}", cfg.auth.api_url);
+                }
                 "gateway.http_url" => cfg.gateway.http_url = value,
                 "gateway.grpc_url" => cfg.gateway.grpc_url = value,
                 "auth.api_url" => cfg.auth.api_url = value,
@@ -556,7 +682,7 @@ fn handle_config_command(command: Option<ConfigCommands>) -> Result<()> {
                 "cli.default_bucket" => cfg.cli.default_bucket = Some(value),
                 _ => {
                     anyhow::bail!(
-                        "Unknown config key: {}. Valid keys: gateway.http_url, gateway.grpc_url, auth.api_url, blockchain.solana_rpc_url, cli.default_bucket",
+                        "Unknown config key: {}. Valid keys: server, gateway.http_url, gateway.grpc_url, auth.api_url, blockchain.solana_rpc_url, cli.default_bucket",
                         key
                     );
                 }

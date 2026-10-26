@@ -147,7 +147,7 @@ impl MachineService {
                 let config_dir = config::cyxcloud_config_dir();
                 std::fs::create_dir_all(&config_dir)?;
 
-                std::fs::write(&self.credentials_path, content)?;
+                cyxcloud_core::owner_only::write_owner_only(&self.credentials_path, content)?;
                 info!(
                     path = ?self.credentials_path,
                     node_id = %self.config.node.id,
@@ -443,8 +443,11 @@ impl MachineService {
             .filter(|(i, _)| *i == 0) // Just get the first CPU info (they're all the same model)
             .map(|(_, cpu)| CpuInfo {
                 name: cpu.brand().to_string(),
-                cores: sys.cpus().len() as u32,
-                threads: sys.cpus().len() as u32, // sysinfo doesn't distinguish cores/threads
+                cores: sys
+                    .physical_core_count()
+                    .map(|c| c as u32)
+                    .unwrap_or(sys.cpus().len() as u32),
+                threads: sys.cpus().len() as u32,
                 frequency_mhz: Some(cpu.frequency() as u32),
             })
             .collect();

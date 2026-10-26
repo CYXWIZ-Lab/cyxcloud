@@ -13,6 +13,8 @@ pub mod crypto;
 pub mod erasure;
 pub mod error;
 pub mod node_identity;
+pub mod node_status;
+pub mod owner_only;
 pub mod tls;
 
 pub use chunk::{reassemble_chunks, split_into_chunks, Chunk, ChunkId, ChunkMetadata};

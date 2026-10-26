@@ -12,6 +12,11 @@ use crate::symbols;
 /// Login configuration
 pub struct LoginConfig {
     pub email: Option<String>,
+    /// Set the server first (a host, or an https:// front door)
+    pub server: Option<String>,
+    /// Read the password from this file's first line instead of prompting
+    /// (for scripts; the password never goes on the command line)
+    pub password_file: Option<std::path::PathBuf>,
 }
 
 /// Register configuration
@@ -22,6 +27,29 @@ pub struct RegisterConfig {
 
 /// Run the login command
 pub async fn login(cyxwiz_client: &CyxWizClient, config: LoginConfig) -> Result<()> {
+    // One server address: remember it and sign in there
+    let switched_server;
+    let owned_client;
+    let cyxwiz_client = match &config.server {
+        Some(server) => {
+            let mut cfg = config::load_config();
+            let before = cfg.auth.api_url.clone();
+            cfg.set_server(server).map_err(anyhow::Error::msg)?;
+            config::save_config(&cfg)?;
+            switched_server = cfg.auth.api_url != before;
+            owned_client = CyxWizClient::new(&cfg.auth.api_url);
+            &owned_client
+        }
+        None => {
+            switched_server = false;
+            cyxwiz_client
+        }
+    };
+    if switched_server {
+        // a sign-in belongs to the server that issued it
+        config::delete_credentials()?;
+    }
+
     // Check if already logged in
     if let Some(creds) = config::get_valid_credentials() {
         println!(
@@ -52,8 +80,17 @@ pub async fn login(cyxwiz_client: &CyxWizClient, config: LoginConfig) -> Result<
         anyhow::bail!("Email is required");
     }
 
-    // Get password
-    let password = rpassword::prompt_password("Password: ").context("Failed to read password")?;
+    // Get password: from the file's first line (scripts), or the prompt
+    let password = match &config.password_file {
+        Some(path) => std::fs::read_to_string(path)
+            .with_context(|| format!("cannot read the password file {}", path.display()))?
+            .lines()
+            .next()
+            .unwrap_or("")
+            .trim_end_matches('\r')
+            .to_string(),
+        None => rpassword::prompt_password("Password: ").context("Failed to read password")?,
+    };
 
     if password.is_empty() {
         anyhow::bail!("Password is required");
@@ -67,8 +104,9 @@ pub async fn login(cyxwiz_client: &CyxWizClient, config: LoginConfig) -> Result<
         .await
         .map_err(|e| anyhow::anyhow!("Login failed: {}", e))?;
 
-    // Calculate expiration time (default 24 hours if not in JWT)
-    let expires_at = chrono::Utc::now().timestamp() + 86400;
+    // The token says when it expires; 24 h if it does not
+    let expires_at = crate::server::jwt_expiry(&auth.token)
+        .unwrap_or_else(|| chrono::Utc::now().timestamp() + 86400);
 
     // Save credentials
     let credentials = Credentials {
@@ -97,6 +135,10 @@ pub async fn login(cyxwiz_client: &CyxWizClient, config: LoginConfig) -> Result<
         )
         .cyan()
     );
+    let cfg = config::load_config();
+    if let Some(host) = &cfg.server.host {
+        println!("  server {} (sign-in {})", host, cfg.auth.api_url);
+    }
 
     Ok(())
 }

@@ -25,6 +25,10 @@ use std::path::PathBuf;
 /// This is the structure of ~/.cyxcloud/config.toml
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CyxCloudConfig {
+    /// The one server address the user gave (`cyxcloud login --server`)
+    #[serde(default)]
+    pub server: ServerConfig,
+
     /// Gateway settings
     #[serde(default)]
     pub gateway: GatewayConfig,
@@ -40,6 +44,26 @@ pub struct CyxCloudConfig {
     /// Blockchain settings (optional)
     #[serde(default)]
     pub blockchain: BlockchainConfig,
+}
+
+/// The server the user set once; the service URLs below are derived from it
+/// (crate::server::urls_for_server) and can still be overridden one by one.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ServerConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+}
+
+impl CyxCloudConfig {
+    /// Point every service at `server` (a host, or an https:// front door).
+    pub fn set_server(&mut self, server: &str) -> std::result::Result<(), String> {
+        let urls = crate::server::urls_for_server(server)?;
+        self.server.host = Some(server.trim().trim_end_matches('/').to_string());
+        self.gateway.http_url = urls.gateway_http;
+        self.gateway.grpc_url = urls.gateway_grpc;
+        self.auth.api_url = urls.api;
+        Ok(())
+    }
 }
 
 /// Gateway connection settings
@@ -234,18 +258,9 @@ pub fn save_credentials(credentials: &Credentials) -> Result<()> {
     let content =
         serde_json::to_string_pretty(credentials).context("Failed to serialize credentials")?;
 
-    // Set restrictive permissions on Unix
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::write(&path, &content)?;
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
-    }
-
-    #[cfg(not(unix))]
-    {
-        fs::write(&path, content)?;
-    }
+    // Readable by the owner only, on every OS (Windows ACL too)
+    cyxcloud_core::owner_only::write_owner_only(&path, content)
+        .context("Failed to save credentials owner-only")?;
 
     Ok(())
 }

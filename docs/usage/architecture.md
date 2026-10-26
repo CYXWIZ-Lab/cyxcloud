@@ -47,6 +47,10 @@ What a node loss costs: a chunk needs any 10 of its 14 shards. With one node eve
 
 ## Running a node
 
+### With the CLI (recommended, 2026-10-26)
+
+`cyxcloud login --server HOST`, `cyxcloud node init`, `cyxcloud node start`, `cyxcloud node status`, `cyxcloud doctor`: see `node.md`. The sections below are the manual ways.
+
 ### As a daemon (the HP, 2026-10-22)
 
 ```

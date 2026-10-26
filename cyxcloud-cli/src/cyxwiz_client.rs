@@ -78,7 +78,7 @@ pub struct CyxWallet {
     pub created_at: Option<String>,
 }
 
-/// User profile response (from /api/auth/me endpoint)
+/// User profile response (from the API's /api/users/me)
 #[derive(Debug, Deserialize)]
 pub struct UserProfile {
     pub id: String,
@@ -208,7 +208,7 @@ impl CyxWizClient {
 
     /// Get current user profile
     pub async fn get_profile(&self, token: &str) -> Result<UserProfile> {
-        let url = format!("{}/api/auth/me", self.base_url);
+        let url = format!("{}/api/users/me", self.base_url);
 
         let response = self
             .client

@@ -1,0 +1,95 @@
+# Running a storage node
+
+Offer disk space to CyxCloud from any machine (Linux, macOS, Windows) with the
+`cyxcloud` CLI. The node holds shards of other people's files: never a whole
+file, and the server checks every shard it reads back against its hash.
+Client-side encryption, so that a node cannot read the shards either, is
+TOFIX176 P3.
+
+## Five commands
+
+```
+cyxcloud login --server HOST          # sign in once; the node earns for this account
+cyxcloud node init                    # where, how much, which name
+cyxcloud node start                   # run in the background
+cyxcloud node status                  # what it is doing
+cyxcloud doctor                       # what is wrong, and what to do
+```
+
+`HOST` is the server's host name or IP (dev stack: `localhost`, the HP setup:
+`192.168.1.116`). An `https://` address means one front door for everything
+(TOFIX168, when it exists).
+
+### `cyxcloud node init`
+
+Asks three things when run in a terminal, or takes flags:
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--data-dir` | `~/.cyxcloud/node/data` | folder for the shards |
+| `--offer` | 90 % of free space, at most 500 GB | e.g. `700GB`, `1TB` |
+| `--name` | the machine's host name | shown in lists |
+| `--port` | 50051 | port the server dials for shards (open it in the firewall) |
+| `--status-port` | 9090 | local port for `node status` (127.0.0.1 only is enough) |
+| `--public-address` | this machine's address towards the server | what the server dials back |
+| `--force` | | set up again; the key and the node id are kept |
+
+It refuses an offer larger than the disk's free space. It writes:
+
+| File | What |
+| --- | --- |
+| `~/.cyxcloud/node/config.toml` | the daemon's configuration |
+| `~/.cyxcloud/node/key` | Ed25519 key; the node id is derived from it (owner-only) |
+| `~/.cyxcloud/node/access_secret` | what the server presents on shard traffic (owner-only) |
+| `~/.cyxcloud/node_credentials.json` | the account the node earns for (owner-only); another account's leftover file is replaced |
+
+Owner-only means mode 600 on Linux and macOS, and on Windows an ACL with
+inheritance removed: the user, SYSTEM and Administrators only (the same rule
+OpenSSH applies to private keys).
+
+### `cyxcloud node start | stop | status | logs`
+
+- `start` runs `cyxcloud-node` (next to `cyxcloud`, on the PATH, or
+  `CYXCLOUD_NODE_BIN`) in the background, writes `node.pid` and `node.log`
+  under `~/.cyxcloud/node/`, and waits until the node has registered (up to
+  2 minutes; opening a large store takes a while). `--foreground` runs it in
+  the terminal instead.
+- `stop` stops the process in `node.pid` after checking it is a
+  cyxcloud-node.
+- `status` reads `http://127.0.0.1:<status-port>/status`; `--watch`
+  refreshes every 2 s, `--json` prints the raw report. Exit code 1 when the
+  node is not running.
+- `logs [-n 50] [-f]` prints the log without colour codes and without any line
+  that mentions a password.
+
+Example (this PC, 2026-10-26):
+
+```
+  cloud-node-pc · 2bd0ae5a · ONLINE for 8 min
+  machine     Intel(R) Core(TM) i7-8750H CPU @ 2.20GHz (6 cores, 12 threads) · 48 GB RAM · Windows 11 (26200) · host CJ_PC
+  storage     D:/dev/cyxwiz_web/deploy/local/data/cloud-node · 19 MB used of 20 GB offered (36 GB free on the disk)
+  shards      91 held
+  server      http://localhost:50060 · heartbeat 6 s ago
+  listening   127.0.0.1:50070
+  version     cyxcloud-node 0.1.0
+```
+
+### `cyxcloud doctor`
+
+Checks the version, the server address, the gateway and the sign-in server
+(reachable, TLS or not, clock skew from the `Date` header), the sign-in
+(confirmed with the server, time left), and a node on this machine (running,
+registered, its port accepting connections, offer against free space). Exit
+code 0 all good (warnings allowed), 1 something for you to do, 2 the network or
+the server.
+
+## Not there yet (TOFIX177 slice 2)
+
+- `cyxcloud node service install` (systemd, launchd, Windows service) to start
+  at boot. Until then: `cyxcloud node start` after a reboot, or the daemon
+  section of `architecture.md`.
+- `cyxcloud node upgrade` (signed releases, TOFIX175).
+- Reputation, audits and earnings in `node status` (TOFIX176 P4, P8).
+- Long-lived machine sign-in: the node registers its machine with the
+  account's token from `cyxcloud login` and keeps the machine key it gets; the
+  token itself expires after 24 h.

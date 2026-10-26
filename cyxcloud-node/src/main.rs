@@ -203,6 +203,41 @@ async fn main() -> anyhow::Result<()> {
 
     // Create shared state
     let health_state = Arc::new(RwLock::new(HealthState::default()));
+    {
+        use cyxcloud_storage::backend::StorageBackendSync;
+        let stats = storage.stats().unwrap_or_default();
+        let (disk_free, disk_total) =
+            cyxcloud_node::status::disk_space_for(&config.storage.data_dir);
+        let mut state = health_state.write().await;
+        state.report = cyxcloud_node::status::NodeStatusReport {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            node_id: config.node.id.clone(),
+            name: config.node.name.clone(),
+            listen_addr: format!(
+                "{}:{}",
+                config
+                    .network
+                    .public_address
+                    .clone()
+                    .unwrap_or_else(|| config.network.bind_address.clone()),
+                config.network.grpc_port
+            ),
+            started_unix: chrono::Utc::now().timestamp(),
+            machine: cyxcloud_node::status::detect_machine(),
+            storage: cyxcloud_node::status::StorageFacts {
+                data_dir: config.storage.data_dir.display().to_string(),
+                offered_bytes: stats.bytes_capacity,
+                used_bytes: stats.bytes_used,
+                chunks: stats.chunk_count,
+                disk_free_bytes: disk_free,
+                disk_total_bytes: disk_total,
+            },
+            server: cyxcloud_node::status::ServerFacts {
+                address: config.central.address.clone(),
+                ..Default::default()
+            },
+        };
+    }
     let node_metrics = NodeMetrics::new(&config.node.id);
 
     // Start metrics HTTP server
@@ -285,7 +320,8 @@ async fn main() -> anyhow::Result<()> {
         node_metrics.clone(),
         storage.clone(),
     )
-            .map_err(|e| anyhow::anyhow!("Node identity: {}", e))?,
+            .map_err(|e| anyhow::anyhow!("Node identity: {}", e))?
+            .with_health_state(health_state.clone()),
     );
 
     // Set JWT token for Gateway authentication

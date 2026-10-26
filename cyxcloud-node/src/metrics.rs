@@ -240,9 +240,22 @@ impl MetricsServer {
             async move { handle.render() }
         };
 
+        // Status report for `cyxcloud node status` (no secrets in it)
+        let status_handler = {
+            let state = health_state.clone();
+            move || {
+                let state = state.clone();
+                async move {
+                    let report = state.read().await.report.clone();
+                    axum::Json(report).into_response()
+                }
+            }
+        };
+
         let app = Router::new()
             .route(&health_path, get(health_handler))
-            .route(&metrics_path, get(metrics_handler));
+            .route(&metrics_path, get(metrics_handler))
+            .route("/status", get(status_handler));
 
         info!(addr = %self.addr, "Starting metrics server");
 
@@ -260,6 +273,8 @@ pub struct HealthState {
     pub storage_ok: bool,
     pub network_ok: bool,
     pub last_check: std::time::Instant,
+    /// What `cyxcloud node status` shows (served at GET /status)
+    pub report: crate::status::NodeStatusReport,
 }
 
 impl Default for HealthState {
@@ -269,6 +284,7 @@ impl Default for HealthState {
             storage_ok: true,
             network_ok: true,
             last_check: std::time::Instant::now(),
+            report: crate::status::NodeStatusReport::default(),
         }
     }
 }
