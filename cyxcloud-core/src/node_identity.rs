@@ -65,9 +65,22 @@ impl NodeKey {
         if path.exists() {
             return Self::load(path);
         }
+        // Two processes (or tests) starting at once must end up with one key:
+        // whoever links first wins, the other loads that key.
         let key = Self::generate();
-        key.save(path)?;
-        Ok(key)
+        let created = crate::owner_only::create_owner_only_new(
+            path,
+            encode_hex(key.signing.to_bytes().as_ref()),
+        )
+        .map_err(|source| NodeIdentityError::Io {
+            path: path.display().to_string(),
+            source,
+        })?;
+        if created {
+            Ok(key)
+        } else {
+            Self::load(path)
+        }
     }
 
     /// Load the key at `path`.
@@ -198,8 +211,12 @@ pub fn load_or_generate_access_secret(path: &Path) -> Result<String, NodeIdentit
     let mut bytes = [0u8; 32];
     rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut bytes);
     let secret = encode_hex(&bytes);
-    crate::owner_only::write_owner_only(path, &secret).map_err(io)?;
-    Ok(secret)
+    if crate::owner_only::create_owner_only_new(path, &secret).map_err(io)? {
+        Ok(secret)
+    } else {
+        // someone else created it first: theirs is the secret
+        load_or_generate_access_secret(path)
+    }
 }
 
 pub fn encode_hex(bytes: &[u8]) -> String {
@@ -367,6 +384,44 @@ mod tests {
             let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
             assert_eq!(mode, 0o600);
         }
+    }
+
+    /// 2026-10-26 CI: tests building default configs at once read a key file
+    /// another test was still writing and got an empty node id.
+    #[test]
+    fn racing_creators_all_get_the_same_key() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = std::sync::Arc::new(dir.path().join("node").join("key"));
+        let ids: Vec<String> = (0..16)
+            .map(|_| {
+                let path = path.clone();
+                std::thread::spawn(move || NodeKey::load_or_generate(&path).unwrap().node_id())
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|h| h.join().unwrap())
+            .collect();
+
+        assert!(ids.iter().all(|id| id == &ids[0]), "{ids:?}");
+        assert_eq!(NodeKey::load(&path).unwrap().node_id(), ids[0]);
+        let leftovers = std::fs::read_dir(path.parent().unwrap()).unwrap().count();
+        assert_eq!(leftovers, 1, "temporary files must be cleaned up");
+    }
+
+    #[test]
+    fn racing_creators_all_get_the_same_access_secret() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = std::sync::Arc::new(dir.path().join("access_secret"));
+        let secrets: Vec<String> = (0..16)
+            .map(|_| {
+                let path = path.clone();
+                std::thread::spawn(move || load_or_generate_access_secret(&path).unwrap())
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|h| h.join().unwrap())
+            .collect();
+        assert!(secrets.iter().all(|s| s == &secrets[0]));
     }
 
     #[test]

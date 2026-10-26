@@ -14,6 +14,44 @@ pub fn write_owner_only(path: &Path, contents: impl AsRef<[u8]>) -> std::io::Res
     restrict_to_owner(path)
 }
 
+/// Create `path` with `contents`, owner-only, only if it does not exist yet.
+/// Returns false (and writes nothing) when the file already exists.
+///
+/// Atomic against a second process or thread doing the same: the contents are
+/// written and restricted in a private temporary file first, which is then
+/// hard-linked into place (the link fails if `path` exists), so nobody ever
+/// reads a half-written or world-readable file.
+pub fn create_owner_only_new(path: &Path, contents: impl AsRef<[u8]>) -> std::io::Result<bool> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    if path.exists() {
+        return Ok(false);
+    }
+    let mut nonce = [0u8; 8];
+    rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut nonce);
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let tmp = path.with_file_name(format!(
+        ".{}.{}.{}.tmp",
+        name,
+        std::process::id(),
+        u64::from_le_bytes(nonce)
+    ));
+    let result = (|| {
+        write_owner_only(&tmp, contents)?;
+        match std::fs::hard_link(&tmp, path) {
+            Ok(()) => Ok(true),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+            Err(e) => Err(e),
+        }
+    })();
+    let _ = std::fs::remove_file(&tmp);
+    result
+}
+
 /// Restrict an existing file to the current user.
 ///
 /// Unix: mode 0600. Windows: inheritance removed and full control granted to
