@@ -315,11 +315,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Create heartbeat service for Gateway registration
     let heartbeat_service = Arc::new(
-        HeartbeatService::new(
-        config.clone(),
-        node_metrics.clone(),
-        storage.clone(),
-    )
+        HeartbeatService::new(config.clone(), node_metrics.clone(), storage.clone())
             .map_err(|e| anyhow::anyhow!("Node identity: {}", e))?
             .with_health_state(health_state.clone()),
     );

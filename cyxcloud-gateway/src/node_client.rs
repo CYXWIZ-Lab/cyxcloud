@@ -166,8 +166,7 @@ impl NodeClient {
             let mut connections = self.connections.write().await;
 
             // Evict stale connections
-            let stale_threshold =
-                std::time::Duration::from_secs(self.config.stale_connection_secs);
+            let stale_threshold = std::time::Duration::from_secs(self.config.stale_connection_secs);
             let now = std::time::Instant::now();
             connections.retain(|addr, pooled| {
                 let keep = now.duration_since(pooled.last_used) < stale_threshold;
@@ -327,7 +326,9 @@ impl NodeClient {
         node_addresses: &[String],
         chunk_id: &[u8],
     ) -> Result<Bytes, NodeClientError> {
-        let fetch = self.get_chunk_from_any_reporting(node_addresses, chunk_id).await;
+        let fetch = self
+            .get_chunk_from_any_reporting(node_addresses, chunk_id)
+            .await;
         match fetch.data {
             Some(data) => Ok(data),
             None => Err(fetch
@@ -582,6 +583,9 @@ mod fake_node_tests {
 
         assert!(fetch.data.is_none());
         assert_eq!(fetch.corrupt_nodes, vec![liar_a, liar_b]);
-        assert!(matches!(fetch.last_error, Some(NodeClientError::CorruptShard { .. })));
+        assert!(matches!(
+            fetch.last_error,
+            Some(NodeClientError::CorruptShard { .. })
+        ));
     }
 }

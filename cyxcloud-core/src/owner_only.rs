@@ -85,7 +85,10 @@ mod tests {
         let path = dir.path().join("secret");
         write_owner_only(&path, "abc").unwrap();
 
-        let out = std::process::Command::new("icacls").arg(&path).output().unwrap();
+        let out = std::process::Command::new("icacls")
+            .arg(&path)
+            .output()
+            .unwrap();
         let acl = String::from_utf8_lossy(&out.stdout).to_lowercase();
         let user = std::env::var("USERNAME").unwrap().to_lowercase();
 

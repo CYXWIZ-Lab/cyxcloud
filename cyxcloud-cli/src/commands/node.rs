@@ -127,7 +127,10 @@ pub fn status_lines(r: &NodeStatusReport, now: i64) -> Vec<(String, String)> {
         "NOT REGISTERED".to_string()
     };
 
-    let mut lines = vec![(String::new(), format!("{} · {} · {}", r.name, short_id, state))];
+    let mut lines = vec![(
+        String::new(),
+        format!("{} · {} · {}", r.name, short_id, state),
+    )];
 
     let m = &r.machine;
     let mut machine = Vec::new();
@@ -156,7 +159,10 @@ pub fn status_lines(r: &NodeStatusReport, now: i64) -> Vec<(String, String)> {
         human_bytes(s.offered_bytes)
     );
     if s.disk_total_bytes > 0 {
-        storage.push_str(&format!(" ({} free on the disk)", human_bytes(s.disk_free_bytes)));
+        storage.push_str(&format!(
+            " ({} free on the disk)",
+            human_bytes(s.disk_free_bytes)
+        ));
     }
     lines.push(("storage".into(), storage));
     lines.push(("shards".into(), format!("{} held", s.chunks)));
@@ -282,7 +288,11 @@ fn is_our_node(pid: u32) -> bool {
         std::process::Command::new("tasklist")
             .args(["/FI", &format!("PID eq {}", pid), "/FO", "CSV", "/NH"])
             .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).to_lowercase().contains("cyxcloud-node"))
+            .map(|o| {
+                String::from_utf8_lossy(&o.stdout)
+                    .to_lowercase()
+                    .contains("cyxcloud-node")
+            })
             .unwrap_or(false)
     }
     #[cfg(not(windows))]
@@ -307,7 +317,11 @@ fn kill(pid: u32, force: bool) -> Result<()> {
     };
     #[cfg(not(windows))]
     let status = std::process::Command::new("kill")
-        .args(if force { vec!["-9".to_string(), pid.to_string()] } else { vec![pid.to_string()] })
+        .args(if force {
+            vec!["-9".to_string(), pid.to_string()]
+        } else {
+            vec![pid.to_string()]
+        })
         .status()?;
     if !status.success() {
         bail!("could not stop process {}", pid);
@@ -320,7 +334,11 @@ fn node_binary() -> PathBuf {
     if let Ok(path) = std::env::var("CYXCLOUD_NODE_BIN") {
         return PathBuf::from(path);
     }
-    let name = if cfg!(windows) { "cyxcloud-node.exe" } else { "cyxcloud-node" };
+    let name = if cfg!(windows) {
+        "cyxcloud-node.exe"
+    } else {
+        "cyxcloud-node"
+    };
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             let candidate = dir.join(name);
@@ -382,9 +400,10 @@ pub async fn init(cfg: InitConfig) -> Result<()> {
     let default_dir = node_dir()?.join("data");
     let data_dir = match cfg.data_dir {
         Some(d) => d,
-        None if interactive => {
-            PathBuf::from(prompt("Where should shards live?", &default_dir.to_string_lossy())?)
-        }
+        None if interactive => PathBuf::from(prompt(
+            "Where should shards live?",
+            &default_dir.to_string_lossy(),
+        )?),
         None => default_dir,
     };
     std::fs::create_dir_all(&data_dir)
@@ -393,7 +412,11 @@ pub async fn init(cfg: InitConfig) -> Result<()> {
     let free_gb = free >> 30;
 
     // How much
-    let suggested = if free_gb > 0 { (free_gb * 9 / 10).clamp(1, 500) } else { 100 };
+    let suggested = if free_gb > 0 {
+        (free_gb * 9 / 10).clamp(1, 500)
+    } else {
+        100
+    };
     let offer_gb = match cfg.offer {
         Some(o) => server::parse_offer_gb(&o).map_err(anyhow::Error::msg)?,
         None if interactive => {
@@ -470,7 +493,10 @@ pub async fn init(cfg: InitConfig) -> Result<()> {
         shared.gateway.grpc_url
     );
     println!("  shards in {}", data_dir.display());
-    println!("  reachable at {}:{} (the server dials this)", public_address, grpc_port);
+    println!(
+        "  reachable at {}:{} (the server dials this)",
+        public_address, grpc_port
+    );
     println!("  key {} (owner-only)", key_path.display());
     println!("  Start it: cyxcloud node start");
     Ok(())
@@ -503,10 +529,16 @@ pub async fn start(foreground: bool) -> Result<()> {
     }
 
     let log = log_path()?;
-    if std::fs::metadata(&log).map(|m| m.len() > 10 << 20).unwrap_or(false) {
+    if std::fs::metadata(&log)
+        .map(|m| m.len() > 10 << 20)
+        .unwrap_or(false)
+    {
         let _ = std::fs::rename(&log, log.with_extension("log.1"));
     }
-    let out = std::fs::OpenOptions::new().create(true).append(true).open(&log)?;
+    let out = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log)?;
     let err = out.try_clone()?;
     let mut command = std::process::Command::new(&binary);
     command
@@ -538,14 +570,22 @@ pub async fn start(foreground: bool) -> Result<()> {
         )
     })?;
     std::fs::write(pid_path()?, child.id().to_string())?;
-    println!("{} Starting the node (log: {})", style("*").blue(), log.display());
+    println!(
+        "{} Starting the node (log: {})",
+        style("*").blue(),
+        log.display()
+    );
 
     // Wait until it answers and has registered, or say why not
     let deadline = std::time::Instant::now() + Duration::from_secs(120);
     loop {
         if let Ok(Some(code)) = child.try_wait() {
             let _ = std::fs::remove_file(pid_path()?);
-            eprintln!("{} The node stopped right away ({}). Last log lines:", style(symbols::CROSS).red(), code);
+            eprintln!(
+                "{} The node stopped right away ({}). Last log lines:",
+                style(symbols::CROSS).red(),
+                code
+            );
             for line in tail_lines(&log, 15) {
                 eprintln!("  {}", line);
             }
@@ -594,7 +634,11 @@ pub async fn stop() -> Result<()> {
     };
     if !is_our_node(pid) {
         let _ = std::fs::remove_file(pid_path()?);
-        println!("{} The node is not running (stale pid {} removed)", style("!").yellow(), pid);
+        println!(
+            "{} The node is not running (stale pid {} removed)",
+            style("!").yellow(),
+            pid
+        );
         return Ok(());
     }
     kill(pid, false)?;
@@ -734,7 +778,11 @@ fn prompt(question: &str, default: &str) -> Result<String> {
     let mut answer = String::new();
     std::io::stdin().read_line(&mut answer)?;
     let answer = answer.trim();
-    Ok(if answer.is_empty() { default.to_string() } else { answer.to_string() })
+    Ok(if answer.is_empty() {
+        default.to_string()
+    } else {
+        answer.to_string()
+    })
 }
 
 /// This machine's address on the route to `url`'s host (what the server
@@ -794,10 +842,22 @@ mod tests {
         assert!(v["node"].get("id").is_none(), "the key decides the id");
         assert_eq!(v["node"]["name"].as_str(), Some("hp-linux"));
         assert_eq!(v["storage"]["max_capacity_gb"].as_integer(), Some(700));
-        assert_eq!(v["storage"]["data_dir"].as_str(), Some("/home/mrcj/cyxwiz/node-data"));
-        assert_eq!(v["network"]["public_address"].as_str(), Some("192.168.1.180"));
-        assert_eq!(v["central"]["address"].as_str(), Some("http://192.168.1.116:50060"));
-        assert_eq!(v["cyxwiz_api"]["base_url"].as_str(), Some("http://192.168.1.116:3002"));
+        assert_eq!(
+            v["storage"]["data_dir"].as_str(),
+            Some("/home/mrcj/cyxwiz/node-data")
+        );
+        assert_eq!(
+            v["network"]["public_address"].as_str(),
+            Some("192.168.1.180")
+        );
+        assert_eq!(
+            v["central"]["address"].as_str(),
+            Some("http://192.168.1.116:50060")
+        );
+        assert_eq!(
+            v["cyxwiz_api"]["base_url"].as_str(),
+            Some("http://192.168.1.116:3002")
+        );
         assert_eq!(status_port_of(&text), 9090);
     }
 
@@ -850,8 +910,12 @@ mod tests {
         let text: Vec<String> = lines.iter().map(|(l, v)| format!("{} {}", l, v)).collect();
 
         assert_eq!(text[0].trim(), "hp-linux · 4856c643 · ONLINE for 3 d 02 h");
-        assert!(text.iter().any(|l| l.contains("i7-2620M") && l.contains("2 cores, 4 threads") && l.contains("7.7 GB RAM")));
-        assert!(text.iter().any(|l| l.contains("6.5 MB used of 700 GB offered") && l.contains("830 GB free")));
+        assert!(text.iter().any(|l| l.contains("i7-2620M")
+            && l.contains("2 cores, 4 threads")
+            && l.contains("7.7 GB RAM")));
+        assert!(text
+            .iter()
+            .any(|l| l.contains("6.5 MB used of 700 GB offered") && l.contains("830 GB free")));
         assert!(text.iter().any(|l| l == "shards 42 held"));
         assert!(text.iter().any(|l| l.contains("heartbeat 12 s ago")));
         assert!(!text.iter().any(|l| l.starts_with("last error")));
@@ -868,7 +932,9 @@ mod tests {
         let lines = status_lines(&r, now);
 
         assert!(lines[0].1.ends_with("NOT REGISTERED"));
-        assert!(lines.iter().any(|(l, v)| l == "last error" && v.contains("connection refused")));
+        assert!(lines
+            .iter()
+            .any(|(l, v)| l == "last error" && v.contains("connection refused")));
     }
 
     #[test]
@@ -926,6 +992,9 @@ mod tests {
 
     #[test]
     fn the_route_to_localhost_is_loopback() {
-        assert_eq!(local_address_towards("http://localhost:50060").as_deref(), Some("127.0.0.1"));
+        assert_eq!(
+            local_address_towards("http://localhost:50060").as_deref(),
+            Some("127.0.0.1")
+        );
     }
 }

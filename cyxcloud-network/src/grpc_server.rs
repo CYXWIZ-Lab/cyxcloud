@@ -492,9 +492,10 @@ mod tests {
 
     fn bearer<T>(inner: T, secret: &str) -> Request<T> {
         let mut request = Request::new(inner);
-        request
-            .metadata_mut()
-            .insert("authorization", format!("Bearer {}", secret).parse().unwrap());
+        request.metadata_mut().insert(
+            "authorization",
+            format!("Bearer {}", secret).parse().unwrap(),
+        );
         request
     }
 
@@ -513,7 +514,10 @@ mod tests {
             metadata: None,
         };
 
-        let no_header = service.store_chunk(Request::new(store())).await.unwrap_err();
+        let no_header = service
+            .store_chunk(Request::new(store()))
+            .await
+            .unwrap_err();
         assert_eq!(no_header.code(), tonic::Code::Unauthenticated);
 
         let wrong = service
@@ -531,7 +535,10 @@ mod tests {
         let get = GetChunkRequest {
             chunk_id: chunk_id.as_bytes().to_vec(),
         };
-        let read_refused = service.get_chunk(Request::new(get.clone())).await.unwrap_err();
+        let read_refused = service
+            .get_chunk(Request::new(get.clone()))
+            .await
+            .unwrap_err();
         assert_eq!(read_refused.code(), tonic::Code::Unauthenticated);
         let read = service
             .get_chunk(bearer(get, "the-gateway-knows-this"))
@@ -553,7 +560,9 @@ mod tests {
         let (storage, _dir) = create_test_storage();
         let chunk_id = ChunkId::from_data(b"the shard as written");
         // bit rot: the store holds other bytes under the id
-        storage.put(chunk_id, Bytes::from_static(b"rotten")).unwrap();
+        storage
+            .put(chunk_id, Bytes::from_static(b"rotten"))
+            .unwrap();
         let service = ChunkServiceImpl::new(storage, "test-node".to_string());
 
         let err = service

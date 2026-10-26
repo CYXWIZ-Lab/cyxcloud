@@ -5,7 +5,9 @@
 
 use crate::data_loader::{DataLoader, DataLoaderBuilder, TrainingBatch};
 use crate::datastream_client::{DataStreamConfig, DataStreamResult};
-use crate::verification::{DatasetVerification, DatasetVerifier, TrustRequirement, VerificationError};
+use crate::verification::{
+    DatasetVerification, DatasetVerifier, TrustRequirement, VerificationError,
+};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -247,9 +249,10 @@ impl TrainingExecutor {
         info!("Initializing data loader");
 
         let loader = self.create_loader();
-        let batch_rx = loader.start().await.map_err(|e| {
-            TrainingError::LoadingError(format!("Failed to start loader: {}", e))
-        })?;
+        let batch_rx = loader
+            .start()
+            .await
+            .map_err(|e| TrainingError::LoadingError(format!("Failed to start loader: {}", e)))?;
 
         self.loader = Some(loader);
 
@@ -312,9 +315,8 @@ impl TrainingExecutor {
 
             self.update_state(TrainingState::Training).await;
 
-            let batch = batch_result.map_err(|e| {
-                TrainingError::LoadingError(format!("Batch loading failed: {}", e))
-            })?;
+            let batch = batch_result
+                .map_err(|e| TrainingError::LoadingError(format!("Batch loading failed: {}", e)))?;
 
             // Process batch via callback
             if let Some(ref callback) = self.batch_callback {
@@ -323,7 +325,9 @@ impl TrainingExecutor {
 
             // Update counters
             let global_batches = self.batches_processed.fetch_add(1, Ordering::SeqCst) + 1;
-            let items = self.items_processed.fetch_add(batch.items.len() as u64, Ordering::SeqCst)
+            let items = self
+                .items_processed
+                .fetch_add(batch.items.len() as u64, Ordering::SeqCst)
                 + batch.items.len() as u64;
 
             // Update status periodically
@@ -374,10 +378,9 @@ impl TrainingExecutor {
 
     /// Verify the dataset
     async fn verify_dataset(&self) -> Result<DatasetVerification, VerificationError> {
-        let mut client = crate::datastream_client::DataStreamClient::connect(
-            self.config.gateway_config.clone(),
-        )
-        .await?;
+        let mut client =
+            crate::datastream_client::DataStreamClient::connect(self.config.gateway_config.clone())
+                .await?;
 
         let verifier = DatasetVerifier::new().trust_requirement(self.config.trust_requirement);
 

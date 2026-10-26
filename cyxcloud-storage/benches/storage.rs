@@ -139,9 +139,7 @@ fn bench_read_throughput(c: &mut Criterion) {
     let total_bytes = chunk_size * chunks_per_iter;
 
     let data = Bytes::from(generate_data(chunk_size));
-    let ids: Vec<ChunkId> = (0..chunks_per_iter as u64)
-        .map(generate_chunk_id)
-        .collect();
+    let ids: Vec<ChunkId> = (0..chunks_per_iter as u64).map(generate_chunk_id).collect();
 
     for id in &ids {
         backend.put(*id, data.clone()).unwrap();

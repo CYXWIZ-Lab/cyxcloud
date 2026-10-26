@@ -43,7 +43,8 @@ impl GrpcNetworkClient {
 
         for node in nodes {
             if let Some(secret) = &node.access_secret {
-                self.chunk_client.set_access_secret(&node.grpc_address, secret);
+                self.chunk_client
+                    .set_access_secret(&node.grpc_address, secret);
             }
             addrs.insert(node.peer_id, node.grpc_address);
         }

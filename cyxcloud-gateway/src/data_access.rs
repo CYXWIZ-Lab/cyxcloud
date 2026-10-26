@@ -104,11 +104,9 @@ impl SignedToken {
 
     /// Decode token from base64 string
     pub fn decode(token_str: &str) -> Result<Self, DataAccessError> {
-        let json = base64::Engine::decode(
-            &base64::engine::general_purpose::URL_SAFE_NO_PAD,
-            token_str,
-        )
-        .map_err(|_| DataAccessError::InvalidToken)?;
+        let json =
+            base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, token_str)
+                .map_err(|_| DataAccessError::InvalidToken)?;
 
         serde_json::from_slice(&json).map_err(|_| DataAccessError::InvalidToken)
     }
@@ -285,8 +283,8 @@ impl DataAccessTokenService {
         let signed_token = SignedToken::decode(token_string)?;
 
         // Verify signature
-        let token_bytes = serde_json::to_vec(&signed_token.data)
-            .map_err(|_| DataAccessError::InvalidToken)?;
+        let token_bytes =
+            serde_json::to_vec(&signed_token.data).map_err(|_| DataAccessError::InvalidToken)?;
 
         let sig_array: [u8; 64] = signed_token
             .signature

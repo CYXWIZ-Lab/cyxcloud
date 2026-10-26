@@ -103,7 +103,9 @@ where
                 let claims: Claims = match auth.validate_token(&token).await {
                     Ok(claims) => claims,
                     Err(e) => {
-                        return Ok(Status::unauthenticated(format!("Invalid token: {}", e)).to_http())
+                        return Ok(
+                            Status::unauthenticated(format!("Invalid token: {}", e)).to_http()
+                        )
                     }
                 };
                 request.extensions_mut().insert(claims);
@@ -123,17 +125,30 @@ mod tests {
         assert!(!needs_jwt("/cyxcloud.data.DataService/StreamData"));
         assert!(needs_jwt("/cyxcloud.node.NodeService/Heartbeat"));
         assert!(needs_jwt("/cyxcloud.data.DataService/GetDataset"));
-        assert!(needs_jwt("/cyxcloud.datastream.DataStreamService/CreateAccessToken"));
-        assert!(needs_jwt("/cyxcloud.datastream.DataStreamService/StreamBatches"));
+        assert!(needs_jwt(
+            "/cyxcloud.datastream.DataStreamService/CreateAccessToken"
+        ));
+        assert!(needs_jwt(
+            "/cyxcloud.datastream.DataStreamService/StreamBatches"
+        ));
         assert!(needs_jwt(""));
     }
 
     #[test]
     fn bearer_tokens_are_read_strictly() {
         assert_eq!(bearer_token(Some("Bearer abc.def")).unwrap(), "abc.def");
-        assert_eq!(bearer_token(None).unwrap_err().code(), tonic::Code::Unauthenticated);
-        assert_eq!(bearer_token(Some("abc")).unwrap_err().code(), tonic::Code::Unauthenticated);
-        assert_eq!(bearer_token(Some("Bearer ")).unwrap_err().code(), tonic::Code::Unauthenticated);
+        assert_eq!(
+            bearer_token(None).unwrap_err().code(),
+            tonic::Code::Unauthenticated
+        );
+        assert_eq!(
+            bearer_token(Some("abc")).unwrap_err().code(),
+            tonic::Code::Unauthenticated
+        );
+        assert_eq!(
+            bearer_token(Some("Bearer ")).unwrap_err().code(),
+            tonic::Code::Unauthenticated
+        );
         assert!(bearer_token(Some("basic abc")).is_err());
     }
 }

@@ -31,16 +31,28 @@ pub struct Check {
 
 impl Check {
     fn ok(text: impl Into<String>) -> Self {
-        Self { outcome: Outcome::Ok, text: text.into() }
+        Self {
+            outcome: Outcome::Ok,
+            text: text.into(),
+        }
     }
     fn warn(text: impl Into<String>) -> Self {
-        Self { outcome: Outcome::Warn, text: text.into() }
+        Self {
+            outcome: Outcome::Warn,
+            text: text.into(),
+        }
     }
     fn fix(text: impl Into<String>) -> Self {
-        Self { outcome: Outcome::Fix, text: text.into() }
+        Self {
+            outcome: Outcome::Fix,
+            text: text.into(),
+        }
     }
     fn down(text: impl Into<String>) -> Self {
-        Self { outcome: Outcome::Down, text: text.into() }
+        Self {
+            outcome: Outcome::Down,
+            text: text.into(),
+        }
     }
 }
 
@@ -62,7 +74,10 @@ pub fn clock_skew_secs(http_date: &str, now: chrono::DateTime<chrono::Utc>) -> O
 /// Offered space against what the disk can hold; warn under 10 % headroom.
 pub fn disk_check(offered: u64, used: u64, free: u64, total: u64, data_dir: &str) -> Check {
     if total == 0 {
-        return Check::warn(format!("{}: could not read the disk's free space", data_dir));
+        return Check::warn(format!(
+            "{}: could not read the disk's free space",
+            data_dir
+        ));
     }
     let room = free + used;
     if offered > room {
@@ -153,10 +168,15 @@ pub async fn run(cyxwiz: &CyxWizClient) -> Result<i32> {
     }
 
     // Sign-in server
-    match http.get(format!("{}/health", cfg.auth.api_url)).send().await {
-        Ok(resp) if resp.status().is_success() => {
-            checks.push(Check::ok(format!("sign-in server {} reachable", cfg.auth.api_url)))
-        }
+    match http
+        .get(format!("{}/health", cfg.auth.api_url))
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => checks.push(Check::ok(format!(
+            "sign-in server {} reachable",
+            cfg.auth.api_url
+        ))),
         Ok(resp) => checks.push(Check::down(format!(
             "sign-in server {} answered {}",
             cfg.auth.api_url,
@@ -179,16 +199,18 @@ pub async fn run(cyxwiz: &CyxWizClient) -> Result<i32> {
                     profile.username.unwrap_or(profile.email),
                     human_duration(left)
                 ))),
-                Err(crate::cyxwiz_client::CyxWizError::InvalidCredentials) => checks.push(Check::fix(
-                    "the saved sign-in was refused: run `cyxcloud login`",
-                )),
+                Err(crate::cyxwiz_client::CyxWizError::InvalidCredentials) => checks.push(
+                    Check::fix("the saved sign-in was refused: run `cyxcloud login`"),
+                ),
                 Err(e) => checks.push(Check::warn(format!(
                     "signed in as {} (could not confirm with the server: {})",
                     creds.email, e
                 ))),
             }
         }
-        None => checks.push(Check::fix("not signed in: run `cyxcloud login --server HOST`")),
+        None => checks.push(Check::fix(
+            "not signed in: run `cyxcloud login --server HOST`",
+        )),
     }
 
     // Node on this machine
@@ -204,13 +226,19 @@ pub async fn run(cyxwiz: &CyxWizClient) -> Result<i32> {
                 .await
                 .ok();
             let report = match report {
-                Some(r) => r.json::<cyxcloud_core::node_status::NodeStatusReport>().await.ok(),
+                Some(r) => r
+                    .json::<cyxcloud_core::node_status::NodeStatusReport>()
+                    .await
+                    .ok(),
                 None => None,
             };
             match report {
                 Some(r) => {
                     if r.server.registered {
-                        checks.push(Check::ok(format!("node {} is running and registered", r.name)));
+                        checks.push(Check::ok(format!(
+                            "node {} is running and registered",
+                            r.name
+                        )));
                     } else {
                         checks.push(Check::fix(format!(
                             "node {} is running but not registered: {}",
@@ -258,7 +286,10 @@ fn port_check(listen_addr: &str) -> Check {
                 listen_addr, e
             )),
         },
-        None => Check::warn(format!("node listen address '{}' is not an address", listen_addr)),
+        None => Check::warn(format!(
+            "node listen address '{}' is not an address",
+            listen_addr
+        )),
     }
 }
 
@@ -289,16 +320,28 @@ mod tests {
         let now = chrono::DateTime::parse_from_rfc3339("2026-10-26T12:00:30Z")
             .unwrap()
             .with_timezone(&chrono::Utc);
-        assert_eq!(clock_skew_secs("Mon, 26 Oct 2026 12:00:00 GMT", now), Some(30));
+        assert_eq!(
+            clock_skew_secs("Mon, 26 Oct 2026 12:00:00 GMT", now),
+            Some(30)
+        );
         assert_eq!(clock_skew_secs("not a date", now), None);
     }
 
     #[test]
     fn disk_headroom_warns_and_impossible_offers_are_for_the_user() {
         let gb = 1u64 << 30;
-        assert_eq!(disk_check(700 * gb, 0, 830 * gb, 915 * gb, "/d").outcome, Outcome::Ok);
-        assert_eq!(disk_check(800 * gb, 0, 830 * gb, 915 * gb, "/d").outcome, Outcome::Warn);
-        assert_eq!(disk_check(900 * gb, 0, 830 * gb, 915 * gb, "/d").outcome, Outcome::Fix);
+        assert_eq!(
+            disk_check(700 * gb, 0, 830 * gb, 915 * gb, "/d").outcome,
+            Outcome::Ok
+        );
+        assert_eq!(
+            disk_check(800 * gb, 0, 830 * gb, 915 * gb, "/d").outcome,
+            Outcome::Warn
+        );
+        assert_eq!(
+            disk_check(900 * gb, 0, 830 * gb, 915 * gb, "/d").outcome,
+            Outcome::Fix
+        );
         assert_eq!(disk_check(1, 0, 0, 0, "/d").outcome, Outcome::Warn);
     }
 
@@ -308,5 +351,4 @@ mod tests {
         assert_eq!(c.outcome, Outcome::Fix);
         assert!(c.text.contains("firewall"));
     }
-
 }

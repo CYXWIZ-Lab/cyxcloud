@@ -56,14 +56,13 @@ pub struct InfoConfig {
 pub async fn list(client: &GatewayClient, config: ListConfig) -> Result<()> {
     let term = Term::stdout();
 
-    term.write_line(&format!(
-        "{} Fetching datasets...",
-        symbols::LOOKING_GLASS
-    ))?;
+    term.write_line(&format!("{} Fetching datasets...", symbols::LOOKING_GLASS))?;
 
     // Call gateway API to list datasets
     // For now, show placeholder - will integrate with gRPC DataStreamService
-    let datasets = client.list_datasets(config.include_shared, config.limit).await?;
+    let datasets = client
+        .list_datasets(config.include_shared, config.limit)
+        .await?;
 
     term.clear_last_lines(1)?;
 
@@ -106,11 +105,7 @@ pub async fn list(client: &GatewayClient, config: ListConfig) -> Result<()> {
     }
 
     term.write_line("")?;
-    term.write_line(&format!(
-        "{} {} dataset(s)",
-        symbols::INFO,
-        datasets.len()
-    ))?;
+    term.write_line(&format!("{} {} dataset(s)", symbols::INFO, datasets.len()))?;
 
     Ok(())
 }
@@ -124,15 +119,14 @@ pub async fn list_public(client: &GatewayClient, config: ListPublicConfig) -> Re
         symbols::LOOKING_GLASS
     ))?;
 
-    let datasets = client.list_public_datasets(config.name_filter.as_deref()).await?;
+    let datasets = client
+        .list_public_datasets(config.name_filter.as_deref())
+        .await?;
 
     term.clear_last_lines(1)?;
 
     if datasets.is_empty() {
-        term.write_line(&format!(
-            "{} No public datasets found",
-            symbols::INFO
-        ))?;
+        term.write_line(&format!("{} No public datasets found", symbols::INFO))?;
         return Ok(());
     }
 
@@ -186,24 +180,26 @@ pub async fn create(client: &GatewayClient, config: CreateConfig) -> Result<()> 
         config.name
     ))?;
 
-    let dataset = client.create_dataset(
-        &config.name,
-        config.description.as_deref(),
-        &config.bucket,
-        config.prefix.as_deref(),
-    ).await?;
+    let dataset = client
+        .create_dataset(
+            &config.name,
+            config.description.as_deref(),
+            &config.bucket,
+            config.prefix.as_deref(),
+        )
+        .await?;
 
     term.clear_last_lines(1)?;
 
-    term.write_line(&format!(
-        "{} Dataset created successfully!",
-        symbols::CHECK
-    ))?;
+    term.write_line(&format!("{} Dataset created successfully!", symbols::CHECK))?;
     term.write_line(&format!("   ID:    {}", dataset.id))?;
     term.write_line(&format!("   Name:  {}", dataset.name))?;
     term.write_line(&format!("   Files: {}", dataset.file_count))?;
     term.write_line(&format!("   Size:  {}", format_bytes(dataset.size_bytes)))?;
-    term.write_line(&format!("   Hash:  {}", hex::encode(&dataset.content_hash[..16.min(dataset.content_hash.len())])))?;
+    term.write_line(&format!(
+        "   Hash:  {}",
+        hex::encode(&dataset.content_hash[..16.min(dataset.content_hash.len())])
+    ))?;
 
     Ok(())
 }
@@ -218,28 +214,35 @@ pub async fn verify(client: &GatewayClient, config: VerifyConfig) -> Result<()> 
         config.dataset_id
     ))?;
 
-    let result = client.verify_dataset(
-        &config.dataset_id,
-        config.check_public,
-        config.full_verification,
-    ).await?;
+    let result = client
+        .verify_dataset(
+            &config.dataset_id,
+            config.check_public,
+            config.full_verification,
+        )
+        .await?;
 
     term.clear_last_lines(1)?;
 
     if result.manifest_valid && result.all_files_valid {
-        term.write_line(&format!(
-            "{} Dataset verification passed!",
-            symbols::CHECK
-        ))?;
+        term.write_line(&format!("{} Dataset verification passed!", symbols::CHECK))?;
     } else {
-        term.write_line(&format!(
-            "{} Dataset verification failed!",
-            symbols::CROSS
-        ))?;
+        term.write_line(&format!("{} Dataset verification failed!", symbols::CROSS))?;
     }
 
-    term.write_line(&format!("   Manifest:     {}", if result.manifest_valid { "valid" } else { "INVALID" }))?;
-    term.write_line(&format!("   Files:        {}/{} valid", result.files_verified, result.files_verified + result.files_failed))?;
+    term.write_line(&format!(
+        "   Manifest:     {}",
+        if result.manifest_valid {
+            "valid"
+        } else {
+            "INVALID"
+        }
+    ))?;
+    term.write_line(&format!(
+        "   Files:        {}/{} valid",
+        result.files_verified,
+        result.files_verified + result.files_failed
+    ))?;
     term.write_line(&format!("   Trust level:  {:?}", result.trust_level))?;
 
     if let Some(public_match) = result.public_match {
@@ -250,8 +253,14 @@ pub async fn verify(client: &GatewayClient, config: VerifyConfig) -> Result<()> 
             public_match.name,
             public_match.version
         ))?;
-        term.write_line(&format!("   Verified by: {}", public_match.verified_by.join(", ")))?;
-        term.write_line(&format!("   License:     {}", public_match.license.unwrap_or_else(|| "-".to_string())))?;
+        term.write_line(&format!(
+            "   Verified by: {}",
+            public_match.verified_by.join(", ")
+        ))?;
+        term.write_line(&format!(
+            "   License:     {}",
+            public_match.license.unwrap_or_else(|| "-".to_string())
+        ))?;
     }
 
     Ok(())
@@ -267,27 +276,22 @@ pub async fn share(client: &GatewayClient, config: ShareConfig) -> Result<()> {
         config.share_with
     ))?;
 
-    let result = client.share_dataset(
-        &config.dataset_id,
-        &config.share_with,
-        &config.permissions,
-    ).await?;
+    let result = client
+        .share_dataset(&config.dataset_id, &config.share_with, &config.permissions)
+        .await?;
 
     term.clear_last_lines(1)?;
 
     if result.success {
-        term.write_line(&format!(
-            "{} Dataset shared successfully!",
-            symbols::CHECK
-        ))?;
+        term.write_line(&format!("{} Dataset shared successfully!", symbols::CHECK))?;
         term.write_line(&format!("   Share ID:    {}", result.share_id))?;
         term.write_line(&format!("   Shared with: {}", config.share_with))?;
-        term.write_line(&format!("   Permissions: {}", config.permissions.join(", ")))?;
-    } else {
         term.write_line(&format!(
-            "{} Failed to share dataset",
-            symbols::CROSS
+            "   Permissions: {}",
+            config.permissions.join(", ")
         ))?;
+    } else {
+        term.write_line(&format!("{} Failed to share dataset", symbols::CROSS))?;
     }
 
     Ok(())
@@ -317,11 +321,20 @@ pub async fn info(client: &GatewayClient, config: InfoConfig) -> Result<()> {
     term.write_line(&format!("{} Dataset Information", symbols::INFO))?;
     term.write_line(&format!("   ID:          {}", dataset.id))?;
     term.write_line(&format!("   Name:        {}", dataset.name))?;
-    term.write_line(&format!("   Description: {}", dataset.description.unwrap_or_else(|| "-".to_string())))?;
+    term.write_line(&format!(
+        "   Description: {}",
+        dataset.description.unwrap_or_else(|| "-".to_string())
+    ))?;
     term.write_line(&format!("   Owner:       {}", dataset.owner_id))?;
     term.write_line(&format!("   Files:       {}", dataset.file_count))?;
-    term.write_line(&format!("   Size:        {}", format_bytes(dataset.size_bytes)))?;
-    term.write_line(&format!("   Hash:        {}", hex::encode(&dataset.content_hash)))?;
+    term.write_line(&format!(
+        "   Size:        {}",
+        format_bytes(dataset.size_bytes)
+    ))?;
+    term.write_line(&format!(
+        "   Hash:        {}",
+        hex::encode(&dataset.content_hash)
+    ))?;
     term.write_line(&format!("   Trust:       {}", trust_label))?;
     term.write_line(&format!("   Version:     {}", dataset.version))?;
     term.write_line(&format!("   Created:     {}", dataset.created_at))?;

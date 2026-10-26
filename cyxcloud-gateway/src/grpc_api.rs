@@ -445,7 +445,11 @@ fn node_from_token<T>(request: &Request<T>) -> Result<Uuid, Status> {
 
 /// The request's node (by the id the node calls itself) must be the node the
 /// token was issued to.
-async fn same_node(metadata: &MetadataService, peer_id: &str, token_node: Uuid) -> Result<(), Status> {
+async fn same_node(
+    metadata: &MetadataService,
+    peer_id: &str,
+    token_node: Uuid,
+) -> Result<(), Status> {
     let node = metadata
         .get_node_by_peer_id(peer_id)
         .await
@@ -463,7 +467,6 @@ async fn same_node(metadata: &MetadataService, peer_id: &str, token_node: Uuid) 
 // =============================================================================
 // DATA SERVICE IMPLEMENTATION
 // =============================================================================
-
 
 /// A dataset access token may stream a file when it carries the "stream" or
 /// "read" scope (CreateAccessToken grants both by default).
@@ -533,13 +536,17 @@ impl DataService for DataServiceImpl {
         if req.access_token.is_empty() {
             return Err(Status::unauthenticated("Dataset access token required"));
         }
-        let token_hash = blake3::hash(req.access_token.as_bytes()).as_bytes().to_vec();
+        let token_hash = blake3::hash(req.access_token.as_bytes())
+            .as_bytes()
+            .to_vec();
         let token = metadata
             .database()
             .validate_data_access_token(&token_hash)
             .await
             .map_err(|e| Status::internal(format!("Database error: {}", e)))?
-            .ok_or_else(|| Status::unauthenticated("Dataset access token is invalid, expired or revoked"))?;
+            .ok_or_else(|| {
+                Status::unauthenticated("Dataset access token is invalid, expired or revoked")
+            })?;
         if !token_allows_stream(&token.scopes) {
             return Err(Status::permission_denied("Token does not allow streaming"));
         }
@@ -868,7 +875,10 @@ mod tests {
 
     #[test]
     fn stream_scope_is_read_or_stream() {
-        assert!(token_allows_stream(&["read".to_string(), "stream".to_string()]));
+        assert!(token_allows_stream(&[
+            "read".to_string(),
+            "stream".to_string()
+        ]));
         assert!(token_allows_stream(&["stream".to_string()]));
         assert!(token_allows_stream(&["read".to_string()]));
         assert!(!token_allows_stream(&["write".to_string()]));
@@ -879,7 +889,10 @@ mod tests {
     fn a_missing_chunk_is_data_loss_with_its_position() {
         let status = chunk_failure(2, 7, "no storage node holds it", "");
         assert_eq!(status.code(), tonic::Code::DataLoss);
-        assert_eq!(status.message(), "chunk 3 of 7 could not be served: no storage node holds it");
+        assert_eq!(
+            status.message(),
+            "chunk 3 of 7 could not be served: no storage node holds it"
+        );
         let detailed = chunk_failure(0, 1, "no storage node could serve it", "connection refused");
         assert!(detailed.message().ends_with("(connection refused)"));
     }

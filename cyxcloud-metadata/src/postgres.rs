@@ -1648,11 +1648,7 @@ impl Database {
     }
 
     /// Get dataset by name and owner (latest version)
-    pub async fn get_dataset_by_name(
-        &self,
-        owner_id: Uuid,
-        name: &str,
-    ) -> Result<Option<Dataset>> {
+    pub async fn get_dataset_by_name(&self, owner_id: Uuid, name: &str) -> Result<Option<Dataset>> {
         let result = sqlx::query_as::<_, Dataset>(
             "SELECT * FROM datasets WHERE owner_id = $1 AND name = $2 ORDER BY version DESC LIMIT 1",
         )
@@ -1809,10 +1805,7 @@ impl Database {
     }
 
     /// Find public dataset by hash
-    pub async fn find_public_dataset_by_hash(
-        &self,
-        hash: &[u8],
-    ) -> Result<Option<PublicDataset>> {
+    pub async fn find_public_dataset_by_hash(&self, hash: &[u8]) -> Result<Option<PublicDataset>> {
         let result = sqlx::query_as::<_, PublicDataset>(
             "SELECT * FROM public_datasets WHERE official_hash = $1",
         )
@@ -1953,10 +1946,11 @@ impl Database {
 
     /// Clean up expired tokens
     pub async fn cleanup_expired_tokens(&self) -> Result<u64> {
-        let result =
-            sqlx::query("DELETE FROM data_access_tokens WHERE expires_at < NOW() - INTERVAL '7 days'")
-                .execute(&self.pool)
-                .await?;
+        let result = sqlx::query(
+            "DELETE FROM data_access_tokens WHERE expires_at < NOW() - INTERVAL '7 days'",
+        )
+        .execute(&self.pool)
+        .await?;
         Ok(result.rows_affected())
     }
 
@@ -2055,12 +2049,11 @@ impl Database {
 
     /// Get dataset summary with trust info
     pub async fn get_dataset_summary(&self, dataset_id: Uuid) -> Result<Option<DatasetSummary>> {
-        let result = sqlx::query_as::<_, DatasetSummary>(
-            "SELECT * FROM dataset_summary WHERE id = $1",
-        )
-        .bind(dataset_id)
-        .fetch_optional(&self.pool)
-        .await?;
+        let result =
+            sqlx::query_as::<_, DatasetSummary>("SELECT * FROM dataset_summary WHERE id = $1")
+                .bind(dataset_id)
+                .fetch_optional(&self.pool)
+                .await?;
         Ok(result)
     }
 
@@ -2130,7 +2123,8 @@ impl Database {
         prefix: Option<&str>,
         limit: i32,
     ) -> Result<Vec<File>> {
-        self.list_files_in_bucket(bucket, prefix, limit as i64, 0).await
+        self.list_files_in_bucket(bucket, prefix, limit as i64, 0)
+            .await
     }
 
     /// Share a dataset with another user (convenience method)
@@ -2141,7 +2135,9 @@ impl Database {
         permissions: Vec<String>,
     ) -> Result<DatasetShare> {
         // Get dataset to find the owner
-        let dataset = self.get_dataset(dataset_id).await?
+        let dataset = self
+            .get_dataset(dataset_id)
+            .await?
             .ok_or_else(|| sqlx::Error::RowNotFound)?;
 
         let share = CreateDatasetShare {

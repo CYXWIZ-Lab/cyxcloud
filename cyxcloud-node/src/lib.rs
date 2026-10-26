@@ -42,12 +42,6 @@ pub use command_executor::{CommandBatchSummary, CommandExecutor, CommandResult, 
 pub use cyxwiz_api_client::{
     CpuInfo, CyxWizApiClient, DetectedHardware, GpuInfo, LoginResponse, SavedCredentials, UserInfo,
 };
-pub use health::{
-    HealthChecker, HeartbeatService, NodeAnnouncement, NodeAnnouncer,
-    NodeCapacity2 as NodeCapacity, NodeStatus2 as NodeStatus,
-};
-pub use machine_service::MachineService;
-pub use metrics::{init_metrics, HealthState, MetricsServer, NodeMetrics};
 pub use data_loader::{
     DataLoader, DataLoaderBuilder, DataLoaderConfig, LoaderState, LoaderStats, TrainingBatch,
 };
@@ -55,11 +49,17 @@ pub use datastream_client::{
     BatchIterator, DataStreamClient, DataStreamClientBuilder, DataStreamConfig, DataStreamError,
     DataStreamResult, VerifiedBatch,
 };
+pub use health::{
+    HealthChecker, HeartbeatService, NodeAnnouncement, NodeAnnouncer,
+    NodeCapacity2 as NodeCapacity, NodeStatus2 as NodeStatus,
+};
+pub use machine_service::MachineService;
+pub use metrics::{init_metrics, HealthState, MetricsServer, NodeMetrics};
 pub use training_executor::{
     TrainingError, TrainingExecutor, TrainingExecutorBuilder, TrainingJobConfig, TrainingState,
     TrainingStatus,
 };
 pub use verification::{
-    DatasetVerification, DatasetVerifier, PublicDatasetHashes, TrustRequirement,
-    VerificationError, VerificationOptions,
+    DatasetVerification, DatasetVerifier, PublicDatasetHashes, TrustRequirement, VerificationError,
+    VerificationOptions,
 };

@@ -169,7 +169,10 @@ async fn list_datasets(
     let metadata = state.metadata_service().ok_or_else(|| {
         (
             StatusCode::SERVICE_UNAVAILABLE,
-            Json(ApiError::new("Metadata service not available", "SERVICE_UNAVAILABLE")),
+            Json(ApiError::new(
+                "Metadata service not available",
+                "SERVICE_UNAVAILABLE",
+            )),
         )
     })?;
 
@@ -229,7 +232,10 @@ async fn list_public_datasets(
             error!(error = %e, "Failed to list public datasets");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiError::new("Failed to list public datasets", "REGISTRY_ERROR")),
+                Json(ApiError::new(
+                    "Failed to list public datasets",
+                    "REGISTRY_ERROR",
+                )),
             )
         })?;
 
@@ -253,7 +259,10 @@ async fn create_dataset(
     let metadata = state.metadata_service().ok_or_else(|| {
         (
             StatusCode::SERVICE_UNAVAILABLE,
-            Json(ApiError::new("Metadata service not available", "SERVICE_UNAVAILABLE")),
+            Json(ApiError::new(
+                "Metadata service not available",
+                "SERVICE_UNAVAILABLE",
+            )),
         )
     })?;
 
@@ -360,7 +369,10 @@ async fn get_dataset_info(
     let metadata = state.metadata_service().ok_or_else(|| {
         (
             StatusCode::SERVICE_UNAVAILABLE,
-            Json(ApiError::new("Metadata service not available", "SERVICE_UNAVAILABLE")),
+            Json(ApiError::new(
+                "Metadata service not available",
+                "SERVICE_UNAVAILABLE",
+            )),
         )
     })?;
 
@@ -461,7 +473,10 @@ async fn verify_dataset(
     let metadata = state.metadata_service().ok_or_else(|| {
         (
             StatusCode::SERVICE_UNAVAILABLE,
-            Json(ApiError::new("Metadata service not available", "SERVICE_UNAVAILABLE")),
+            Json(ApiError::new(
+                "Metadata service not available",
+                "SERVICE_UNAVAILABLE",
+            )),
         )
     })?;
 
@@ -560,7 +575,10 @@ async fn share_dataset(
     let metadata = state.metadata_service().ok_or_else(|| {
         (
             StatusCode::SERVICE_UNAVAILABLE,
-            Json(ApiError::new("Metadata service not available", "SERVICE_UNAVAILABLE")),
+            Json(ApiError::new(
+                "Metadata service not available",
+                "SERVICE_UNAVAILABLE",
+            )),
         )
     })?;
 
@@ -600,7 +618,10 @@ async fn share_dataset(
     if dataset.owner_id != user_id {
         return Err((
             StatusCode::FORBIDDEN,
-            Json(ApiError::new("Only the owner can share a dataset", "FORBIDDEN")),
+            Json(ApiError::new(
+                "Only the owner can share a dataset",
+                "FORBIDDEN",
+            )),
         ));
     }
 
@@ -659,14 +680,20 @@ async fn extract_and_validate_token(
         .ok_or_else(|| {
             (
                 StatusCode::UNAUTHORIZED,
-                Json(ApiError::new("Missing Authorization header", "MISSING_AUTH")),
+                Json(ApiError::new(
+                    "Missing Authorization header",
+                    "MISSING_AUTH",
+                )),
             )
         })?;
 
     if !auth_header.starts_with("Bearer ") {
         return Err((
             StatusCode::UNAUTHORIZED,
-            Json(ApiError::new("Invalid Authorization format", "INVALID_AUTH_FORMAT")),
+            Json(ApiError::new(
+                "Invalid Authorization format",
+                "INVALID_AUTH_FORMAT",
+            )),
         ));
     }
 

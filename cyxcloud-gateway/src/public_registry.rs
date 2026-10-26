@@ -112,7 +112,10 @@ impl PublicDatasetRegistry {
             .await
             .map_err(|e| RegistryError::Database(e.to_string()))?;
 
-        Ok(datasets.into_iter().map(PublicDatasetSummary::from).collect())
+        Ok(datasets
+            .into_iter()
+            .map(PublicDatasetSummary::from)
+            .collect())
     }
 
     /// Get a public dataset by name and version
@@ -132,14 +135,19 @@ impl PublicDatasetRegistry {
             .get_public_dataset(name, version)
             .await
             .map_err(|e| RegistryError::Database(e.to_string()))?
-            .ok_or_else(|| RegistryError::PublicDatasetNotFound(format!("{} v{}", name, version)))?;
+            .ok_or_else(|| {
+                RegistryError::PublicDatasetNotFound(format!("{} v{}", name, version))
+            })?;
 
         Ok(PublicDatasetMatch::from(dataset))
     }
 
     /// Find a public dataset by content hash
     #[instrument(skip(self, content_hash))]
-    pub async fn find_by_hash(&self, content_hash: &[u8]) -> RegistryResult<Option<PublicDatasetMatch>> {
+    pub async fn find_by_hash(
+        &self,
+        content_hash: &[u8],
+    ) -> RegistryResult<Option<PublicDatasetMatch>> {
         let metadata = self
             .state
             .metadata_service()
@@ -220,7 +228,9 @@ impl PublicDatasetRegistry {
             .get_public_dataset(name, version)
             .await
             .map_err(|e| RegistryError::Database(e.to_string()))?
-            .ok_or_else(|| RegistryError::PublicDatasetNotFound(format!("{} v{}", name, version)))?;
+            .ok_or_else(|| {
+                RegistryError::PublicDatasetNotFound(format!("{} v{}", name, version))
+            })?;
 
         // Update the cache reference
         metadata
@@ -258,11 +268,7 @@ impl PublicDatasetRegistry {
 
     /// Get the official hash for a public dataset
     #[instrument(skip(self))]
-    pub async fn get_official_hash(
-        &self,
-        name: &str,
-        version: &str,
-    ) -> RegistryResult<Vec<u8>> {
+    pub async fn get_official_hash(&self, name: &str, version: &str) -> RegistryResult<Vec<u8>> {
         let metadata = self
             .state
             .metadata_service()
@@ -273,7 +279,9 @@ impl PublicDatasetRegistry {
             .get_public_dataset(name, version)
             .await
             .map_err(|e| RegistryError::Database(e.to_string()))?
-            .ok_or_else(|| RegistryError::PublicDatasetNotFound(format!("{} v{}", name, version)))?;
+            .ok_or_else(|| {
+                RegistryError::PublicDatasetNotFound(format!("{} v{}", name, version))
+            })?;
 
         Ok(public_dataset.official_hash)
     }

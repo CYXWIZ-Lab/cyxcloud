@@ -35,7 +35,9 @@ pub fn check_registration(
         .listen_addrs
         .first()
         .filter(|a| !a.is_empty())
-        .ok_or_else(|| Status::invalid_argument("the node must say where it listens (listen_addrs)"))?;
+        .ok_or_else(|| {
+            Status::invalid_argument("the node must say where it listens (listen_addrs)")
+        })?;
 
     let proof = req.proof.as_ref().ok_or_else(|| {
         Status::invalid_argument(
@@ -58,9 +60,9 @@ pub fn check_registration(
     }
     .verify(now)
     .map_err(|e| match e {
-        NodeIdentityError::StaleTimestamp { .. } => Status::failed_precondition(format!(
-            "{e}: check the node's clock"
-        )),
+        NodeIdentityError::StaleTimestamp { .. } => {
+            Status::failed_precondition(format!("{e}: check the node's clock"))
+        }
         other => Status::permission_denied(other.to_string()),
     })?;
 
@@ -143,7 +145,11 @@ mod tests {
         let err = check_registration(&req, None, NOW).unwrap_err();
 
         assert_eq!(err.code(), tonic::Code::InvalidArgument);
-        assert!(err.message().contains("cyxcloud node init"), "{}", err.message());
+        assert!(
+            err.message().contains("cyxcloud node init"),
+            "{}",
+            err.message()
+        );
     }
 
     #[test]

@@ -16,13 +16,12 @@ use cyxcloud_metadata::{
 use cyxcloud_protocol::datastream::{
     data_stream_service_server::DataStreamService, upload_file_request, AccessTokenResponse,
     BatchResponse, CreateAccessTokenRequest, CreateDatasetRequest, CreateDatasetResponse,
-    DatasetFileInfo, DatasetInfo, DatasetInfoResponse, DeleteDatasetRequest,
-    DeleteDatasetResponse, FileVerification, GetDatasetInfoRequest, ListDatasetsRequest,
-    ListDatasetsResponse, ListPublicDatasetsRequest, ListPublicDatasetsResponse,
-    PublicDatasetInfo, PublicDatasetMatch, RevokeAccessTokenRequest, RevokeAccessTokenResponse,
-    ShareDatasetRequest, ShareDatasetResponse, StreamBatchesRequest,
-    TrustLevel as ProtoTrustLevel, UploadFileMetadata, UploadFileRequest, UploadFileResponse,
-    VerificationResult, VerifyDatasetRequest,
+    DatasetFileInfo, DatasetInfo, DatasetInfoResponse, DeleteDatasetRequest, DeleteDatasetResponse,
+    FileVerification, GetDatasetInfoRequest, ListDatasetsRequest, ListDatasetsResponse,
+    ListPublicDatasetsRequest, ListPublicDatasetsResponse, PublicDatasetInfo, PublicDatasetMatch,
+    RevokeAccessTokenRequest, RevokeAccessTokenResponse, ShareDatasetRequest, ShareDatasetResponse,
+    StreamBatchesRequest, TrustLevel as ProtoTrustLevel, UploadFileMetadata, UploadFileRequest,
+    UploadFileResponse, VerificationResult, VerifyDatasetRequest,
 };
 use std::pin::Pin;
 use std::sync::Arc;
@@ -475,7 +474,11 @@ impl DataStreamService for DataStreamServiceImpl {
 
         // Apply pagination
         let offset = req.offset.max(0) as usize;
-        let limit = if req.limit > 0 { req.limit as usize } else { 100 };
+        let limit = if req.limit > 0 {
+            req.limit as usize
+        } else {
+            100
+        };
         let paginated: Vec<_> = filtered
             .into_iter()
             .skip(offset)
@@ -483,7 +486,11 @@ impl DataStreamService for DataStreamServiceImpl {
             .map(|d| Self::dataset_to_proto(&d))
             .collect();
 
-        debug!(count = paginated.len(), total = total_count, "Listed datasets");
+        debug!(
+            count = paginated.len(),
+            total = total_count,
+            "Listed datasets"
+        );
 
         Ok(Response::new(ListDatasetsResponse {
             datasets: paginated,
@@ -511,8 +518,9 @@ impl DataStreamService for DataStreamServiceImpl {
             .file_ids
             .iter()
             .map(|s| {
-                Uuid::parse_str(s)
-                    .map_err(|e| Status::invalid_argument(format!("Invalid file_id '{}': {}", s, e)))
+                Uuid::parse_str(s).map_err(|e| {
+                    Status::invalid_argument(format!("Invalid file_id '{}': {}", s, e))
+                })
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -794,7 +802,10 @@ impl DataStreamService for DataStreamServiceImpl {
                     .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
 
                 let (valid, actual_hash) = if let Some(stored_file) = file_record {
-                    (stored_file.content_hash == file.content_hash, Some(stored_file.content_hash))
+                    (
+                        stored_file.content_hash == file.content_hash,
+                        Some(stored_file.content_hash),
+                    )
                 } else {
                     (false, None)
                 };
@@ -912,7 +923,9 @@ impl DataStreamService for DataStreamServiceImpl {
             .ok_or_else(|| Status::not_found("Dataset not found"))?;
 
         if dataset.owner_id != user_id {
-            return Err(Status::permission_denied("Only the owner can share a dataset"));
+            return Err(Status::permission_denied(
+                "Only the owner can share a dataset",
+            ));
         }
 
         // Determine permissions
@@ -924,9 +937,11 @@ impl DataStreamService for DataStreamServiceImpl {
 
         // Calculate expiration if provided
         let expires_at = if req.expires_at > 0 {
-            Some(chrono::DateTime::from_timestamp(req.expires_at, 0)
-                .ok_or_else(|| Status::invalid_argument("Invalid expires_at timestamp"))?
-                .with_timezone(&chrono::Utc))
+            Some(
+                chrono::DateTime::from_timestamp(req.expires_at, 0)
+                    .ok_or_else(|| Status::invalid_argument("Invalid expires_at timestamp"))?
+                    .with_timezone(&chrono::Utc),
+            )
         } else {
             None
         };
@@ -986,10 +1001,7 @@ impl DataStreamService for DataStreamServiceImpl {
                 .map(|d| Self::public_dataset_to_proto(&d))
                 .collect()
         } else {
-            datasets
-                .iter()
-                .map(Self::public_dataset_to_proto)
-                .collect()
+            datasets.iter().map(Self::public_dataset_to_proto).collect()
         };
 
         debug!(count = filtered.len(), "Listed public datasets");
@@ -1098,7 +1110,9 @@ impl DataStreamService for DataStreamServiceImpl {
             .map_err(|e| Status::internal(format!("Database error: {}", e)))?
             .ok_or_else(|| Status::not_found("Dataset not found"))?;
         if dataset.owner_id != user_id {
-            return Err(Status::permission_denied("Only the dataset's owner can delete it"));
+            return Err(Status::permission_denied(
+                "Only the dataset's owner can delete it",
+            ));
         }
         metadata
             .database()
@@ -1141,10 +1155,16 @@ mod upload_tests {
 
         let mut short = UploadAssembler::start(&meta(10, vec![])).unwrap();
         short.push(&data[..4]).unwrap();
-        assert_eq!(short.finish().unwrap_err().code(), tonic::Code::InvalidArgument);
+        assert_eq!(
+            short.finish().unwrap_err().code(),
+            tonic::Code::InvalidArgument
+        );
 
         let mut long = UploadAssembler::start(&meta(4, vec![])).unwrap();
-        assert_eq!(long.push(&data).unwrap_err().code(), tonic::Code::InvalidArgument);
+        assert_eq!(
+            long.push(&data).unwrap_err().code(),
+            tonic::Code::InvalidArgument
+        );
 
         let mut wrong = UploadAssembler::start(&meta(10, vec![7u8; 32])).unwrap();
         wrong.push(&data).unwrap();

@@ -74,7 +74,9 @@ type AuthHeader = Option<tonic::metadata::MetadataValue<tonic::metadata::Ascii>>
 
 fn with_auth<T>(mut request: tonic::Request<T>, auth: &AuthHeader) -> tonic::Request<T> {
     if let Some(value) = auth {
-        request.metadata_mut().insert("authorization", value.clone());
+        request
+            .metadata_mut()
+            .insert("authorization", value.clone());
     }
     request
 }
@@ -239,11 +241,14 @@ impl ChunkClient {
             let chunk_id = chunk_id;
             let data = data.clone();
             async move {
-                let request = with_auth(tonic::Request::new(StoreChunkRequest {
-                    chunk_id: chunk_id.as_bytes().to_vec(),
-                    data: data.to_vec(),
-                    metadata: None,
-                }), &auth);
+                let request = with_auth(
+                    tonic::Request::new(StoreChunkRequest {
+                        chunk_id: chunk_id.as_bytes().to_vec(),
+                        data: data.to_vec(),
+                        metadata: None,
+                    }),
+                    &auth,
+                );
 
                 let response = client
                     .store_chunk(request)
@@ -274,9 +279,12 @@ impl ChunkClient {
             let auth = auth.clone();
             let chunk_id = chunk_id;
             async move {
-                let request = with_auth(tonic::Request::new(GetChunkRequest {
-                    chunk_id: chunk_id.as_bytes().to_vec(),
-                }), &auth);
+                let request = with_auth(
+                    tonic::Request::new(GetChunkRequest {
+                        chunk_id: chunk_id.as_bytes().to_vec(),
+                    }),
+                    &auth,
+                );
 
                 let response = client
                     .get_chunk(request)
@@ -304,9 +312,12 @@ impl ChunkClient {
             let auth = auth.clone();
             let chunk_id = chunk_id;
             async move {
-                let request = with_auth(tonic::Request::new(DeleteChunkRequest {
-                    chunk_id: chunk_id.as_bytes().to_vec(),
-                }), &auth);
+                let request = with_auth(
+                    tonic::Request::new(DeleteChunkRequest {
+                        chunk_id: chunk_id.as_bytes().to_vec(),
+                    }),
+                    &auth,
+                );
 
                 let response = client.delete_chunk(request).await.map_err(|e| {
                     CyxCloudError::Network(format!("DeleteChunk RPC failed: {}", e))
@@ -328,9 +339,12 @@ impl ChunkClient {
             let auth = auth.clone();
             let chunk_id = chunk_id;
             async move {
-                let request = with_auth(tonic::Request::new(VerifyChunkRequest {
-                    chunk_id: chunk_id.as_bytes().to_vec(),
-                }), &auth);
+                let request = with_auth(
+                    tonic::Request::new(VerifyChunkRequest {
+                        chunk_id: chunk_id.as_bytes().to_vec(),
+                    }),
+                    &auth,
+                );
 
                 let response = client.verify_chunk(request).await.map_err(|e| {
                     CyxCloudError::Network(format!("VerifyChunk RPC failed: {}", e))
@@ -357,9 +371,12 @@ impl ChunkClient {
             let auth = auth.clone();
             let chunk_ids = chunk_ids.clone();
             async move {
-                let request = with_auth(tonic::Request::new(StreamChunksRequest {
-                    chunk_ids: chunk_ids.iter().map(|id| id.as_bytes().to_vec()).collect(),
-                }), &auth);
+                let request = with_auth(
+                    tonic::Request::new(StreamChunksRequest {
+                        chunk_ids: chunk_ids.iter().map(|id| id.as_bytes().to_vec()).collect(),
+                    }),
+                    &auth,
+                );
 
                 let mut stream = client
                     .stream_chunks(request)

@@ -609,18 +609,32 @@ mod tests {
             "sub": "6ac29f910171abdbcfdf8a04", "email": "e2e-user@local.test", "role": "user",
             "iat": now, "exp": now + 3600, "iss": "cyxwiz-api"
         });
-        let token = jsonwebtoken::encode(&jsonwebtoken::Header::default(), &api_claims,
-                                         &jsonwebtoken::EncodingKey::from_secret(&secret)).unwrap();
-        let claims = auth.validate_token(&token).await.expect("API token accepted");
+        let token = jsonwebtoken::encode(
+            &jsonwebtoken::Header::default(),
+            &api_claims,
+            &jsonwebtoken::EncodingKey::from_secret(&secret),
+        )
+        .unwrap();
+        let claims = auth
+            .validate_token(&token)
+            .await
+            .expect("API token accepted");
         assert_eq!(claims.sub, "6ac29f910171abdbcfdf8a04");
         assert_eq!(claims.user_type, "user");
 
         let expired = serde_json::json!({
             "sub": "x", "iat": now - 7200, "exp": now - 3600, "iss": "cyxwiz-api"
         });
-        let token = jsonwebtoken::encode(&jsonwebtoken::Header::default(), &expired,
-                                         &jsonwebtoken::EncodingKey::from_secret(&secret)).unwrap();
-        assert!(auth.validate_token(&token).await.is_err(), "expired API token refused");
+        let token = jsonwebtoken::encode(
+            &jsonwebtoken::Header::default(),
+            &expired,
+            &jsonwebtoken::EncodingKey::from_secret(&secret),
+        )
+        .unwrap();
+        assert!(
+            auth.validate_token(&token).await.is_err(),
+            "expired API token refused"
+        );
     }
 
     #[test]
@@ -669,5 +683,4 @@ mod tests {
         let own = Uuid::new_v4();
         assert_eq!(user_uuid_for_subject(&own.to_string()), own);
     }
-
 }

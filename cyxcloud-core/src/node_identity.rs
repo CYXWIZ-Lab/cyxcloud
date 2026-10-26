@@ -123,7 +123,8 @@ pub fn node_id_from_public_key(public_key: &[u8]) -> String {
 }
 
 fn registration_message(node_id: &str, listen_addr: &str, timestamp: i64) -> Vec<u8> {
-    let mut m = Vec::with_capacity(REGISTRATION_DOMAIN.len() + node_id.len() + listen_addr.len() + 10);
+    let mut m =
+        Vec::with_capacity(REGISTRATION_DOMAIN.len() + node_id.len() + listen_addr.len() + 10);
     m.extend_from_slice(REGISTRATION_DOMAIN);
     m.extend_from_slice(node_id.as_bytes());
     m.push(0);
@@ -169,8 +170,8 @@ impl RegistrationProof<'_> {
             });
         }
 
-        let signature =
-            Signature::from_slice(self.signature).map_err(|_| NodeIdentityError::MalformedSignature)?;
+        let signature = Signature::from_slice(self.signature)
+            .map_err(|_| NodeIdentityError::MalformedSignature)?;
         let message = registration_message(self.node_id, self.listen_addr, self.timestamp);
         key.verify(&message, &signature)
             .map_err(|_| NodeIdentityError::BadSignature)?;
@@ -284,7 +285,10 @@ mod tests {
             timestamp: now,
             signature: &sig,
         };
-        assert!(matches!(other_addr.verify(now), Err(NodeIdentityError::BadSignature)));
+        assert!(matches!(
+            other_addr.verify(now),
+            Err(NodeIdentityError::BadSignature)
+        ));
 
         let other_time = RegistrationProof {
             node_id: &node_id,
@@ -293,7 +297,10 @@ mod tests {
             timestamp: now + 1,
             signature: &sig,
         };
-        assert!(matches!(other_time.verify(now), Err(NodeIdentityError::BadSignature)));
+        assert!(matches!(
+            other_time.verify(now),
+            Err(NodeIdentityError::BadSignature)
+        ));
     }
 
     #[test]
@@ -337,7 +344,10 @@ mod tests {
             signature: &sig,
         };
 
-        assert!(matches!(proof.verify(now), Err(NodeIdentityError::BadSignature)));
+        assert!(matches!(
+            proof.verify(now),
+            Err(NodeIdentityError::BadSignature)
+        ));
     }
 
     #[test]

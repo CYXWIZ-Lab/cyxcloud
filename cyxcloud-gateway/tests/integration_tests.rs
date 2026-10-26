@@ -19,13 +19,21 @@ async fn test_auth_token_lifecycle() {
 
     // Generate access token
     let token = auth
-        .generate_token("test-user-id", TokenType::Access, None, vec!["read".into(), "write".into()])
+        .generate_token(
+            "test-user-id",
+            TokenType::Access,
+            None,
+            vec!["read".into(), "write".into()],
+        )
         .expect("Failed to generate token");
 
     assert!(!token.is_empty());
 
     // Validate
-    let claims = auth.validate_token(&token).await.expect("Failed to validate");
+    let claims = auth
+        .validate_token(&token)
+        .await
+        .expect("Failed to validate");
     assert_eq!(claims.sub, "test-user-id");
     assert_eq!(claims.user_type, "user");
     assert!(claims.permissions.contains(&"read".to_string()));
@@ -63,7 +71,12 @@ async fn test_auth_permissions() {
     let auth = AuthService::from_env();
 
     let token = auth
-        .generate_token("admin", TokenType::Access, None, vec!["read".into(), "write".into(), "admin".into()])
+        .generate_token(
+            "admin",
+            TokenType::Access,
+            None,
+            vec!["read".into(), "write".into(), "admin".into()],
+        )
         .expect("Failed to generate token");
 
     let claims = auth.validate_token(&token).await.expect("Valid token");
@@ -71,8 +84,14 @@ async fn test_auth_permissions() {
     assert!(AuthService::has_permission(&claims, "admin"));
     assert!(AuthService::has_permission(&claims, "read"));
     assert!(!AuthService::has_permission(&claims, "superuser"));
-    assert!(AuthService::has_any_permission(&claims, &["superuser", "admin"]));
-    assert!(!AuthService::has_any_permission(&claims, &["superuser", "root"]));
+    assert!(AuthService::has_any_permission(
+        &claims,
+        &["superuser", "admin"]
+    ));
+    assert!(!AuthService::has_any_permission(
+        &claims,
+        &["superuser", "root"]
+    ));
 }
 
 #[tokio::test]
@@ -94,7 +113,12 @@ async fn test_auth_multiple_revocations() {
     let mut tokens = Vec::new();
     for i in 0..10 {
         let token = auth
-            .generate_token(&format!("user-{}", i), TokenType::Access, None, vec!["read".into()])
+            .generate_token(
+                &format!("user-{}", i),
+                TokenType::Access,
+                None,
+                vec!["read".into()],
+            )
             .expect("Failed to generate token");
         let claims = auth.validate_token(&token).await.expect("Valid");
         tokens.push((token, claims.jti));
@@ -251,11 +275,21 @@ async fn test_list_objects_with_prefix() {
     state.create_bucket("bucket").await.unwrap();
 
     state
-        .put_object("bucket", "docs/readme.md", Bytes::from("readme"), "text/plain")
+        .put_object(
+            "bucket",
+            "docs/readme.md",
+            Bytes::from("readme"),
+            "text/plain",
+        )
         .await
         .unwrap();
     state
-        .put_object("bucket", "docs/guide.md", Bytes::from("guide"), "text/plain")
+        .put_object(
+            "bucket",
+            "docs/guide.md",
+            Bytes::from("guide"),
+            "text/plain",
+        )
         .await
         .unwrap();
     state
@@ -433,10 +467,9 @@ async fn test_auth_from_state() {
 /// database URL configured the gateway must stop, not pretend.
 #[tokio::test]
 async fn a_configured_database_that_is_down_stops_the_gateway() {
-    let config = cyxcloud_gateway::GatewayConfig::with_database(
-        "postgres://nobody:none@127.0.0.1:1/none",
-    )
-    .with_database_connect_wait(std::time::Duration::from_secs(1));
+    let config =
+        cyxcloud_gateway::GatewayConfig::with_database("postgres://nobody:none@127.0.0.1:1/none")
+            .with_database_connect_wait(std::time::Duration::from_secs(1));
 
     let started = std::time::Instant::now();
     let result = AppState::with_config(config).await;

@@ -19,8 +19,7 @@ fn generate_mock_batch(batch_index: u64, items_per_batch: usize) -> VerifiedBatc
         .map(|i| {
             // Generate item with identifiable pattern
             let item_id = batch_index * items_per_batch as u64 + i as u64;
-            format!("batch_{}_item_{}", batch_index, item_id)
-                .into_bytes()
+            format!("batch_{}_item_{}", batch_index, item_id).into_bytes()
         })
         .collect();
 
@@ -58,9 +57,7 @@ fn test_batch_callback() {
     let items_clone = items_processed.clone();
 
     // Create mock batches
-    let batches: Vec<TrainingBatch> = (0..5)
-        .map(|i| generate_mock_batch(i, 32).into())
-        .collect();
+    let batches: Vec<TrainingBatch> = (0..5).map(|i| generate_mock_batch(i, 32).into()).collect();
 
     // Process batches with callback
     for batch in &batches {
@@ -99,21 +96,16 @@ fn test_epoch_tracking() {
 
             if batch.is_epoch_end {
                 assert_eq!(
-                    epoch_batches,
-                    batches_per_epoch,
+                    epoch_batches, batches_per_epoch,
                     "Epoch {} should have {} batches",
-                    epoch,
-                    batches_per_epoch
+                    epoch, batches_per_epoch
                 );
             }
         }
     }
 
     assert_eq!(current_epoch, num_epochs - 1);
-    assert_eq!(
-        global_batches,
-        (batches_per_epoch * num_epochs as u64)
-    );
+    assert_eq!(global_batches, (batches_per_epoch * num_epochs as u64));
 
     println!("Epoch tracking: OK");
 }
@@ -366,7 +358,11 @@ fn test_batch_data_integrity() {
     let training: TrainingBatch = verified.into();
 
     // Verify data integrity after conversion
-    for (i, (item, original_hash)) in training.items.iter().zip(original_hashes.iter()).enumerate()
+    for (i, (item, original_hash)) in training
+        .items
+        .iter()
+        .zip(original_hashes.iter())
+        .enumerate()
     {
         let new_hash = blake3::hash(item);
         assert_eq!(

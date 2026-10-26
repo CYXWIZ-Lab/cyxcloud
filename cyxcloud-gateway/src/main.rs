@@ -448,7 +448,12 @@ fn redact_url_password(url: &str) -> String {
         (Some(scheme), Some(at)) if at > scheme => {
             let credentials = &url[scheme + 3..at];
             match credentials.find(':') {
-                Some(colon) => format!("{}{}:***{}", &url[..scheme + 3], &credentials[..colon], &url[at..]),
+                Some(colon) => format!(
+                    "{}{}:***{}",
+                    &url[..scheme + 3],
+                    &credentials[..colon],
+                    &url[at..]
+                ),
                 None => url.to_string(),
             }
         }
@@ -462,9 +467,17 @@ mod redact_tests {
 
     #[test]
     fn hides_only_the_password() {
-        assert_eq!(redact_url_password("postgres://cyxcloud:s3cret@localhost:5433/cyxcloud"),
-                   "postgres://cyxcloud:***@localhost:5433/cyxcloud");
-        assert_eq!(redact_url_password("redis://localhost:6380"), "redis://localhost:6380");
-        assert_eq!(redact_url_password("postgres://user@host/db"), "postgres://user@host/db");
+        assert_eq!(
+            redact_url_password("postgres://cyxcloud:s3cret@localhost:5433/cyxcloud"),
+            "postgres://cyxcloud:***@localhost:5433/cyxcloud"
+        );
+        assert_eq!(
+            redact_url_password("redis://localhost:6380"),
+            "redis://localhost:6380"
+        );
+        assert_eq!(
+            redact_url_password("postgres://user@host/db"),
+            "postgres://user@host/db"
+        );
     }
 }

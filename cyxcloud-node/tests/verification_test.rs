@@ -226,7 +226,9 @@ fn test_public_dataset_registry() {
 
     // Register some datasets
     let mnist_hash = blake3::hash(b"MNIST dataset content").as_bytes().to_vec();
-    let cifar_hash = blake3::hash(b"CIFAR-10 dataset content").as_bytes().to_vec();
+    let cifar_hash = blake3::hash(b"CIFAR-10 dataset content")
+        .as_bytes()
+        .to_vec();
 
     registry.register("MNIST", "1.0", mnist_hash.clone());
     registry.register("CIFAR-10", "1.0", cifar_hash.clone());
@@ -328,7 +330,10 @@ fn test_manifest_hash() {
         different_order.update(hash);
     }
     let different_hash = different_order.finalize();
-    assert_ne!(manifest_hash, different_hash, "Order should affect manifest hash");
+    assert_ne!(
+        manifest_hash, different_hash,
+        "Order should affect manifest hash"
+    );
 
     println!("Manifest hash: OK");
 }

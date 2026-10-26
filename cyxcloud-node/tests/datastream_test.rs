@@ -5,8 +5,8 @@
 //! Run with: cargo test --test datastream_test
 
 use cyxcloud_node::{
-    DataLoaderBuilder, DataLoaderConfig, DataStreamConfig, DatasetVerifier,
-    TrainingBatch, TrainingExecutorBuilder, TrustRequirement, VerifiedBatch, VerificationOptions,
+    DataLoaderBuilder, DataLoaderConfig, DataStreamConfig, DatasetVerifier, TrainingBatch,
+    TrainingExecutorBuilder, TrustRequirement, VerificationOptions, VerifiedBatch,
 };
 
 /// Test DataStreamConfig defaults and environment loading
@@ -91,9 +91,7 @@ fn test_data_loader_builder() {
 /// Test DataLoader infinite epochs mode
 #[test]
 fn test_data_loader_infinite_epochs() {
-    let loader = DataLoaderBuilder::new("test-dataset")
-        .infinite()
-        .build();
+    let loader = DataLoaderBuilder::new("test-dataset").infinite().build();
 
     assert!(loader.config().num_epochs.is_none());
 

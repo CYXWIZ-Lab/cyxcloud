@@ -75,11 +75,9 @@ impl IntoResponse for S3Error {
                 "AccessDenied",
                 "Access Denied".to_string(),
             ),
-            S3Error::InvalidRequest(m) => (
-                StatusCode::BAD_REQUEST,
-                "InvalidRequest",
-                xml_escape(m),
-            ),
+            S3Error::InvalidRequest(m) => {
+                (StatusCode::BAD_REQUEST, "InvalidRequest", xml_escape(m))
+            }
             S3Error::Internal(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "InternalError",

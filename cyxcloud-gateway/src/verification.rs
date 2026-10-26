@@ -474,10 +474,7 @@ mod tests {
             hasher2.update(&file.content_hash);
         }
 
-        assert_eq!(
-            hasher1.finalize().as_bytes(),
-            hasher2.finalize().as_bytes()
-        );
+        assert_eq!(hasher1.finalize().as_bytes(), hasher2.finalize().as_bytes());
     }
 
     #[test]

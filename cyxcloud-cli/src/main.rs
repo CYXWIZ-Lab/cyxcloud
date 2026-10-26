@@ -78,7 +78,7 @@ enum Commands {
         /// Email address (will prompt if not provided)
         #[arg(short, long)]
         email: Option<String>,
-    
+
         /// Server to sign in to (host name or IP, or an https:// address);
         /// remembered for every later command
         #[arg(long)]
@@ -578,7 +578,10 @@ async fn main() -> Result<()> {
                     let config = dataset::ShareConfig {
                         dataset_id,
                         share_with: with,
-                        permissions: permissions.split(',').map(|s| s.trim().to_string()).collect(),
+                        permissions: permissions
+                            .split(',')
+                            .map(|s| s.trim().to_string())
+                            .collect(),
                     };
                     dataset::share(&client, config).await?;
                 }

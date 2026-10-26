@@ -35,10 +35,7 @@ pub enum AuditEvent {
     },
 
     /// API key deleted
-    ApiKeyDeleted {
-        key_id: String,
-        user_id: String,
-    },
+    ApiKeyDeleted { key_id: String, user_id: String },
 
     /// Rate limit exceeded
     RateLimited {
@@ -48,10 +45,7 @@ pub enum AuditEvent {
     },
 
     /// Path traversal attempt blocked
-    PathTraversalBlocked {
-        key: String,
-        ip: Option<String>,
-    },
+    PathTraversalBlocked { key: String, ip: Option<String> },
 
     /// TLS/mTLS event
     TlsEvent {
@@ -60,16 +54,10 @@ pub enum AuditEvent {
     },
 
     /// Node registration
-    NodeRegistered {
-        node_id: String,
-        ip: Option<String>,
-    },
+    NodeRegistered { node_id: String, ip: Option<String> },
 
     /// Node deregistered or expired
-    NodeRemoved {
-        node_id: String,
-        reason: String,
-    },
+    NodeRemoved { node_id: String, reason: String },
 
     /// Administrative action
     AdminAction {

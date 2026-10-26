@@ -170,7 +170,12 @@ pub struct AppState {
 
 /// Why a stored file cannot be served: which chunk, and the reason.
 pub fn chunk_failure_text(index: usize, count: usize, why: &str, detail: &str) -> String {
-    let mut text = format!("chunk {} of {} could not be served: {}", index + 1, count, why);
+    let mut text = format!(
+        "chunk {} of {} could not be served: {}",
+        index + 1,
+        count,
+        why
+    );
     if !detail.is_empty() {
         text.push_str(&format!(" ({})", detail));
     }
@@ -835,7 +840,10 @@ impl AppState {
             drop(buckets);
             self.publish_file_created(bucket, key, 0).await;
 
-            return Ok(PutOutcome { etag, file_id: None });
+            return Ok(PutOutcome {
+                etag,
+                file_id: None,
+            });
         }
 
         // Use metadata service + node storage with erasure coding
@@ -1072,7 +1080,9 @@ impl AppState {
                                         .iter()
                                         .find(|n| n.grpc_address == backup_node.grpc_address)
                                     {
-                                        if let Err(e) = meta.record_chunk_location(&shard_id, node.id).await {
+                                        if let Err(e) =
+                                            meta.record_chunk_location(&shard_id, node.id).await
+                                        {
                                             warn!(error = %e, "Failed to record shard location (backup node)");
                                         }
                                     }
@@ -1208,9 +1218,8 @@ impl AppState {
             .map_err(|e| S3Error::Internal(e.to_string()))?;
 
         // Create erasure decoder
-        let erasure_decoder = ErasureEncoder::new().map_err(|e| {
-            S3Error::Internal(format!("Failed to create erasure decoder: {}", e))
-        })?;
+        let erasure_decoder = ErasureEncoder::new()
+            .map_err(|e| S3Error::Internal(format!("Failed to create erasure decoder: {}", e)))?;
 
         // Decode each chunk using erasure coding
         let mut decoded_chunks: Vec<(i32, Bytes)> = Vec::with_capacity(num_chunks);
@@ -1308,8 +1317,7 @@ impl AppState {
             // For the last chunk, it may be smaller
             let chunk_size = if chunk_idx == (num_chunks as i32 - 1) {
                 // Last chunk: remaining bytes
-                let full_chunks_size =
-                    (num_chunks - 1) * file.chunk_size as usize;
+                let full_chunks_size = (num_chunks - 1) * file.chunk_size as usize;
                 file.size_bytes as usize - full_chunks_size
             } else {
                 file.chunk_size as usize

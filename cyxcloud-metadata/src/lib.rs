@@ -254,7 +254,11 @@ impl MetadataService {
         window_secs: u64,
     ) -> std::result::Result<bool, CacheError> {
         self.cache
-            .try_check_rate_limit(key, max_requests, std::time::Duration::from_secs(window_secs))
+            .try_check_rate_limit(
+                key,
+                max_requests,
+                std::time::Duration::from_secs(window_secs),
+            )
             .await
     }
 
@@ -485,7 +489,10 @@ impl MetadataService {
     /// A node served a shard whose bytes do not hash to its id: count it
     /// against the node. Returns the node's failure count, None if unknown.
     pub async fn record_node_corruption(&self, grpc_address: &str) -> Result<Option<i32>> {
-        Ok(self.db.increment_node_failures_by_address(grpc_address).await?)
+        Ok(self
+            .db
+            .increment_node_failures_by_address(grpc_address)
+            .await?)
     }
 
     /// Get under-replicated chunks

@@ -189,8 +189,7 @@ impl DataStreamClient {
         let response = self.client.get_dataset_info(request).await?;
         let info = response.into_inner();
 
-        info
-            .dataset
+        info.dataset
             .ok_or_else(|| DataStreamError::DatasetNotFound(dataset_id.to_string()))
     }
 

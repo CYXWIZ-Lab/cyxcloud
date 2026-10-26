@@ -566,7 +566,10 @@ mod tests {
     #[test]
     fn two_plain_nodes_share_the_shards_of_a_chunk() {
         let engine = PlacementEngine::new(PlacementConfig::default());
-        let nodes = vec![make_plain_node("pc", 50, 0.0), make_plain_node("hp", 700, 0.0)];
+        let nodes = vec![
+            make_plain_node("pc", 50, 0.0),
+            make_plain_node("hp", 700, 0.0),
+        ];
 
         let decisions = engine.select_nodes(&nodes, 14, 1, None);
 

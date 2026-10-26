@@ -154,7 +154,10 @@ mod tests {
         assert_eq!(u.gateway_http, "http://192.168.1.116:8180");
         assert_eq!(u.gateway_grpc, "http://192.168.1.116:50060");
         assert_eq!(u.api, "http://192.168.1.116:3002");
-        assert_eq!(urls_for_server("http://localhost/").unwrap().api, "http://localhost:3002");
+        assert_eq!(
+            urls_for_server("http://localhost/").unwrap().api,
+            "http://localhost:3002"
+        );
     }
 
     #[test]
@@ -168,13 +171,18 @@ mod tests {
     #[test]
     fn addresses_with_ports_or_paths_are_refused_with_the_reason() {
         assert!(urls_for_server("").is_err());
-        assert!(urls_for_server("host:9999").unwrap_err().contains("host name or IP only"));
+        assert!(urls_for_server("host:9999")
+            .unwrap_err()
+            .contains("host name or IP only"));
         assert!(urls_for_server("https://x/y").is_err());
     }
 
     #[test]
     fn hosts_and_ports_come_out_of_urls() {
-        assert_eq!(url_host("http://192.168.1.116:50060"), Some("192.168.1.116"));
+        assert_eq!(
+            url_host("http://192.168.1.116:50060"),
+            Some("192.168.1.116")
+        );
         assert_eq!(url_host("https://cloud.cyxwiz.ai"), Some("cloud.cyxwiz.ai"));
         assert_eq!(url_port("http://localhost:3002/api"), Some(3002));
         assert_eq!(url_port("https://cloud.cyxwiz.ai"), Some(443));
