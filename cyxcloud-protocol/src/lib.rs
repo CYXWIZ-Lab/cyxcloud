@@ -9,11 +9,10 @@
 //! - `DataService` - Stream ML training data (basic)
 //! - `DataStreamService` - Zero-copy ML training data with verification
 
-// This crate is only tonic/prost output. Newer clippy (CI's stable, not yet
-// 1.91 locally) flags the generated clients: `#[must_use]` on methods that
-// return a Future, and `Result<_, tonic::Status>` being large. Neither is ours
-// to change, so they are allowed here and nowhere else.
-#![allow(clippy::double_must_use, clippy::result_large_err)]
+// This crate is only tonic/prost output: the generated clients return
+// `Result<_, tonic::Status>`, which newer clippy calls large. Not ours to
+// change, so allowed here only (double_must_use: workspace lints).
+#![allow(clippy::result_large_err)]
 
 /// Chunk service messages and client/server
 pub mod chunk {

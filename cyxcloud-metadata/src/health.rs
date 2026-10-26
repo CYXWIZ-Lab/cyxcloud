@@ -330,7 +330,7 @@ impl HealthMonitor {
         let results = self.results.read().await;
         let mut summary = HealthSummary::default();
 
-        for (_, result) in results.iter() {
+        for result in results.values() {
             summary.total += 1;
             match result.status {
                 HealthStatus::Healthy => summary.healthy += 1,
@@ -345,9 +345,9 @@ impl HealthMonitor {
             }
         }
 
-        if summary.latency_samples > 0 {
-            summary.avg_latency_ms = Some(summary.total_latency_ms / summary.latency_samples);
-        }
+        summary.avg_latency_ms = summary
+            .total_latency_ms
+            .checked_div(summary.latency_samples);
 
         summary
     }

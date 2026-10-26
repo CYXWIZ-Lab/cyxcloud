@@ -47,3 +47,6 @@ tracing-subscriber = { workspace = true }
 [[example]]
 name = "cluster_node"
 path = "examples/cluster_node.rs"
+
+[lints]
+workspace = true

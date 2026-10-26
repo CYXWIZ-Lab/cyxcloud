@@ -12,6 +12,12 @@ members = [
     "cyxcloud-protocol",
 ]
 
+# Lints for every member ([lints] workspace = true in each crate).
+[workspace.lints.clippy]
+# async_trait (and tonic) put #[must_use] on functions that return boxed
+# futures; newer clippy flags that in code we do not write.
+double_must_use = "allow"
+
 [workspace.package]
 version = "0.1.0"
 edition = "2021"

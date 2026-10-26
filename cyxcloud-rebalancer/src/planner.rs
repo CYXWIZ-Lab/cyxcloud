@@ -197,7 +197,7 @@ impl Planner {
 
         // Sort issues by priority (highest first)
         let mut sorted_issues: Vec<_> = issues.iter().collect();
-        sorted_issues.sort_by(|a, b| b.priority.cmp(&a.priority));
+        sorted_issues.sort_by_key(|i| std::cmp::Reverse(i.priority));
 
         // Reset pending load tracking
         self.pending_load.clear();

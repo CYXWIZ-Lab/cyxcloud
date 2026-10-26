@@ -44,3 +44,6 @@ io-uring = []  # Linux-specific io_uring support
 [[bench]]
 name = "storage"
 harness = false
+
+[lints]
+workspace = true

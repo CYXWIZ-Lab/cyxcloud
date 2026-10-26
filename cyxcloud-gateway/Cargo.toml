@@ -87,3 +87,6 @@ blockchain = ["solana-sdk", "solana-client"]
 
 [dev-dependencies]
 reqwest = { version = "0.11", features = ["json"] }
+
+[lints]
+workspace = true

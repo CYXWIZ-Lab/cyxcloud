@@ -20,8 +20,9 @@ pub enum DataStreamError {
     #[error("Connection failed: {0}")]
     ConnectionFailed(String),
 
+    /// Boxed: a tonic::Status is large and would make every Result large
     #[error("gRPC error: {0}")]
-    GrpcError(#[from] tonic::Status),
+    GrpcError(Box<tonic::Status>),
 
     #[error("Transport error: {0}")]
     Transport(#[from] tonic::transport::Error),
@@ -43,6 +44,12 @@ pub enum DataStreamError {
 
     #[error("Stream ended unexpectedly")]
     StreamEnded,
+}
+
+impl From<tonic::Status> for DataStreamError {
+    fn from(status: tonic::Status) -> Self {
+        DataStreamError::GrpcError(Box::new(status))
+    }
 }
 
 pub type DataStreamResult<T> = Result<T, DataStreamError>;
@@ -322,7 +329,6 @@ impl DataStreamClient {
 }
 
 /// Verify a batch response
-#[allow(clippy::result_large_err)] // DataStreamError carries a tonic::Status; boxing it is TOFIX175 clean-up
 fn verify_batch(batch: &BatchResponse, _max_trust_level: i32) -> DataStreamResult<VerifiedBatch> {
     // Verify item hashes
     if batch.items.len() != batch.item_hashes.len() {

@@ -139,7 +139,7 @@ impl ScanResult {
             .chain(self.corrupt.iter())
             .collect();
 
-        issues.sort_by(|a, b| b.priority.cmp(&a.priority));
+        issues.sort_by_key(|i| std::cmp::Reverse(i.priority));
         issues
     }
 
