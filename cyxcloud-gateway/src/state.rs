@@ -927,9 +927,11 @@ impl AppState {
 
             debug!(file_id = %file.id, "File record created, now storing shards");
 
-            // Track total shards stored for verification
+            // Track shards stored (and recorded) per chunk: every chunk needs
+            // DATA_SHARDS of them to be readable
             let mut shards_stored = 0;
             let mut failed_shards = 0;
+            let mut stored_per_chunk = vec![0usize; chunk_count];
 
             // Process each chunk with erasure coding
             for chunk in &chunks {
@@ -1022,7 +1024,10 @@ impl AppState {
                                 replication_factor: 3, // Target replicas for rebalancer
                             };
                             if let Err(e) = meta.register_chunk(create_chunk).await {
+                                // a shard nobody can find is not stored
                                 warn!(error = %e, "Failed to register chunk in database");
+                                failed_shards += 1;
+                                continue;
                             }
 
                             // Record shard location in metadata
@@ -1036,6 +1041,10 @@ impl AppState {
                                 }
                             }
                             shards_stored += 1;
+                            if let Some(n) = stored_per_chunk.get_mut(chunk.metadata.index as usize)
+                            {
+                                *n += 1;
+                            }
                         }
                         Err(e) => {
                             warn!(
@@ -1074,6 +1083,7 @@ impl AppState {
                                     };
                                     if let Err(e) = meta.register_chunk(create_chunk).await {
                                         warn!(error = %e, "Failed to register chunk in database (backup node)");
+                                        break;
                                     }
 
                                     if let Some(node) = nodes
@@ -1087,6 +1097,11 @@ impl AppState {
                                         }
                                     }
                                     shards_stored += 1;
+                                    if let Some(n) =
+                                        stored_per_chunk.get_mut(chunk.metadata.index as usize)
+                                    {
+                                        *n += 1;
+                                    }
                                     stored = true;
                                     break;
                                 }
@@ -1100,18 +1115,32 @@ impl AppState {
                 }
             }
 
-            // Check if we stored enough shards (need at least DATA_SHARDS per chunk)
-            let min_shards_needed = chunk_count * DATA_SHARDS;
-            if shards_stored < min_shards_needed {
+            // Every chunk needs DATA_SHARDS stored and recorded shards; a total
+            // across chunks can hide one chunk that cannot be read back
+            if let Some((short_chunk, have)) = stored_per_chunk
+                .iter()
+                .enumerate()
+                .find(|(_, n)| **n < DATA_SHARDS)
+            {
                 error!(
+                    chunk = short_chunk,
+                    have = *have,
+                    need = DATA_SHARDS,
                     shards_stored = shards_stored,
-                    min_needed = min_shards_needed,
                     failed = failed_shards,
-                    "Insufficient shards stored, data may not be recoverable"
+                    "Insufficient shards stored; the file is not kept"
                 );
+                // no half-stored file in listings
+                if let Err(e) = meta.delete_file(file.id).await {
+                    warn!(error = %e, file_id = %file.id, "Could not remove the failed upload's file record");
+                }
                 return Err(S3Error::Internal(format!(
-                    "Failed to store sufficient shards: {} stored, {} needed",
-                    shards_stored, min_shards_needed
+                    "chunk {} of {} could not be stored: {} of {} shards stored and recorded, {} needed",
+                    short_chunk + 1,
+                    chunk_count,
+                    have,
+                    TOTAL_SHARDS,
+                    DATA_SHARDS
                 )));
             }
 

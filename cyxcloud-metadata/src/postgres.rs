@@ -769,7 +769,7 @@ impl Database {
 
     /// Get a chunk by chunk_id
     pub async fn get_chunk_by_id(&self, chunk_id: &[u8]) -> Result<Option<Chunk>> {
-        let result = sqlx::query_as::<_, Chunk>("SELECT * FROM chunks WHERE chunk_id = $1")
+        let result = sqlx::query_as::<_, Chunk>("SELECT * FROM chunks WHERE chunk_id = $1 LIMIT 1")
             .bind(chunk_id)
             .fetch_optional(&self.pool)
             .await?;
