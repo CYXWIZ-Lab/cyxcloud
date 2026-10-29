@@ -2,10 +2,11 @@
 //! --server HOST` and `cyxcloud config set server HOST` set it once; the CLI
 //! and the node derive everything else from it.
 //!
-//! Until the front door (TOFIX168 `cyxwiz-front`) serves everything on one
-//! port, a plain host maps to the three services' ports of the server side
-//! (gateway HTTP 8180, gateway gRPC 50060, CyxWiz API 3002). An `https://`
-//! URL means a front door: every service at that one URL.
+//! A front door (TOFIX168 `cyxwiz-front`) serves everything at one URL:
+//! `https://HOST[:PORT]`, or `http://HOST:PORT` for one without TLS (local
+//! or LAN). A plain host (no scheme, or `http://` without a port) means the
+//! server side without a front door: the three services on their own ports
+//! (gateway HTTP 8180, gateway gRPC 50060, CyxWiz API 3002).
 
 /// Where the CLI and the node reach the server side.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,24 +29,32 @@ pub fn urls_for_server(server: &str) -> Result<ServerUrls, String> {
     if server.is_empty() {
         return Err("the server address is empty".into());
     }
-    if let Some(rest) = server.strip_prefix("https://") {
+    let front_door = |scheme: &str, rest: &str| -> Result<ServerUrls, String> {
         if rest.is_empty() || rest.contains('/') {
             return Err(format!(
-                "'{}' is not a server address (expected https://HOST or https://HOST:PORT)",
-                server
+                "'{}' is not a server address (expected {}://HOST:PORT)",
+                server, scheme
             ));
         }
-        let one = format!("https://{}", rest);
-        return Ok(ServerUrls {
+        let one = format!("{}://{}", scheme, rest);
+        Ok(ServerUrls {
             gateway_http: one.clone(),
             gateway_grpc: one.clone(),
             api: one,
-        });
+        })
+    };
+    if let Some(rest) = server.strip_prefix("https://") {
+        return front_door("https", rest);
+    }
+    if let Some(rest) = server.strip_prefix("http://") {
+        if rest.contains(':') {
+            return front_door("http", rest);
+        }
     }
     let host = server.strip_prefix("http://").unwrap_or(server);
     if host.contains('/') || host.contains(':') {
         return Err(format!(
-            "'{}': give the server's host name or IP only (the ports are known), or an https:// address",
+            "'{}': give the server's host name or IP, or a front door as http://HOST:PORT or https://HOST",
             server
         ));
     }
@@ -156,12 +165,21 @@ mod tests {
     }
 
     #[test]
-    fn addresses_with_ports_or_paths_are_refused_with_the_reason() {
+    fn an_http_address_with_a_port_is_a_front_door_without_tls() {
+        let u = urls_for_server("http://192.168.1.216:8000").unwrap();
+        assert_eq!(u.gateway_http, "http://192.168.1.216:8000");
+        assert_eq!(u.gateway_grpc, "http://192.168.1.216:8000");
+        assert_eq!(u.api, "http://192.168.1.216:8000");
+    }
+
+    #[test]
+    fn unclear_addresses_are_refused_with_the_reason() {
         assert!(urls_for_server("").is_err());
         assert!(urls_for_server("host:9999")
             .unwrap_err()
-            .contains("host name or IP only"));
+            .contains("http://HOST:PORT"));
         assert!(urls_for_server("https://x/y").is_err());
+        assert!(urls_for_server("http://x:1/y").is_err());
     }
 
     #[test]

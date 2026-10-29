@@ -10,6 +10,7 @@ members = [
     "cyxcloud-rebalancer",
     "cyxcloud-cli",
     "cyxcloud-protocol",
+    "cyxwiz-front",
 ]
 
 # Lints for every member ([lints] workspace = true in each crate).

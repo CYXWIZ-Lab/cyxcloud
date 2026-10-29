@@ -12,7 +12,7 @@ use crate::symbols;
 /// Login configuration
 pub struct LoginConfig {
     pub email: Option<String>,
-    /// Set the server first (a host, or an https:// front door)
+    /// Set the server first (a host, or a front door: https://HOST, http://HOST:PORT)
     pub server: Option<String>,
     /// Read the password from this file's first line instead of prompting
     /// (for scripts; the password never goes on the command line)

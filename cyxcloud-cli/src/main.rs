@@ -78,7 +78,7 @@ enum Commands {
         #[arg(short, long)]
         email: Option<String>,
 
-        /// Server to sign in to (host name or IP, or an https:// address);
+        /// Server to sign in to (host name or IP, or a front door: https://HOST, http://HOST:PORT);
         /// remembered for every later command
         #[arg(long)]
         server: Option<String>,

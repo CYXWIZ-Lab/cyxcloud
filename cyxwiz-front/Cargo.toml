@@ -1,0 +1,39 @@
+[package]
+name = "cyxwiz-front"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The CyxWiz server side's one front door: TLS, sign-in check, limits, audit, routing"
+publish = false
+
+[lib]
+name = "cyxwiz_front"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cyxwiz-front"
+path = "src/main.rs"
+
+[dependencies]
+hyper = { workspace = true, features = ["client", "server", "http1", "http2"] }
+hyper-util = { version = "0.1", features = ["client-legacy", "server-auto", "tokio", "http1", "http2"] }
+http-body-util = "0.1"
+bytes = { workspace = true }
+tokio = { workspace = true }
+tokio-rustls = { workspace = true }
+rustls = { workspace = true }
+rustls-pemfile = { workspace = true }
+jsonwebtoken = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+
+[dev-dependencies]
+reqwest = { version = "0.11", default-features = false }
+
+[lints]
+workspace = true

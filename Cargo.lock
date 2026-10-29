@@ -1827,6 +1827,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "cyxwiz-front"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "clap",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "jsonwebtoken",
+ "reqwest 0.11.27",
+ "rustls 0.22.4",
+ "rustls-pemfile 2.2.0",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-rustls 0.25.0",
+ "toml 0.8.23",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "darling"
 version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"

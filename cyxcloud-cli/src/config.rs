@@ -55,7 +55,7 @@ pub struct ServerConfig {
 }
 
 impl CyxCloudConfig {
-    /// Point every service at `server` (a host, or an https:// front door).
+    /// Point every service at `server` (a host, or a front door: https://HOST, http://HOST:PORT).
     pub fn set_server(&mut self, server: &str) -> std::result::Result<(), String> {
         let urls = crate::server::urls_for_server(server)?;
         self.server.host = Some(server.trim().trim_end_matches('/').to_string());

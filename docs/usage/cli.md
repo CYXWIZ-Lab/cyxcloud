@@ -12,13 +12,17 @@ cyxcloud config show
 cyxcloud config set server HOST
 ```
 
-- `--server HOST` (or `config set server HOST`) sets every service address at
-  once and is remembered in `~/.cyxcloud/config.toml` under `[server] host`.
-  A plain host maps to the server side's three services until the front door
-  exists (TOFIX168): gateway HTTP `:8180`, gateway gRPC `:50060`, sign-in
-  `:3002`. An `https://HOST` address means one front door for all three. The
-  separate keys (`gateway.http_url`, `gateway.grpc_url`, `auth.api_url`) can
-  still be set one by one.
+- `--server` (or `config set server`) sets every service address at once and
+  is remembered in `~/.cyxcloud/config.toml` under `[server] host`:
+  - `https://HOST[:PORT]`: a front door (`front.md`) with TLS, every service
+    at that one URL;
+  - `http://HOST:PORT`: a front door without TLS (local, LAN; the local one
+    is `http://HOST:8000`);
+  - `HOST` (or `http://HOST` without a port): no front door, the three
+    services on their own ports (gateway HTTP `:8180`, gateway gRPC
+    `:50060`, sign-in `:3002`).
+  The separate keys (`gateway.http_url`, `gateway.grpc_url`, `auth.api_url`)
+  can still be set one by one.
 - Changing the server drops the old sign-in: a sign-in belongs to the server
   that issued it.
 - The password is prompted for, or read from the first line of
