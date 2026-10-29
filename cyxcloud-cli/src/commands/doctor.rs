@@ -59,8 +59,8 @@ impl Check {
 /// The exit code for a list of checks.
 pub fn exit_code(checks: &[Check]) -> i32 {
     match checks.iter().map(|c| c.outcome).max() {
-        Some(Outcome::Down) => 2,
-        Some(Outcome::Fix) => 1,
+        Some(Outcome::Down) => crate::exit::Kind::Network.code(),
+        Some(Outcome::Fix) => crate::exit::Kind::User.code(),
         _ => 0,
     }
 }

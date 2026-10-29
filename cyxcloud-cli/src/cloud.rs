@@ -283,7 +283,10 @@ pub fn status_error(status: tonic::Status) -> anyhow::Error {
         Code::Unavailable => " (the gateway is not reachable: cyxcloud doctor)",
         _ => "",
     };
-    anyhow::anyhow!("{}{}", status.message(), hint)
+    crate::exit::coded(
+        crate::exit::grpc_kind(status.code()),
+        format!("{}{}", status.message(), hint),
+    )
 }
 
 /// `name` as a file name in `dir`: the last path part only, so a name the

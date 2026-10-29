@@ -33,8 +33,23 @@ See `node.md`: `cyxcloud node init | start | stop | status | logs`.
 ## Health
 
 `cyxcloud doctor` checks the path from this machine to the server and the node
-on this machine, and says what to do; exit codes 0 / 1 (you) / 2 (network or
-server).
+on this machine, and says what to do; it exits 0 (all fine, warnings included),
+1 (something for you to fix) or 2 (the server cannot be reached).
+
+## Exit codes
+
+Every command uses the same codes, so a script (or the Engine) can tell who has
+to act:
+
+| Code | Meaning |
+| --- | --- |
+| 0 | Done (also `--help` and `--version`) |
+| 1 | You: a wrong argument, not signed in, no such dataset, refused by the server |
+| 2 | Network: the server or the node could not be reached in time |
+| 3 | Server: the server failed (an internal error, a lost shard), or the node on this machine stopped right after `node start` |
+
+The message on stderr says what happened and what to do next. `node status`
+exits 1 when the node is not running.
 
 ## Datasets
 

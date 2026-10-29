@@ -606,7 +606,7 @@ async fn wait_until_registered(
             for line in tail_lines(&log, 15) {
                 eprintln!("  {}", line);
             }
-            std::process::exit(3);
+            std::process::exit(crate::exit::Kind::Server.code());
         }
         if let Some(r) = fetch_status(port).await {
             if r.server.registered {
@@ -723,7 +723,7 @@ pub async fn status(watch: bool, json: bool) -> Result<()> {
                     style("!").yellow()
                 );
                 if !watch {
-                    std::process::exit(1);
+                    std::process::exit(crate::exit::Kind::User.code());
                 }
             }
         }

@@ -28,6 +28,7 @@ mod cloud;
 mod commands;
 mod config;
 mod cyxwiz_client;
+mod exit;
 mod server;
 mod symbols;
 
@@ -316,7 +317,22 @@ enum ConfigCommands {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
+    if let Err(e) = run().await {
+        let kind = exit::classify(&e);
+        eprintln!(
+            "{} {}",
+            console::style(symbols::CROSS).red(),
+            exit::describe(&e)
+        );
+        if let Some(step) = exit::next_step(kind) {
+            eprintln!("  {}", step);
+        }
+        std::process::exit(kind.code());
+    }
+}
+
+async fn run() -> Result<()> {
     // Initialize logging
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -325,7 +341,20 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    let cli = Cli::parse();
+    // clap exits with 2 on a usage error; here a wrong argument is the
+    // user's (1) and 2 means the network (see exit.rs)
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(e) => {
+            let code = if e.use_stderr() {
+                exit::Kind::User.code()
+            } else {
+                0
+            };
+            let _ = e.print();
+            std::process::exit(code);
+        }
+    };
 
     // Load configuration from ~/.cyxcloud/config.toml
     let cfg = config::load_config();

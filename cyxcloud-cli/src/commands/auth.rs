@@ -102,7 +102,7 @@ pub async fn login(cyxwiz_client: &CyxWizClient, config: LoginConfig) -> Result<
     let auth = cyxwiz_client
         .login(&email, &password)
         .await
-        .map_err(|e| anyhow::anyhow!("Login failed: {}", e))?;
+        .context("Login failed")?;
 
     // The token says when it expires; 24 h if it does not
     let expires_at = crate::server::jwt_expiry(&auth.token)
@@ -278,7 +278,7 @@ pub async fn register(cyxwiz_client: &CyxWizClient, config: RegisterConfig) -> R
     let auth = cyxwiz_client
         .register(&config.email, &password, config.username.as_deref())
         .await
-        .map_err(|e| anyhow::anyhow!("Registration failed: {}", e))?;
+        .context("Registration failed")?;
 
     // The token says when it expires; 24 h if it does not
     let expires_at = crate::server::jwt_expiry(&auth.token)
