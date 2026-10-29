@@ -71,7 +71,6 @@ pub struct AllocationRequest {
 /// Machine registration request
 #[derive(Debug, Serialize)]
 pub struct RegisterMachineRequest {
-    pub owner_id: String,
     pub hostname: Option<String>,
     pub os: Option<String>,
     pub hardware: Option<DetectedHardware>,
@@ -359,24 +358,22 @@ impl CyxWizApiClient {
         self.auth_token.is_some() && self.user_id.is_some()
     }
 
-    /// Register a new machine with the CyxWiz API
-    /// Requires login first (uses stored user_id)
+    /// Register a new machine with the CyxWiz API. The account sign-in says
+    /// whose machine it is: the API takes the owner from the token (TOFIX183).
     pub async fn register_machine(
         &mut self,
         hostname: &str,
         os: &str,
         hardware: DetectedHardware,
     ) -> Result<RegisterMachineResponse, ApiError> {
-        let owner_id = self
-            .user_id
-            .as_ref()
-            .ok_or_else(|| ApiError::NotConfigured("Not logged in - user_id not set".to_string()))?
-            .clone();
+        let token = self
+            .auth_token
+            .clone()
+            .ok_or_else(|| ApiError::NotConfigured("Not signed in".to_string()))?;
 
         let url = format!("{}/api/machines/register", self.base_url);
 
         let request = RegisterMachineRequest {
-            owner_id: owner_id.clone(),
             hostname: Some(hostname.to_string()),
             os: Some(os.to_string()),
             hardware: Some(hardware),
@@ -384,19 +381,19 @@ impl CyxWizApiClient {
         };
 
         info!(
-            owner_id = %owner_id,
+            account = ?self.user_id,
             hostname = hostname,
             url = %url,
             "Registering machine with CyxWiz API"
         );
 
-        // The account sign-in says whose machine this is (TOFIX183: the API is
-        // to take the owner from the token, not from the body)
-        let mut post = self.client.post(&url).json(&request);
-        if let Some(token) = &self.auth_token {
-            post = post.bearer_auth(token);
-        }
-        let response = post.send().await?;
+        let response = self
+            .client
+            .post(&url)
+            .bearer_auth(token)
+            .json(&request)
+            .send()
+            .await?;
 
         if response.status().is_success() {
             let result: RegisterMachineResponse = response.json().await?;
