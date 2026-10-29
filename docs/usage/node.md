@@ -32,7 +32,7 @@ Asks three things when run in a terminal, or takes flags:
 | `--port` | 50051 | port the server dials for shards (open it in the firewall) |
 | `--status-port` | 9090 | local port for `node status` (127.0.0.1 only is enough) |
 | `--public-address` | this machine's address towards the server | what the server dials back |
-| `--force` | | set up again; the key and the node id are kept |
+| `--force` | | set up again; the key and the node id are kept, the folder and the offer are asked again (defaults without a terminal) |
 
 It refuses an offer larger than the disk's free space. It writes:
 
@@ -46,6 +46,24 @@ It refuses an offer larger than the disk's free space. It writes:
 Owner-only means mode 600 on Linux and macOS, and on Windows an ACL with
 inheritance removed: the user, SYSTEM and Administrators only (the same rule
 OpenSSH applies to private keys).
+
+### Sign-in: what the node runs on
+
+The account sign-in from `cyxcloud login` is needed once, to set the machine
+up. After that the node runs on credentials that do not expire:
+
+| Talking to | Credential | Expires |
+| --- | --- | --- |
+| the gateway | the node key signs every registration; the gateway's node token (24 h) carries heartbeats and is renewed by registering again | never (the key) |
+| the CyxWiz API | the machine `api_key` the API issued at registration carries heartbeats | never |
+
+The account sign-in is needed again only when the API no longer knows the
+machine (its key is refused). The node then logs, once:
+"Registering this machine needs a current sign-in: run `cyxcloud login`, then
+`cyxcloud node sign-in`, then restart the node". `cyxcloud node sign-in`
+gives the node the CLI's current sign-in and changes nothing else (folder,
+offer, key); it refuses when the node belongs to another account (moving a
+node to another account is `node init --force`).
 
 ### `cyxcloud node start | stop | status | logs`
 
@@ -104,6 +122,6 @@ other machines, to run as administrator.
 
 - `cyxcloud node upgrade` (signed releases, TOFIX175).
 - Reputation, audits and earnings in `node status` (TOFIX176 P4, P8).
-- Long-lived machine sign-in: the node registers its machine with the
-  account's token from `cyxcloud login` and keeps the machine key it gets; the
-  token itself expires after 24 h.
+- The API still takes the machine's owner from the request body, and several
+  of its machine routes need no sign-in (TOFIX183); the node already sends
+  its account sign-in when it registers.

@@ -43,8 +43,10 @@ tonic = { workspace = true }
 # Async (for TLS)
 tokio = { workspace = true }
 
-[dev-dependencies]
+# Reading JWT claims (jwt.rs)
 serde_json = { workspace = true }
+
+[dev-dependencies]
 criterion = { workspace = true }
 proptest = { workspace = true }
 tempfile = { workspace = true }

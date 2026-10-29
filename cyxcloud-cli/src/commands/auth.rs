@@ -105,7 +105,7 @@ pub async fn login(cyxwiz_client: &CyxWizClient, config: LoginConfig) -> Result<
         .context("Login failed")?;
 
     // The token says when it expires; 24 h if it does not
-    let expires_at = crate::server::jwt_expiry(&auth.token)
+    let expires_at = cyxcloud_core::jwt::expiry(&auth.token)
         .unwrap_or_else(|| chrono::Utc::now().timestamp() + 86400);
 
     // Save credentials
@@ -281,7 +281,7 @@ pub async fn register(cyxwiz_client: &CyxWizClient, config: RegisterConfig) -> R
         .context("Registration failed")?;
 
     // The token says when it expires; 24 h if it does not
-    let expires_at = crate::server::jwt_expiry(&auth.token)
+    let expires_at = cyxcloud_core::jwt::expiry(&auth.token)
         .unwrap_or_else(|| chrono::Utc::now().timestamp() + 86400);
 
     // Save credentials

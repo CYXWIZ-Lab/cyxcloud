@@ -180,8 +180,6 @@ pub struct HeartbeatService {
     grpc_address: String,
     client: RwLock<Option<NodeServiceClient<Channel>>>,
     auth_token: RwLock<Option<String>>,
-    /// JWT token from CyxWiz API for Gateway authentication
-    jwt_token: RwLock<Option<String>>,
     /// Wallet address from CyxWiz API login (takes priority over config)
     credentials_wallet: RwLock<Option<String>>,
     system: RwLock<System>,
@@ -243,7 +241,6 @@ impl HeartbeatService {
             grpc_address,
             client: RwLock::new(None),
             auth_token: RwLock::new(None),
-            jwt_token: RwLock::new(None),
             credentials_wallet: RwLock::new(None),
             system: RwLock::new(system),
             command_executor,
@@ -262,19 +259,6 @@ impl HeartbeatService {
         if let Some(state) = &self.health_state {
             update(&mut state.write().await.report);
         }
-    }
-
-    /// Set the JWT token for Gateway authentication
-    /// This token comes from CyxWiz API login
-    pub async fn set_jwt_token(&self, token: String) {
-        let mut jwt = self.jwt_token.write().await;
-        *jwt = Some(token);
-        info!("JWT token set for Gateway authentication");
-    }
-
-    /// Check if JWT token is set
-    pub async fn has_jwt_token(&self) -> bool {
-        self.jwt_token.read().await.is_some()
     }
 
     /// Set the wallet address from CyxWiz API login
@@ -453,10 +437,10 @@ impl HeartbeatService {
         Ok(client)
     }
 
-    /// Create a gRPC request with JWT authorization header
-    fn create_auth_request<T>(&self, inner: T, jwt_token: Option<&str>) -> tonic::Request<T> {
+    /// A gRPC request carrying the node token from RegisterNode
+    fn create_auth_request<T>(&self, inner: T, node_token: Option<&str>) -> tonic::Request<T> {
         let mut request = tonic::Request::new(inner);
-        if let Some(token) = jwt_token {
+        if let Some(token) = node_token {
             if let Ok(value) = format!("Bearer {}", token).parse() {
                 request.metadata_mut().insert("authorization", value);
             }
@@ -464,19 +448,15 @@ impl HeartbeatService {
         request
     }
 
-    /// Register with central server
+    /// Register with the gateway. The node key's signature is the credential
+    /// (TOFIX176 P2): no account sign-in is needed, so a node keeps
+    /// re-registering for as long as its key is on disk (TOFIX177).
     async fn register(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Get JWT token for authentication
-        let jwt_token = self.jwt_token.read().await.clone();
-        if jwt_token.is_none() {
-            return Err("JWT token not set - login to CyxWiz API first".into());
-        }
-
         info!(
             node_id = %self.node_id,
             central_addr = %self.config.central.address,
             grpc_addr = %self.grpc_address,
-            "Registering with Gateway (using JWT auth)"
+            "Registering with Gateway (signed by the node key)"
         );
 
         let mut client = self.connect().await?;
@@ -523,8 +503,7 @@ impl HeartbeatService {
             info!(wallet = %wallet_address, "Registering with wallet address");
         }
 
-        // Create request with JWT auth header
-        let request = self.create_auth_request(register_req, jwt_token.as_deref());
+        let request = tonic::Request::new(register_req);
 
         let response = client.register_node(request).await?;
         let result = response.into_inner();
@@ -571,8 +550,8 @@ impl HeartbeatService {
     async fn send_heartbeat(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Node RPCs carry the node token the gateway issued at registration;
         // without one the heartbeat fails and the caller re-registers.
-        let jwt_token = self.auth_token.read().await.clone();
-        if jwt_token.is_none() {
+        let node_token = self.auth_token.read().await.clone();
+        if node_token.is_none() {
             return Err("not registered with the gateway yet (no node token)".into());
         }
 
@@ -633,7 +612,7 @@ impl HeartbeatService {
         };
 
         // Create request with JWT auth header
-        let request = self.create_auth_request(heartbeat_req, jwt_token.as_deref());
+        let request = self.create_auth_request(heartbeat_req, node_token.as_deref());
 
         let response = client.heartbeat(request).await?;
         let result = response.into_inner();

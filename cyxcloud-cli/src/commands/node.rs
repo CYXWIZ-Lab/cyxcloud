@@ -207,16 +207,20 @@ pub fn strip_ansi(line: &str) -> String {
 /// from ~/.cyxcloud/node_credentials.json). Keeps an existing machine
 /// registration when it belongs to the same account; a file left by another
 /// account is replaced.
+/// Whether the node's credentials file belongs to `email`.
+pub fn node_account_is(existing: &serde_json::Value, email: &str) -> bool {
+    existing
+        .get("email")
+        .and_then(|e| e.as_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case(email))
+}
+
 pub fn node_credentials_json(
     existing: Option<&serde_json::Value>,
     creds: &config::Credentials,
     node_id: &str,
 ) -> serde_json::Value {
-    let same_account = existing
-        .and_then(|e| e.get("email"))
-        .and_then(|e| e.as_str())
-        .map(|e| e.eq_ignore_ascii_case(&creds.email))
-        .unwrap_or(false);
+    let same_account = existing.is_some_and(|e| node_account_is(e, &creds.email));
     let keep = |key: &str| -> serde_json::Value {
         if same_account {
             existing
@@ -500,6 +504,47 @@ pub async fn init(cfg: InitConfig) -> Result<()> {
     );
     println!("  key {} (owner-only)", key_path.display());
     println!("  Start it: cyxcloud node start");
+    Ok(())
+}
+
+/// `cyxcloud node sign-in`: give the node the CLI's current sign-in, and
+/// change nothing else (folder, offer, key). The node runs on its own key and
+/// the machine's api_key; it needs a current account sign-in only to register
+/// the machine with the CyxWiz API again, for example after the API forgot it.
+pub async fn sign_in() -> Result<()> {
+    let creds = config::get_valid_credentials()
+        .context("sign in first: `cyxcloud login`, then run this again")?;
+    if !node_config_path()?.exists() {
+        bail!("no node is set up here: `cyxcloud node init`");
+    }
+    let key = cyxcloud_core::NodeKey::load(&node_dir()?.join("key"))
+        .map_err(|e| anyhow::anyhow!("node key: {}", e))?;
+    let creds_path = node_credentials_path()?;
+    let existing = std::fs::read_to_string(&creds_path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
+    if let Some(e) = &existing {
+        if !node_account_is(e, &creds.email) {
+            bail!(
+                "this node earns for another account; to move it to {} run `cyxcloud node init --force`",
+                creds.email
+            );
+        }
+    }
+    let node_creds = node_credentials_json(existing.as_ref(), &creds, &key.node_id());
+    cyxcloud_core::owner_only::write_owner_only(
+        &creds_path,
+        serde_json::to_string_pretty(&node_creds)?,
+    )
+    .context("cannot save the node's credentials")?;
+    println!(
+        "{} The node has the sign-in of {}",
+        style(symbols::CHECK).green(),
+        creds.email
+    );
+    if fetch_status(configured_status_port()?).await.is_some() {
+        println!("  It reads it when it starts: `cyxcloud node stop`, then `cyxcloud node start`");
+    }
     Ok(())
 }
 
@@ -998,6 +1043,17 @@ mod tests {
             email: email.into(),
             username: Some("e2e_user".into()),
         }
+    }
+
+    #[test]
+    fn the_node_account_is_matched_by_email_in_any_case() {
+        let existing = serde_json::json!({ "email": "E2E-user@local.test" });
+        assert!(node_account_is(&existing, "e2e-user@local.test"));
+        assert!(!node_account_is(&existing, "other@local.test"));
+        assert!(!node_account_is(
+            &serde_json::json!({}),
+            "e2e-user@local.test"
+        ));
     }
 
     #[test]

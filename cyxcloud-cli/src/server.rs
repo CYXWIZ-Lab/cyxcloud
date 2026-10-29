@@ -7,8 +7,6 @@
 //! (gateway HTTP 8180, gateway gRPC 50060, CyxWiz API 3002). An `https://`
 //! URL means a front door: every service at that one URL.
 
-use base64::Engine as _;
-
 /// Where the CLI and the node reach the server side.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerUrls {
@@ -79,17 +77,6 @@ pub fn url_port(url: &str) -> Option<u16> {
         None if url.starts_with("http://") => Some(80),
         None => None,
     }
-}
-
-/// The `exp` claim (Unix seconds) of a JWT, read without verifying it: the
-/// CLI only needs to know when to ask for a new sign-in.
-pub fn jwt_expiry(token: &str) -> Option<i64> {
-    let payload = token.split('.').nth(1)?;
-    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(payload.trim_end_matches('='))
-        .ok()?;
-    let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
-    value.get("exp")?.as_i64()
 }
 
 /// "6.5 MB", "700 GB", "1.2 TB" (powers of 1024, one decimal under 10).
@@ -186,17 +173,6 @@ mod tests {
         assert_eq!(url_host("https://cloud.cyxwiz.ai"), Some("cloud.cyxwiz.ai"));
         assert_eq!(url_port("http://localhost:3002/api"), Some(3002));
         assert_eq!(url_port("https://cloud.cyxwiz.ai"), Some(443));
-    }
-
-    #[test]
-    fn the_expiry_is_read_from_the_token() {
-        let header = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(br#"{"alg":"HS256"}"#);
-        let body = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .encode(br#"{"sub":"6ac29f910171abdbcfdf8a04","exp":1800086400}"#);
-        let token = format!("{}.{}.sig", header, body);
-
-        assert_eq!(jwt_expiry(&token), Some(1_800_086_400));
-        assert_eq!(jwt_expiry("not-a-jwt"), None);
     }
 
     #[test]

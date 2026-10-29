@@ -28,7 +28,7 @@ cyxcloud config set server HOST
 
 ## Storage node
 
-See `node.md`: `cyxcloud node init | start | stop | status | logs`.
+See `node.md`: `cyxcloud node init | start | stop | status | logs | sign-in`.
 
 ## Health
 

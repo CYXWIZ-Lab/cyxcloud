@@ -16,6 +16,10 @@ use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
+/// What to do when the machine has to be registered and the account sign-in
+/// has run out.
+const SIGN_IN_AGAIN: &str = "Registering this machine needs a current sign-in: run `cyxcloud login`, then `cyxcloud node sign-in`, then restart the node";
+
 /// How often a daemon retries a login that never reached the API before giving
 /// up (2026-10-22: the HP's first login hit the 10 s client timeout against a
 /// debug-build API whose Argon2 check takes 4 s cold, and the node exited).
@@ -31,8 +35,6 @@ pub struct MachineService {
     credentials_path: PathBuf,
     email: RwLock<Option<String>>,
     username: RwLock<Option<String>>,
-    /// JWT token for Gateway authentication (shared with HeartbeatService)
-    jwt_token: RwLock<Option<String>>,
     /// Wallet address from CyxWiz account (for storage payments)
     wallet_address: RwLock<Option<String>>,
 }
@@ -63,19 +65,8 @@ impl MachineService {
             credentials_path,
             email: RwLock::new(None),
             username: RwLock::new(None),
-            jwt_token: RwLock::new(None),
             wallet_address: RwLock::new(None),
         })
-    }
-
-    /// Get the JWT token for Gateway authentication
-    pub async fn get_jwt_token(&self) -> Option<String> {
-        self.jwt_token.read().await.clone()
-    }
-
-    /// Check if we have a valid JWT token
-    pub async fn has_jwt_token(&self) -> bool {
-        self.jwt_token.read().await.is_some()
     }
 
     /// Check if we have saved credentials
@@ -107,9 +98,6 @@ impl MachineService {
                     // Store email/username for later
                     *self.email.write().await = Some(creds.email.clone());
                     *self.username.write().await = Some(creds.username.clone());
-
-                    // Store JWT token for Gateway authentication
-                    *self.jwt_token.write().await = Some(creds.auth_token.clone());
 
                     // Store wallet address
                     *self.wallet_address.write().await = creds.wallet_address.clone();
@@ -184,9 +172,6 @@ impl MachineService {
         *self.email.write().await = Some(result.user.email.clone());
         *self.username.write().await = Some(result.user.username.clone());
 
-        // Store JWT token for Gateway authentication
-        *self.jwt_token.write().await = Some(result.token.clone());
-
         // Store wallet address from user profile
         let wallet = result.user.wallet_address();
         *self.wallet_address.write().await = wallet.clone();
@@ -245,9 +230,6 @@ impl MachineService {
         *self.email.write().await = Some(result.user.email.clone());
         *self.username.write().await = Some(result.user.username.clone());
 
-        // Store JWT token for Gateway authentication
-        *self.jwt_token.write().await = Some(result.token.clone());
-
         // Store wallet address from user profile
         let wallet = result.user.wallet_address();
         *self.wallet_address.write().await = wallet.clone();
@@ -282,7 +264,6 @@ impl MachineService {
     /// Logout and clear credentials
     pub async fn logout(&self) -> Result<(), std::io::Error> {
         // Clear in-memory state
-        *self.jwt_token.write().await = None;
         *self.email.write().await = None;
         *self.username.write().await = None;
         *self.wallet_address.write().await = None;
@@ -516,6 +497,16 @@ impl MachineService {
         Ok(())
     }
 
+    /// Whether the account sign-in can still register this machine. After
+    /// registration the machine's api_key is its long-lived credential; the
+    /// account sign-in is needed again only if the API forgets the machine.
+    pub async fn account_sign_in_current(&self) -> bool {
+        let client = self.client.read().await;
+        client
+            .auth_token()
+            .is_some_and(|t| !cyxcloud_core::jwt::has_expired(t, chrono::Utc::now().timestamp()))
+    }
+
     /// Send heartbeat to CyxWiz API
     pub async fn heartbeat(
         &self,
@@ -588,6 +579,13 @@ impl MachineService {
         );
 
         // Register machine if not already registered
+        if !already_registered && !self.account_sign_in_current().await {
+            error!("{}", SIGN_IN_AGAIN);
+            if self.is_interactive() {
+                eprintln!("{} {}", symbols::CROSS, SIGN_IN_AGAIN);
+            }
+            return;
+        }
         if !already_registered {
             if self.is_interactive() {
                 println!("Registering machine with CyxWiz API...");
@@ -623,6 +621,7 @@ impl MachineService {
         // Heartbeat loop
         let interval_secs = self.config.central.heartbeat_interval_secs;
         let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
+        let mut told_to_sign_in = false;
 
         loop {
             interval.tick().await;
@@ -632,9 +631,17 @@ impl MachineService {
                     debug!("Heartbeat to CyxWiz API successful");
                 }
                 Err(crate::cyxwiz_api_client::ApiError::AuthFailed(_)) => {
-                    warn!("Heartbeat auth failed, attempting re-registration");
-                    if let Err(e) = self.register().await {
-                        error!(error = %e, "Re-registration failed");
+                    // The API no longer knows this machine's key. Registering
+                    // again needs the account; with an expired sign-in every
+                    // attempt would fail, so say once what to do instead.
+                    if self.account_sign_in_current().await {
+                        warn!("The CyxWiz API refused the machine key; registering again");
+                        if let Err(e) = self.register().await {
+                            error!(error = %e, "Re-registration failed");
+                        }
+                    } else if !told_to_sign_in {
+                        error!("The CyxWiz API refused the machine key. {}", SIGN_IN_AGAIN);
+                        told_to_sign_in = true;
                     }
                 }
                 Err(crate::cyxwiz_api_client::ApiError::NotConfigured(_)) => {

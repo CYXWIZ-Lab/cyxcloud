@@ -275,9 +275,11 @@ async fn main() -> anyhow::Result<()> {
     info!("Health checker started");
 
     // ========================================
-    // Authentication Flow:
-    // 1. Login to CyxWiz API (port 3002) to get JWT token
-    // 2. Use JWT token for Gateway authentication (port 50052)
+    // Sign-in:
+    // - CyxWiz API: the account sign-in registers the machine once; the
+    //   machine's api_key carries its heartbeats from then on.
+    // - Gateway: the node key signs RegisterNode; the gateway's node token
+    //   carries Heartbeat and ReportMetrics. No account sign-in is involved.
     // ========================================
 
     // Create machine service for CyxWiz API authentication
@@ -304,26 +306,12 @@ async fn main() -> anyhow::Result<()> {
         false
     };
 
-    // Get JWT token for Gateway authentication
-    let jwt_token = machine_service.get_jwt_token().await;
-    if jwt_token.is_none() && config.central.register {
-        error!("No JWT token available for Gateway authentication");
-        return Err(anyhow::anyhow!(
-            "JWT token required for Gateway registration"
-        ));
-    }
-
     // Create heartbeat service for Gateway registration
     let heartbeat_service = Arc::new(
         HeartbeatService::new(config.clone(), node_metrics.clone(), storage.clone())
             .map_err(|e| anyhow::anyhow!("Node identity: {}", e))?
             .with_health_state(health_state.clone()),
     );
-
-    // Set JWT token for Gateway authentication
-    if let Some(token) = jwt_token {
-        heartbeat_service.set_jwt_token(token).await;
-    }
 
     // Set wallet address for Gateway registration (from CyxWiz login)
     if let Some(wallet) = machine_service.get_credentials_wallet().await {
@@ -338,7 +326,7 @@ async fn main() -> anyhow::Result<()> {
         });
         info!(
             central_addr = %config.central.address,
-            "Gateway heartbeat service started (with JWT auth)"
+            "Gateway heartbeat service started"
         );
     }
 

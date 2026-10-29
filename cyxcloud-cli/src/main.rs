@@ -259,6 +259,8 @@ enum NodeCommands {
     },
     /// Stop the node started with `cyxcloud node start`
     Stop,
+    /// Give the node this CLI's current sign-in (keeps its folder, offer and key)
+    SignIn,
     /// Show what the node is doing
     Status {
         /// Refresh every 2 s
@@ -440,6 +442,7 @@ async fn run() -> Result<()> {
             }
             NodeCommands::Start { foreground } => node::start(foreground).await?,
             NodeCommands::Stop => node::stop().await?,
+            NodeCommands::SignIn => node::sign_in().await?,
             NodeCommands::Status { watch, json } => node::status(watch, json).await?,
             NodeCommands::Logs { lines, follow } => node::logs(lines, follow).await?,
             NodeCommands::Service { command } => match command {

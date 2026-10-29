@@ -344,6 +344,11 @@ impl CyxWizApiClient {
         self.api_key.as_deref()
     }
 
+    /// The account sign-in the machine was set up with
+    pub fn auth_token(&self) -> Option<&str> {
+        self.auth_token.as_deref()
+    }
+
     /// Get current user ID
     pub fn user_id(&self) -> Option<&str> {
         self.user_id.as_deref()
@@ -385,7 +390,13 @@ impl CyxWizApiClient {
             "Registering machine with CyxWiz API"
         );
 
-        let response = self.client.post(&url).json(&request).send().await?;
+        // The account sign-in says whose machine this is (TOFIX183: the API is
+        // to take the owner from the token, not from the body)
+        let mut post = self.client.post(&url).json(&request);
+        if let Some(token) = &self.auth_token {
+            post = post.bearer_auth(token);
+        }
+        let response = post.send().await?;
 
         if response.status().is_success() {
             let result: RegisterMachineResponse = response.json().await?;

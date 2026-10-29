@@ -12,6 +12,7 @@ pub mod circuit_breaker;
 pub mod crypto;
 pub mod erasure;
 pub mod error;
+pub mod jwt;
 pub mod node_identity;
 pub mod node_status;
 pub mod owner_only;
