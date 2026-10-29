@@ -415,8 +415,11 @@ impl HeartbeatService {
                     }
                 }
             } else if self.config.central.address.starts_with("https://") {
-                // HTTPS URL but no CA cert - try system roots
-                warn!("Using HTTPS without explicit CA cert - using system roots");
+                // An https:// server (a front door, TOFIX168) with a public
+                // certificate: the system's trusted roots. This branch used
+                // to log "using system roots" and then dial without TLS.
+                endpoint = endpoint.tls_config(tonic::transport::ClientTlsConfig::new())?;
+                info!(central_addr = %self.config.central.address, "TLS with the system's trusted roots");
             }
         }
 

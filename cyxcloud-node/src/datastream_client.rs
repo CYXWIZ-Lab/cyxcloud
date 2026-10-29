@@ -171,12 +171,15 @@ impl DataStreamClient {
                 .connect()
                 .await?
         } else {
-            // Plain connection
-            Channel::from_shared(config.gateway_addr.clone())
+            // No CA given: an https:// gateway (or front door) is trusted by
+            // the system's roots; http:// is plain
+            let mut endpoint = Channel::from_shared(config.gateway_addr.clone())
                 .map_err(|e| DataStreamError::ConnectionFailed(e.to_string()))?
-                .connect_timeout(std::time::Duration::from_secs(config.connect_timeout_secs))
-                .connect()
-                .await?
+                .connect_timeout(std::time::Duration::from_secs(config.connect_timeout_secs));
+            if config.gateway_addr.starts_with("https://") {
+                endpoint = endpoint.tls_config(tonic::transport::ClientTlsConfig::new())?;
+            }
+            endpoint.connect().await?
         };
 
         let client = DataStreamServiceClient::new(channel);
