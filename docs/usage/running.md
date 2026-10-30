@@ -32,6 +32,22 @@ cargo build -p cyxcloud-cli
 cargo test -p cyxcloud-gateway
 ```
 
+**Older CPUs (no AVX2).** On Linux and macOS x86-64, `reed-solomon-erasure`
+(erasure coding, in cyxcloud-core) compiles its SIMD code with
+`-march=haswell`, so a binary built on a recent machine dies with "illegal
+instruction" (SIGILL, exit 132) on a CPU without AVX2, such as the HP's
+i7-2620M: the gateway on its first upload. Build for any x86-64 since ~2009
+with:
+
+```sh
+RUST_REED_SOLOMON_ERASURE_ARCH=x86-64-v2 cargo build --release -p cyxcloud-gateway
+```
+
+The crate's build script does not rerun when the variable changes: run
+`cargo clean --release -p reed-solomon-erasure` first in a target folder that
+built it without. The Dockerfiles here and in cyxwiz_web `deploy/server` set
+it. Windows (MSVC) builds do not compile the SIMD code and are not affected.
+
 ## 3. Run the gateway
 
 ```powershell

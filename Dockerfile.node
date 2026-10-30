@@ -80,6 +80,11 @@ COPY cyxcloud-gateway ./cyxcloud-gateway
 COPY cyxcloud-node ./cyxcloud-node
 COPY cyxcloud-cli ./cyxcloud-cli
 COPY cyxcloud-rebalancer ./cyxcloud-rebalancer
+COPY cyxwiz-front ./cyxwiz-front
+
+# Erasure coding: portable SIMD (reed-solomon-erasure defaults to
+# -march=haswell, AVX2, and the binary dies with SIGILL on older CPUs).
+ENV RUST_REED_SOLOMON_ERASURE_ARCH=x86-64-v2
 
 # Build release binary
 RUN cargo build --release -p cyxcloud-node
