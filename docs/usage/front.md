@@ -42,9 +42,12 @@ cyxcloud login --server https://cloud.cyxwiz.ai   # with TLS
 | Forward | gRPC over HTTP/2, HTTP over HTTP/1.1; streams and trailers pass through; `X-Forwarded-For`, `-Proto` and `-Host` are added, connection headers dropped. A service that does not answer: 502 / gRPC UNAVAILABLE. |
 | Audit | one log line per request (target `audit`): client address, method, path, route, status, account (the token's `sub`), milliseconds. Never a token. |
 
-Not routed on purpose: the gateway's S3 API (`/s3`, no sign-in yet,
-TOFIX171), every service's `/metrics` and `/health`, the gateway's `/ws`, and
-central's REST (admin, internal).
+`/s3/` reaches the gateway's S3 API (the website's Drive), with its own body
+cap of 256 MB, the gateway's own. The gateway takes only a signed-in user's
+token there and serves only that user's bucket, `user-<their id>`.
+
+Not routed on purpose: every service's `/metrics` and `/health`, the
+gateway's `/ws`, and central's REST (admin, internal).
 
 `GET /health` is the door's own: `{"front":"ok","services":{"central":"up",
 "gateway":"up","api":"up"}}`, 503 when a service does not accept a
@@ -87,15 +90,21 @@ prefix = "/api/v1/auth/"
 upstream = "http://gateway:8180"
 
 [[route]]
+name = "gateway"
+prefix = "/s3/"
+upstream = "http://gateway:8180"
+body_bytes = 268435456        # this route's cap in place of http_body_bytes
+
+[[route]]
 name = "api"
 prefix = "/api/"
 upstream = "http://api:3002"
 ```
 
-Unknown keys are refused, so a typo does not silently change the door.
+`body_bytes` is for HTTP routes only: the services cap gRPC streams, so a gRPC
+route with it is refused. Unknown keys are refused too, so a typo does not
+silently change the door.
 
 ## Not there yet
 
-- Engine and node configured by the one address (TOFIX168 step 3).
-- The whole server side in one Docker compose behind the door (step 4).
 - Limits shared across several doors (Redis), per-account quotas (TOFIX176 P6).

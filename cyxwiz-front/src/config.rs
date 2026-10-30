@@ -62,6 +62,17 @@ pub struct Route {
     /// gRPC (HTTP/2 to the service) or plain HTTP
     #[serde(default)]
     pub grpc: bool,
+    /// Largest body this HTTP route accepts, in place of
+    /// `limits.http_body_bytes` (the gateway's S3 uploads take its own cap)
+    #[serde(default)]
+    pub body_bytes: Option<u64>,
+}
+
+impl Route {
+    /// The body cap for a request on this route
+    pub fn body_cap(&self, limits: &Limits) -> u64 {
+        self.body_bytes.unwrap_or(limits.http_body_bytes)
+    }
 }
 
 // Every address, IPv4 and IPv6 (see `listen`): "localhost" resolves to ::1
@@ -79,22 +90,29 @@ fn default_http_body_bytes() -> u64 {
     16 * 1024 * 1024
 }
 
+/// The gateway's own cap on an S3 upload (its `DefaultBodyLimit`)
+pub const GATEWAY_S3_BODY_BYTES: u64 = 256 * 1024 * 1024;
+
 /// The local server side (deploy/local): central, gateway and API on their
-/// usual ports. Not routed on purpose: the gateway's `/s3` (no sign-in,
-/// TOFIX171), every service's `/metrics` and `/health`, the gateway's `/ws`
-/// and central's REST (admin, internal).
+/// usual ports. Not routed on purpose: every service's `/metrics` and
+/// `/health`, the gateway's `/ws` and central's REST (admin, internal).
 pub fn default_routes() -> Vec<Route> {
     let r = |name: &str, prefix: &str, upstream: &str, grpc: bool| Route {
         name: name.into(),
         prefix: prefix.into(),
         upstream: upstream.into(),
         grpc,
+        body_bytes: None,
     };
     vec![
         r("central", "/cyxwiz.", "http://127.0.0.1:50051", true),
         r("gateway", "/cyxcloud.", "http://127.0.0.1:50060", true),
         r("gateway", "/api/datasets/", "http://127.0.0.1:8180", false),
         r("gateway", "/api/v1/auth/", "http://127.0.0.1:8180", false),
+        Route {
+            body_bytes: Some(GATEWAY_S3_BODY_BYTES),
+            ..r("gateway", "/s3/", "http://127.0.0.1:8180", false)
+        },
         r("api", "/api/", "http://127.0.0.1:3002", false),
     ]
 }
@@ -116,6 +134,12 @@ impl FrontConfig {
         for r in &self.routes {
             if !r.prefix.starts_with('/') {
                 anyhow::bail!("route {}: prefix '{}' must start with /", r.name, r.prefix);
+            }
+            if r.grpc && r.body_bytes.is_some() {
+                anyhow::bail!(
+                    "route {}: body_bytes is for HTTP routes (the services cap gRPC streams)",
+                    r.name
+                );
             }
             if !(r.upstream.starts_with("http://") || r.upstream.starts_with("https://")) {
                 anyhow::bail!(
@@ -150,5 +174,16 @@ mod tests {
         assert!(FrontConfig::from_toml("listn = \"0.0.0.0:1\"").is_err());
         let bad = "[[route]]\nname = \"x\"\nprefix = \"api\"\nupstream = \"http://a\"\n";
         assert!(FrontConfig::from_toml(bad).is_err());
+        let grpc_cap = "[[route]]\nname = \"x\"\nprefix = \"/x.\"\nupstream = \"http://a\"\ngrpc = true\nbody_bytes = 1\n";
+        assert!(FrontConfig::from_toml(grpc_cap).is_err());
+    }
+
+    #[test]
+    fn a_route_can_have_its_own_body_cap() {
+        let cfg = FrontConfig::from_toml("").unwrap();
+        let s3 = cfg.routes.iter().find(|r| r.prefix == "/s3/").unwrap();
+        assert_eq!(s3.body_cap(&cfg.limits), GATEWAY_S3_BODY_BYTES);
+        let api = cfg.routes.iter().find(|r| r.prefix == "/api/").unwrap();
+        assert_eq!(api.body_cap(&cfg.limits), cfg.limits.http_body_bytes);
     }
 }

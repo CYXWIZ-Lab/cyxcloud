@@ -62,8 +62,16 @@ mod tests {
     }
 
     #[test]
+    fn storage_goes_to_the_gateway() {
+        assert_eq!(
+            name("/s3/user-u1/a.txt", false).unwrap(),
+            "gateway http://127.0.0.1:8180"
+        );
+    }
+
+    #[test]
     fn what_must_stay_inside_is_not_routed() {
-        for path in ["/s3/bucket/key", "/metrics", "/health/x", "/ws", "/version"] {
+        for path in ["/metrics", "/health/x", "/ws", "/version"] {
             assert_eq!(name(path, false), None, "{}", path);
         }
         // a gRPC path is not reachable as plain HTTP, nor the reverse

@@ -242,7 +242,7 @@ impl Front {
                 .get(hyper::header::CONTENT_LENGTH)
                 .and_then(|v| v.to_str().ok())
                 .and_then(|v| v.parse::<u64>().ok())
-                .is_some_and(|n| n > self.config.limits.http_body_bytes);
+                .is_some_and(|n| n > route.body_cap(&self.config.limits));
             if too_big {
                 let mut o = refuse(
                     StatusCode::PAYLOAD_TOO_LARGE,
@@ -358,7 +358,7 @@ impl Front {
             body.map_err(|e| Box::new(e) as BoxError).boxed()
         } else {
             // a body without a declared length is cut at the cap
-            Limited::new(body, self.config.limits.http_body_bytes as usize).boxed()
+            Limited::new(body, route.body_cap(&self.config.limits) as usize).boxed()
         };
         let client = if grpc {
             &self.grpc_client

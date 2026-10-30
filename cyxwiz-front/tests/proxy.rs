@@ -71,12 +71,21 @@ async fn front_door_at(upstream_port: u16, listen: &str) -> std::net::SocketAddr
                 prefix: "/api/".into(),
                 upstream: format!("http://127.0.0.1:{}", upstream_port),
                 grpc: false,
+                body_bytes: None,
+            },
+            Route {
+                name: "big".into(),
+                prefix: "/big/".into(),
+                upstream: format!("http://127.0.0.1:{}", upstream_port),
+                grpc: false,
+                body_bytes: Some(8192),
             },
             Route {
                 name: "gateway".into(),
                 prefix: "/down/".into(),
                 upstream: "http://127.0.0.1:9".into(),
                 grpc: false,
+                body_bytes: None,
             },
         ],
     };
@@ -142,7 +151,7 @@ async fn the_door_routes_checks_and_refuses() {
 
     // what is not routed is not served
     let r = http
-        .get(format!("{}/s3/bucket/key", door))
+        .get(format!("{}/metrics", door))
         .send()
         .await
         .unwrap();
@@ -157,6 +166,16 @@ async fn the_door_routes_checks_and_refuses() {
         .unwrap();
     assert_eq!(r.status(), 413);
     assert_eq!(hits.load(Ordering::SeqCst), 2);
+
+    // a route with its own, larger cap takes the same body
+    let r = http
+        .post(format!("{}/big/x", door))
+        .body(vec![0u8; 4096])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(hits.load(Ordering::SeqCst), 3);
 
     // the door's health names the service that is down
     let r = http.get(format!("{}/health", door)).send().await.unwrap();
