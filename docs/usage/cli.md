@@ -84,8 +84,9 @@ cyxcloud token create NAME|ID [--ttl 1h]
   address).
 
 The older bucket and key commands (`upload`, `download`, `list`, `delete`,
-`status`) are gone: they used the gateway's S3 API, which has no
-authentication yet (TOFIX171). `cyxcloud doctor` replaces `status`.
+`status`) are gone: they used the gateway's S3 API without a sign-in. The S3
+API is now the website's Drive storage and takes a signed-in user's token for
+their own bucket only. `cyxcloud doctor` replaces `status`.
 
 `register` creates the account through the API (POST /api/users) and then
 signs in; `logout` forgets the local sign-in (the API has no logout route; the

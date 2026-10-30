@@ -2,13 +2,17 @@
 //!
 //! Implements a subset of the AWS S3 API for object storage operations.
 //! Supports: PUT, GET, DELETE, HEAD, and LIST operations.
+//!
+//! Every request carries a CyxWiz sign-in token, and a user reaches only
+//! their own bucket, `user-<their id>` ([`bucket_for_user`]).
 
 #![allow(unused_imports)]
 
 use axum::{
     body::Body,
-    extract::{Path, Query, State},
+    extract::{Extension, Path, Query, Request, State},
     http::{header, HeaderMap, StatusCode},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{delete, get, head, put},
     Router,
@@ -21,6 +25,10 @@ use tokio_stream::StreamExt;
 use tracing::{debug, info, instrument};
 
 use crate::AppState;
+
+/// The signed-in user an S3 request runs for, set by [`require_bucket_owner`].
+#[derive(Clone, Copy, Debug)]
+struct Caller(uuid::Uuid);
 
 /// S3 API error types
 #[derive(Error, Debug)]
@@ -39,6 +47,9 @@ pub enum S3Error {
 
     #[error("Access denied")]
     AccessDenied,
+
+    #[error("No valid sign-in")]
+    Unauthenticated,
 
     #[error("Invalid request: {0}")]
     InvalidRequest(String),
@@ -74,6 +85,11 @@ impl IntoResponse for S3Error {
                 StatusCode::FORBIDDEN,
                 "AccessDenied",
                 "Access Denied".to_string(),
+            ),
+            S3Error::Unauthenticated => (
+                StatusCode::UNAUTHORIZED,
+                "Unauthenticated",
+                "Sign in first: the request has no valid CyxWiz token".to_string(),
             ),
             S3Error::InvalidRequest(m) => {
                 (StatusCode::BAD_REQUEST, "InvalidRequest", xml_escape(m))
@@ -238,8 +254,52 @@ impl ListObjectsV2Response {
     }
 }
 
+/// The one bucket a user may use: the website's `getUserBucket`.
+pub fn bucket_for_user(user: &str) -> String {
+    format!("user-{user}")
+}
+
+/// The sign-in check for every S3 route: a valid token, and the bucket in
+/// the path is the token holder's own. Hands the handlers the [`Caller`].
+async fn require_bucket_owner(
+    State(state): State<Arc<AppState>>,
+    mut req: Request,
+    next: Next,
+) -> Response {
+    let token = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(str::trim)
+        .filter(|t| !t.is_empty());
+    let Some(token) = token else {
+        return S3Error::Unauthenticated.into_response();
+    };
+    let claims = match state.auth_service().validate_token(token).await {
+        Ok(claims) => claims,
+        Err(e) => {
+            debug!(error = %e, "S3 request with a bad token");
+            return S3Error::Unauthenticated.into_response();
+        }
+    };
+    // Inside the nest the path starts at the bucket: /<bucket>[/<key>].
+    let bucket = req.uri().path().trim_start_matches('/').split('/').next().unwrap_or("");
+    if bucket != bucket_for_user(&claims.sub) {
+        info!(user = %claims.sub, bucket = %bucket, "S3 request for another user's bucket refused");
+        return S3Error::AccessDenied.into_response();
+    }
+    match state.user_for_claims(&claims).await {
+        Ok(user) => {
+            req.extensions_mut().insert(Caller(user));
+        }
+        Err(e) => return S3Error::Internal(e).into_response(),
+    }
+    next.run(req).await
+}
+
 /// Create S3 API routes
-pub fn routes() -> Router<Arc<AppState>> {
+pub fn routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
         // Bucket operations
         .route("/:bucket", put(create_bucket))
@@ -251,6 +311,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/:bucket/*key", get(get_object))
         .route("/:bucket/*key", delete(delete_object))
         .route("/:bucket/*key", head(head_object))
+        .route_layer(middleware::from_fn_with_state(state, require_bucket_owner))
 }
 
 // =============================================================================
@@ -261,6 +322,7 @@ pub fn routes() -> Router<Arc<AppState>> {
 #[instrument(skip(state))]
 async fn create_bucket(
     State(state): State<Arc<AppState>>,
+    Extension(caller): Extension<Caller>,
     Path(bucket): Path<String>,
 ) -> S3Result<impl IntoResponse> {
     info!(bucket = %bucket, "Creating bucket");
@@ -271,7 +333,7 @@ async fn create_bucket(
     }
 
     // Create bucket in metadata
-    state.create_bucket(&bucket).await?;
+    state.create_bucket(&bucket, caller.0).await?;
 
     Ok((StatusCode::OK, [(header::LOCATION, format!("/{}", bucket))]))
 }
@@ -371,6 +433,7 @@ async fn list_objects(
 #[instrument(skip(state, body))]
 async fn put_object(
     State(state): State<Arc<AppState>>,
+    Extension(caller): Extension<Caller>,
     Path((bucket, key)): Path<(String, String)>,
     headers: HeaderMap,
     body: Bytes,
@@ -391,7 +454,10 @@ async fn put_object(
         .to_string();
 
     // Store object
-    let etag = state.put_object(&bucket, &key, body, &content_type).await?;
+    let etag = state
+        .put_object_as(caller.0, &bucket, &key, body, &content_type)
+        .await?
+        .etag;
 
     Ok((StatusCode::OK, [(header::ETAG, format!("\"{}\"", etag))]))
 }
@@ -592,4 +658,69 @@ mod tests {
         assert!(xml.contains("<Key>prefix/file.txt</Key>"));
         assert!(xml.contains("<Size>1024</Size>"));
     }
+
+    mod sign_in {
+        use super::super::*;
+        use crate::auth::TokenType;
+        use axum::http::Request as HttpRequest;
+        use tower::ServiceExt;
+
+        fn app() -> (Router, Arc<AppState>) {
+            let state = Arc::new(AppState::new());
+            let router = routes(state.clone()).with_state(state.clone());
+            (router, state)
+        }
+
+        fn token(state: &AppState, user: &str) -> String {
+            state
+                .auth_service()
+                .generate_token(user, TokenType::Access, None, vec![])
+                .expect("token")
+        }
+
+        async fn status(router: &Router, method: &str, path: &str, token: Option<&str>) -> StatusCode {
+            let mut req = HttpRequest::builder().method(method).uri(path);
+            if let Some(t) = token {
+                req = req.header(header::AUTHORIZATION, format!("Bearer {t}"));
+            }
+            router
+                .clone()
+                .oneshot(req.body(Body::empty()).unwrap())
+                .await
+                .unwrap()
+                .status()
+        }
+
+        #[tokio::test]
+        async fn no_token_is_refused() {
+            let (router, _) = app();
+            assert_eq!(status(&router, "PUT", "/user-u1", None).await, StatusCode::UNAUTHORIZED);
+            assert_eq!(status(&router, "GET", "/user-u1/a.txt", None).await, StatusCode::UNAUTHORIZED);
+        }
+
+        #[tokio::test]
+        async fn a_bad_token_is_refused() {
+            let (router, _) = app();
+            assert_eq!(
+                status(&router, "GET", "/user-u1", Some("not-a-jwt")).await,
+                StatusCode::UNAUTHORIZED
+            );
+        }
+
+        #[tokio::test]
+        async fn a_user_reaches_only_their_bucket() {
+            let (router, state) = app();
+            let mine = token(&state, "u1");
+            assert_eq!(status(&router, "PUT", "/user-u1", Some(&mine)).await, StatusCode::OK);
+            assert_eq!(status(&router, "GET", "/user-u1", Some(&mine)).await, StatusCode::OK);
+            let theirs = token(&state, "u2");
+            assert_eq!(status(&router, "GET", "/user-u1", Some(&theirs)).await, StatusCode::FORBIDDEN);
+            assert_eq!(
+                status(&router, "GET", "/user-u1/a.txt", Some(&theirs)).await,
+                StatusCode::FORBIDDEN
+            );
+            assert_eq!(status(&router, "PUT", "/other", Some(&mine)).await, StatusCode::FORBIDDEN);
+        }
+    }
+
 }

@@ -9,6 +9,9 @@ use std::sync::Arc;
 use cyxcloud_gateway::auth::TokenType;
 use cyxcloud_gateway::{AppState, AuthService};
 
+/// The owner of the test buckets and objects.
+const OWNER: uuid::Uuid = uuid::Uuid::nil();
+
 // ============================================================================
 // Auth Service Tests
 // ============================================================================
@@ -171,7 +174,7 @@ async fn test_bucket_create_and_exists() {
     let state = Arc::new(AppState::new());
 
     assert!(!state.bucket_exists("test-bucket").await.unwrap());
-    state.create_bucket("test-bucket").await.unwrap();
+    state.create_bucket("test-bucket", OWNER).await.unwrap();
     assert!(state.bucket_exists("test-bucket").await.unwrap());
 }
 
@@ -179,22 +182,22 @@ async fn test_bucket_create_and_exists() {
 async fn test_bucket_duplicate_create() {
     let state = Arc::new(AppState::new());
 
-    state.create_bucket("dup-bucket").await.unwrap();
-    let result = state.create_bucket("dup-bucket").await;
+    state.create_bucket("dup-bucket", OWNER).await.unwrap();
+    let result = state.create_bucket("dup-bucket", OWNER).await;
     assert!(result.is_err());
 }
 
 #[tokio::test]
 async fn test_object_put_get_delete() {
     let state = Arc::new(AppState::new());
-    state.create_bucket("mybucket").await.unwrap();
+    state.create_bucket("mybucket", OWNER).await.unwrap();
 
     let data = Bytes::from("hello world");
     let etag = state
-        .put_object("mybucket", "test.txt", data.clone(), "text/plain")
+        .put_object_as(OWNER, "mybucket", "test.txt", data.clone(), "text/plain")
         .await
         .unwrap();
-    assert!(!etag.is_empty());
+    assert!(!etag.etag.is_empty());
 
     let retrieved = state.get_object("mybucket", "test.txt").await.unwrap();
     assert_eq!(retrieved, data);
@@ -220,14 +223,14 @@ async fn test_object_put_get_delete() {
 #[tokio::test]
 async fn test_object_overwrite() {
     let state = Arc::new(AppState::new());
-    state.create_bucket("bucket").await.unwrap();
+    state.create_bucket("bucket", OWNER).await.unwrap();
 
     state
-        .put_object("bucket", "key", Bytes::from("v1"), "text/plain")
+        .put_object_as(OWNER, "bucket", "key", Bytes::from("v1"), "text/plain")
         .await
         .unwrap();
     state
-        .put_object("bucket", "key", Bytes::from("version2"), "text/plain")
+        .put_object_as(OWNER, "bucket", "key", Bytes::from("version2"), "text/plain")
         .await
         .unwrap();
 
@@ -240,7 +243,7 @@ async fn test_object_in_nonexistent_bucket() {
     let state = Arc::new(AppState::new());
 
     let result = state
-        .put_object("no-such-bucket", "key", Bytes::from("data"), "text/plain")
+        .put_object_as(OWNER, "no-such-bucket", "key", Bytes::from("data"), "text/plain")
         .await;
     assert!(result.is_err());
 }
@@ -248,7 +251,7 @@ async fn test_object_in_nonexistent_bucket() {
 #[tokio::test]
 async fn test_get_nonexistent_object() {
     let state = Arc::new(AppState::new());
-    state.create_bucket("bucket").await.unwrap();
+    state.create_bucket("bucket", OWNER).await.unwrap();
 
     let result = state.get_object("bucket", "missing-key").await;
     assert!(result.is_err());
@@ -257,7 +260,7 @@ async fn test_get_nonexistent_object() {
 #[tokio::test]
 async fn test_list_objects_empty_bucket() {
     let state = Arc::new(AppState::new());
-    state.create_bucket("empty").await.unwrap();
+    state.create_bucket("empty", OWNER).await.unwrap();
 
     let (objects, is_truncated, next_token) = state
         .list_objects("empty", "", None, 1000, None)
@@ -272,10 +275,10 @@ async fn test_list_objects_empty_bucket() {
 #[tokio::test]
 async fn test_list_objects_with_prefix() {
     let state = Arc::new(AppState::new());
-    state.create_bucket("bucket").await.unwrap();
+    state.create_bucket("bucket", OWNER).await.unwrap();
 
     state
-        .put_object(
+        .put_object_as(OWNER, 
             "bucket",
             "docs/readme.md",
             Bytes::from("readme"),
@@ -284,7 +287,7 @@ async fn test_list_objects_with_prefix() {
         .await
         .unwrap();
     state
-        .put_object(
+        .put_object_as(OWNER, 
             "bucket",
             "docs/guide.md",
             Bytes::from("guide"),
@@ -293,7 +296,7 @@ async fn test_list_objects_with_prefix() {
         .await
         .unwrap();
     state
-        .put_object("bucket", "images/logo.png", Bytes::from("img"), "image/png")
+        .put_object_as(OWNER, "bucket", "images/logo.png", Bytes::from("img"), "image/png")
         .await
         .unwrap();
 
@@ -311,9 +314,9 @@ async fn test_list_objects_with_prefix() {
 #[tokio::test]
 async fn test_delete_bucket_non_empty() {
     let state = Arc::new(AppState::new());
-    state.create_bucket("bucket").await.unwrap();
+    state.create_bucket("bucket", OWNER).await.unwrap();
     state
-        .put_object("bucket", "file.txt", Bytes::from("data"), "text/plain")
+        .put_object_as(OWNER, "bucket", "file.txt", Bytes::from("data"), "text/plain")
         .await
         .unwrap();
 
@@ -323,7 +326,7 @@ async fn test_delete_bucket_non_empty() {
 #[tokio::test]
 async fn test_delete_bucket_empty() {
     let state = Arc::new(AppState::new());
-    state.create_bucket("bucket").await.unwrap();
+    state.create_bucket("bucket", OWNER).await.unwrap();
 
     assert!(state.bucket_is_empty("bucket").await.unwrap());
     state.delete_bucket("bucket").await.unwrap();
@@ -337,7 +340,7 @@ async fn test_delete_bucket_empty() {
 #[tokio::test]
 async fn test_concurrent_uploads() {
     let state = Arc::new(AppState::new());
-    state.create_bucket("concurrent").await.unwrap();
+    state.create_bucket("concurrent", OWNER).await.unwrap();
 
     let mut handles = Vec::new();
     for i in 0..50 {
@@ -345,7 +348,7 @@ async fn test_concurrent_uploads() {
         handles.push(tokio::spawn(async move {
             let key = format!("file-{}.txt", i);
             let data = Bytes::from(format!("content-{}", i));
-            s.put_object("concurrent", &key, data, "text/plain")
+            s.put_object_as(OWNER, "concurrent", &key, data, "text/plain")
                 .await
                 .unwrap();
         }));
@@ -365,9 +368,9 @@ async fn test_concurrent_uploads() {
 #[tokio::test]
 async fn test_concurrent_read_write() {
     let state = Arc::new(AppState::new());
-    state.create_bucket("rw").await.unwrap();
+    state.create_bucket("rw", OWNER).await.unwrap();
     state
-        .put_object("rw", "shared.txt", Bytes::from("initial"), "text/plain")
+        .put_object_as(OWNER, "rw", "shared.txt", Bytes::from("initial"), "text/plain")
         .await
         .unwrap();
 
@@ -385,7 +388,7 @@ async fn test_concurrent_read_write() {
         let s = state.clone();
         handles.push(tokio::spawn(async move {
             let data = Bytes::from(format!("update-{}", i));
-            s.put_object("rw", "shared.txt", data, "text/plain")
+            s.put_object_as(OWNER, "rw", "shared.txt", data, "text/plain")
                 .await
                 .unwrap();
         }));
@@ -406,11 +409,11 @@ async fn test_concurrent_read_write() {
 #[tokio::test]
 async fn test_large_object() {
     let state = Arc::new(AppState::new());
-    state.create_bucket("large").await.unwrap();
+    state.create_bucket("large", OWNER).await.unwrap();
 
     let data = Bytes::from(vec![42u8; 1024 * 1024]);
     state
-        .put_object("large", "big.bin", data.clone(), "application/octet-stream")
+        .put_object_as(OWNER, "large", "big.bin", data.clone(), "application/octet-stream")
         .await
         .unwrap();
 
@@ -426,11 +429,11 @@ async fn test_large_object() {
 #[tokio::test]
 async fn test_range_retrieval() {
     let state = Arc::new(AppState::new());
-    state.create_bucket("range").await.unwrap();
+    state.create_bucket("range", OWNER).await.unwrap();
 
     let data = Bytes::from("0123456789ABCDEF");
     state
-        .put_object("range", "data.txt", data, "text/plain")
+        .put_object_as(OWNER, "range", "data.txt", data, "text/plain")
         .await
         .unwrap();
 

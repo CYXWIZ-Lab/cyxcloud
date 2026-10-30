@@ -161,9 +161,6 @@ pub struct AppState {
     /// Total bytes stored in memory across all buckets
     memory_bytes_used: std::sync::atomic::AtomicUsize,
 
-    /// User ID (would come from authentication)
-    user_id: Uuid,
-
     /// Whether using memory storage
     use_memory: bool,
 }
@@ -217,7 +214,6 @@ impl AppState {
             blockchain: None,
             memory_buckets: RwLock::new(HashMap::new()),
             memory_bytes_used: std::sync::atomic::AtomicUsize::new(0),
-            user_id: Uuid::new_v4(),
             use_memory: true,
         }
     }
@@ -320,7 +316,6 @@ impl AppState {
             blockchain,
             memory_buckets: RwLock::new(HashMap::new()),
             memory_bytes_used: std::sync::atomic::AtomicUsize::new(0),
-            user_id: Uuid::new_v4(),
             use_memory,
         })
     }
@@ -630,8 +625,9 @@ impl AppState {
         ))
     }
 
-    /// Create a bucket
-    pub async fn create_bucket(&self, name: &str) -> S3Result<()> {
+    /// Create a bucket owned by `owner` (the signed-in user; their users row
+    /// too)
+    pub async fn create_bucket(&self, name: &str, owner: Uuid) -> S3Result<()> {
         if self.use_memory {
             return self.create_memory_bucket(name).await;
         }
@@ -643,18 +639,14 @@ impl AppState {
                 return Err(S3Error::BucketAlreadyExists(name.to_string()));
             }
 
-            // Get or create user
-            let user = meta
-                .get_or_create_user(&self.user_id.to_string())
+            meta.ensure_user(owner)
+                .await
+                .map_err(|e| S3Error::Internal(e.to_string()))?;
+            meta.create_bucket(name, owner)
                 .await
                 .map_err(|e| S3Error::Internal(e.to_string()))?;
 
-            // Create bucket
-            meta.create_bucket(name, user.id)
-                .await
-                .map_err(|e| S3Error::Internal(e.to_string()))?;
-
-            info!(bucket = name, "Bucket created (database)");
+            info!(bucket = name, owner = %owner, "Bucket created (database)");
             Ok(())
         } else {
             Err(S3Error::Internal(
@@ -762,20 +754,6 @@ impl AppState {
     // =========================================================================
     // OBJECT OPERATIONS
     // =========================================================================
-
-    /// Put an object
-    pub async fn put_object(
-        &self,
-        bucket: &str,
-        key: &str,
-        data: Bytes,
-        content_type: &str,
-    ) -> S3Result<String> {
-        Ok(self
-            .put_object_as(self.user_id, bucket, key, data, content_type)
-            .await?
-            .etag)
-    }
 
     /// Stores an object owned by `owner` (an authenticated user) and reports
     /// the file record it made, which a dataset can then reference. The

@@ -21,7 +21,7 @@ Clients never hold data for others:
 
 - The CyxWiz Engine (`DataStreamClient`): lists datasets, uploads files, creates datasets, mints access tokens.
 - The CyxWiz server node (`CloudDatasetFetcher`): streams one file with a token when it trains.
-- The web app: uploads through the S3 API.
+- The web app: its Drive uses the S3 API with the signed-in user's token (through the front door); each user has one bucket, `user-<their id>`, and reaches only that one.
 - The CLI.
 
 Joining the storage means running `cyxcloud-node`. The gateway is the manager; nodes are the members; everything else is a client.
@@ -124,6 +124,5 @@ node services (`cyxcloud-node1`, `cyxcloud-node2`) for a local cluster;
 - The gateway is the single manager and the single data path: every byte goes through it twice.
 - Fewer than four nodes cannot survive a node loss (see above); the rebalancer cannot repair what it has no spare node for.
 - Node-to-node transfer and peer discovery exist as code; nothing routes through them.
-- The S3 API has no authentication.
 - Node registration is JWT-free by design (it is signed instead), with no rate limit yet.
 - The rebalancer's 60 s scans and the metadata pool (10 connections) can starve requests.

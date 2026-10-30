@@ -268,7 +268,7 @@ async fn main() -> anyhow::Result<()> {
         // Dataset API
         .nest("/api/datasets", dataset_api::routes())
         // S3-compatible API
-        .nest("/s3", s3_api::routes())
+        .nest("/s3", s3_api::routes(state.clone()))
         // WebSocket endpoint
         .merge(websocket::routes())
         // Add middleware
