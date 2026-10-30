@@ -44,7 +44,7 @@ async fn main() -> anyhow::Result<()> {
     };
     let config = FrontConfig::from_toml(&text)?;
     let tls = tls_acceptor(&config)?;
-    let listener = tokio::net::TcpListener::bind(config.listen).await?;
+    let listener = cyxwiz_front::listen(config.listen)?;
     info!(
         listen = %config.listen,
         tls = tls.is_some(),

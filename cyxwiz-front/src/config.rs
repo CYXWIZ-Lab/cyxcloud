@@ -64,8 +64,10 @@ pub struct Route {
     pub grpc: bool,
 }
 
+// Every address, IPv4 and IPv6 (see `listen`): "localhost" resolves to ::1
+// first on Windows, and a client that times out there never tries 127.0.0.1.
 fn default_listen() -> SocketAddr {
-    "0.0.0.0:8000".parse().unwrap()
+    "[::]:8000".parse().unwrap()
 }
 fn default_client_ip_header() -> String {
     "cf-connecting-ip".into()

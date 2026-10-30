@@ -405,6 +405,22 @@ pub fn tls_acceptor(config: &FrontConfig) -> anyhow::Result<Option<tokio_rustls:
     Ok(Some(tokio_rustls::TlsAcceptor::from(Arc::new(server))))
 }
 
+/// Listen at `addr`. The IPv6 any-address ("[::]") also takes IPv4
+/// connections, which the system's default (IPv6 only on Windows) would not.
+pub fn listen(addr: SocketAddr) -> std::io::Result<TcpListener> {
+    use socket2::{Domain, Protocol, Socket, Type};
+    let socket = Socket::new(Domain::for_address(addr), Type::STREAM, Some(Protocol::TCP))?;
+    if addr.is_ipv6() && addr.ip().is_unspecified() {
+        socket.set_only_v6(false)?;
+    }
+    #[cfg(not(windows))]
+    socket.set_reuse_address(true)?;
+    socket.bind(&addr.into())?;
+    socket.listen(1024)?;
+    socket.set_nonblocking(true)?;
+    TcpListener::from_std(socket.into())
+}
+
 /// Accept connections until the listener fails.
 pub async fn serve(
     listener: TcpListener,
@@ -413,6 +429,9 @@ pub async fn serve(
 ) -> anyhow::Result<()> {
     loop {
         let (stream, peer) = listener.accept().await?;
+        // An IPv4 client on a dual-stack listener arrives as ::ffff:a.b.c.d;
+        // limits, trusted proxies and the audit use the plain address.
+        let peer = SocketAddr::new(peer.ip().to_canonical(), peer.port());
         let front = front.clone();
         let tls = tls.clone();
         tokio::spawn(async move {

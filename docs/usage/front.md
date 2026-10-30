@@ -18,8 +18,11 @@ JWT_SECRET=... ADMIN_JWT_SECRET=... cyxwiz-front [--config front.toml]
 ```
 
 Locally: `deploy/local/run-service.ps1 front` (cyxwiz_web), part of
-`start-local.ps1`. Without a config file it listens on `0.0.0.0:8000`, plain
-HTTP, and routes to the services on this machine.
+`start-local.ps1`. Without a config file it listens on `[::]:8000`, every
+IPv4 and IPv6 address (so `http://localhost:8000` works where localhost is
+`::1` first, as on Windows), plain HTTP, and routes to the services on this
+machine. A client on IPv4 is logged, limited and forwarded as its plain
+address (`127.0.0.1`, not `::ffff:127.0.0.1`).
 
 Clients then use one address:
 
@@ -50,7 +53,7 @@ connection. `cyxcloud doctor` reads it through the door.
 ## front.toml
 
 ```toml
-listen = "0.0.0.0:443"
+listen = "[::]:443"                            # IPv4 and IPv6; "0.0.0.0:443" for IPv4 only
 tls_cert = "/etc/cyxwiz/front/fullchain.pem"   # both or neither
 tls_key  = "/etc/cyxwiz/front/privkey.pem"
 trusted_proxies = ["127.0.0.1"]                # e.g. cloudflared on this box

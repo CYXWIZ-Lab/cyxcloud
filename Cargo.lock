@@ -1842,6 +1842,7 @@ dependencies = [
  "rustls-pemfile 2.2.0",
  "serde",
  "serde_json",
+ "socket2 0.6.1",
  "tokio",
  "tokio-rustls 0.25.0",
  "toml 0.8.23",

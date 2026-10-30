@@ -48,8 +48,15 @@ async fn stand_in(hits: Arc<AtomicUsize>) -> u16 {
 }
 
 async fn front_door(upstream_port: u16) -> String {
+    format!(
+        "http://{}",
+        front_door_at(upstream_port, "127.0.0.1:0").await
+    )
+}
+
+async fn front_door_at(upstream_port: u16, listen: &str) -> std::net::SocketAddr {
     let config = FrontConfig {
-        listen: "127.0.0.1:0".parse().unwrap(),
+        listen: listen.parse().unwrap(),
         tls_cert: None,
         tls_key: None,
         trusted_proxies: vec![],
@@ -73,11 +80,11 @@ async fn front_door(upstream_port: u16) -> String {
             },
         ],
     };
-    let listener = TcpListener::bind(config.listen).await.unwrap();
+    let listener = cyxwiz_front::listen(config.listen).unwrap();
     let addr = listener.local_addr().unwrap();
     let front = Arc::new(Front::new(config, &[SECRET.into()]).unwrap());
     tokio::spawn(serve(listener, front, None));
-    format!("http://{}", addr)
+    addr
 }
 
 fn token(secret: &str) -> String {
@@ -159,4 +166,28 @@ async fn the_door_routes_checks_and_refuses() {
     assert_eq!(health["services"]["gateway"], "down");
     let r = http.get(format!("{}/down/x", door)).send().await.unwrap();
     assert_eq!(r.status(), 502);
+}
+
+// "localhost" is ::1 first on Windows: the door's default address answers on
+// IPv4 and IPv6, and an IPv4 client is forwarded as its plain address.
+#[tokio::test]
+async fn the_door_answers_on_ipv4_and_ipv6() {
+    let up = stand_in(Arc::new(AtomicUsize::new(0))).await;
+    let port = front_door_at(up, "[::]:0").await.port();
+    let http = reqwest::Client::new();
+    let r = http
+        .get(format!("http://127.0.0.1:{}/api/x", port))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        r.text().await.unwrap(),
+        "path=/api/x xff=127.0.0.1 proto=http"
+    );
+    let r = http
+        .get(format!("http://[::1]:{}/api/x", port))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.text().await.unwrap(), "path=/api/x xff=::1 proto=http");
 }
