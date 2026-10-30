@@ -301,9 +301,19 @@ impl Database {
 
     /// Get node storage summary
     pub async fn get_node_storage_summary(&self) -> Result<Vec<NodeStorageSummary>> {
-        let result = sqlx::query_as::<_, NodeStorageSummary>("SELECT * FROM node_storage_summary")
-            .fetch_all(&self.pool)
-            .await?;
+        // The view's utilization_percent is ROUND(...)::numeric; the struct
+        // reads a float.
+        let result = sqlx::query_as::<_, NodeStorageSummary>(
+            r#"
+            SELECT id, peer_id, grpc_address, storage_total, storage_reserved, storage_used,
+                   storage_available, storage_allocatable,
+                   utilization_percent::float8 AS utilization_percent,
+                   chunk_count, status, last_heartbeat
+            FROM node_storage_summary
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
         Ok(result)
     }
 
