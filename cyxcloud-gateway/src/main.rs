@@ -16,6 +16,7 @@
 // are fully integrated. Currently 40 dead_code items in partially-implemented modules.
 #![allow(dead_code)]
 
+mod admin_api;
 mod audit;
 pub mod auth;
 mod auth_api;
@@ -265,6 +266,11 @@ async fn main() -> anyhow::Result<()> {
         .merge(metrics::routes(metrics_handle))
         // Authentication API
         .nest("/api/v1/auth", auth_api::routes())
+        // The admin site's storage view (admin token, ADMIN_JWT_SECRET)
+        .nest(
+            "/api/v1/admin",
+            admin_api::routes(std::env::var("ADMIN_JWT_SECRET").ok()),
+        )
         // Dataset API
         .nest("/api/datasets", dataset_api::routes())
         // S3-compatible API

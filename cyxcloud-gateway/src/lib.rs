@@ -9,6 +9,7 @@
 #![allow(clippy::type_complexity)]
 #![allow(dead_code)]
 
+mod admin_api;
 pub mod audit;
 pub mod auth;
 mod auth_api;

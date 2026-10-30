@@ -67,6 +67,7 @@ startup line shows the database URL with the password hidden.
 | `DATABASE_URL` / `--database-url` | Postgres; omit or `--memory-only` for in-memory |
 | `REDIS_URL` / `--redis-url` | Redis cache |
 | `JWT_SECRET` | verifies user tokens; required when `CYXCLOUD_ENV=production`, random (tokens never verify) otherwise |
+| `ADMIN_JWT_SECRET` | verifies admin tokens on `/api/v1/admin` (the admin site's Drive page); unset, those routes answer 503 |
 | `--cors-permissive` | allow all origins (development only) |
 | `--grpc-auth` | require a token on gRPC (default on) |
 | `TLS_CERT`, `TLS_KEY`, `TLS_CA_CERT`, `TLS_REQUIRE_CLIENT_CERT` | TLS |

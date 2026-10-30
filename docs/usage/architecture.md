@@ -22,6 +22,7 @@ Clients never hold data for others:
 - The CyxWiz Engine (`DataStreamClient`): lists datasets, uploads files, creates datasets, mints access tokens.
 - The CyxWiz server node (`CloudDatasetFetcher`): streams one file with a token when it trains.
 - The web app: its Drive uses the S3 API with the signed-in user's token (through the front door); each user has one bucket, `user-<their id>`, and reaches only that one.
+- The admin site: its Drive page reads `GET /api/v1/admin/stats` (node counts, capacity, chunks) and `GET /api/v1/admin/nodes[?status=]` (each node's capacity, use, chunks, heartbeat, version), read-only, with an admin token (HS256, `ADMIN_JWT_SECRET`, `role: "admin"`). It talks to the gateway on the server's network, not through the front door.
 - The CLI.
 
 Joining the storage means running `cyxcloud-node`. The gateway is the manager; nodes are the members; everything else is a client.
