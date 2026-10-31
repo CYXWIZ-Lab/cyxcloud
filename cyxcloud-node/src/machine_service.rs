@@ -532,8 +532,7 @@ impl MachineService {
             avg_load as u8
         };
 
-        // Get local IP address (simplified - in production would be more robust)
-        let ip_address = local_ip_address::local_ip().map(|ip| ip.to_string()).ok();
+        let ip_address = outbound_ip().map(|ip| ip.to_string());
 
         let version = Some(env!("CARGO_PKG_VERSION").to_string());
 
@@ -659,9 +658,31 @@ impl MachineService {
     }
 }
 
+/// The address this machine sends from (the interface on the default route).
+/// A UDP socket "connected" to a public address picks the route without
+/// sending anything, and closes when dropped. It replaces
+/// local_ip_address::local_ip, which leaked a netlink socket per call on Linux
+/// (one per 30 s heartbeat: the node ran out of file descriptors in hours).
+fn outbound_ip() -> Option<std::net::IpAddr> {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    socket.local_addr().ok().map(|a| a.ip())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn outbound_ip_leaves_no_socket_open() {
+        let open = || std::fs::read_dir("/proc/self/fd").unwrap().count();
+        let before = open();
+        for _ in 0..200 {
+            let _ = outbound_ip();
+        }
+        assert!(open() <= before + 2, "outbound_ip leaks descriptors");
+    }
 
     #[test]
     fn test_os_info() {
