@@ -570,6 +570,28 @@ impl DataService for DataServiceImpl {
         if !token_allows_stream(&token.scopes) {
             return Err(Status::permission_denied("Token does not allow streaming"));
         }
+        // The token's user must still own the dataset or hold a live share:
+        // an expired or removed share, or a deleted dataset, ends the token.
+        let still_readable = match metadata
+            .database()
+            .get_dataset(token.dataset_id)
+            .await
+            .map_err(|e| Status::internal(format!("Database error: {}", e)))?
+        {
+            Some(d) if d.owner_id == token.user_id => true,
+            Some(_) => metadata
+                .database()
+                .check_dataset_access(token.dataset_id, token.user_id)
+                .await
+                .map_err(|e| Status::internal(format!("Database error: {}", e)))?
+                .is_some(),
+            None => false,
+        };
+        if !still_readable {
+            return Err(Status::unauthenticated(
+                "Dataset access token is invalid, expired or revoked",
+            ));
+        }
         let dataset_files = metadata
             .database()
             .get_dataset_files(token.dataset_id)
@@ -760,7 +782,7 @@ impl DataService for DataServiceImpl {
                 req.dataset_id
             )));
         }
-        let file_chunks: Vec<Vec<u8>> = metadata
+        let file_chunks: std::collections::HashSet<Vec<u8>> = metadata
             .get_file_chunks(file_uuid)
             .await
             .map_err(|e| Status::internal(format!("Failed to get chunks: {}", e)))?
@@ -768,7 +790,7 @@ impl DataService for DataServiceImpl {
             .map(|c| c.chunk_id)
             .collect();
         let chunk_ids: Vec<Vec<u8>> = if req.chunk_ids.is_empty() {
-            file_chunks
+            file_chunks.into_iter().collect()
         } else {
             req.chunk_ids
                 .into_iter()

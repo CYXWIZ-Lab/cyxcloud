@@ -29,7 +29,7 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::Stream;
 use tonic::{Request, Response, Status, Streaming};
-use tracing::{debug, info, instrument};
+use tracing::{debug, error, info, instrument};
 use uuid::Uuid;
 
 /// Largest file UploadFile accepts, like the HTTP body limit of the S3 API.
@@ -951,8 +951,8 @@ impl DataStreamService for DataStreamServiceImpl {
         let dataset_id = Uuid::parse_str(&req.dataset_id)
             .map_err(|e| Status::invalid_argument(format!("Invalid dataset_id: {}", e)))?;
 
-        let share_with_user_id = Uuid::parse_str(&req.share_with_user_id)
-            .map_err(|e| Status::invalid_argument(format!("Invalid share_with_user_id: {}", e)))?;
+        // An account id: a CyxCloud UUID or a CyxWiz account id.
+        let share_with_user_id = crate::auth::user_uuid_for_subject(req.share_with_user_id.trim());
 
         // Verify user owns the dataset
         let dataset = metadata
@@ -962,18 +962,21 @@ impl DataStreamService for DataStreamServiceImpl {
             .map_err(|e| Status::internal(format!("Database error: {}", e)))?
             .ok_or_else(|| Status::not_found("Dataset not found"))?;
 
+        // Another user's dataset answers as an unknown one.
         if dataset.owner_id != user_id {
-            return Err(Status::permission_denied(
-                "Only the owner can share a dataset",
-            ));
+            return Err(Status::not_found("Dataset not found"));
         }
 
-        // Determine permissions
-        let permissions = if req.permissions.is_empty() {
-            vec!["read".to_string()]
-        } else {
-            req.permissions
-        };
+        // Determine permissions: read / stream only
+        let permissions = crate::dataset_api::share_permissions(req.permissions)
+            .map_err(Status::invalid_argument)?;
+
+        // The target account gets a user record if it has none, so a share
+        // answers the same whether or not the account exists.
+        metadata
+            .ensure_user(share_with_user_id)
+            .await
+            .map_err(|_| Status::internal("Failed to share dataset"))?;
 
         // Calculate expiration if provided
         let expires_at = if req.expires_at > 0 {
@@ -999,7 +1002,10 @@ impl DataStreamService for DataStreamServiceImpl {
             .database()
             .create_dataset_share(create_share)
             .await
-            .map_err(|e| Status::internal(format!("Failed to share dataset: {}", e)))?;
+            .map_err(|e| {
+                error!(error = %e, "Failed to share dataset");
+                Status::internal("Failed to share dataset")
+            })?;
 
         info!(
             share_id = %share.id,
@@ -1150,10 +1156,14 @@ impl DataStreamService for DataStreamServiceImpl {
             .map_err(|e| Status::internal(format!("Database error: {}", e)))?
             .ok_or_else(|| Status::not_found("Dataset not found"))?;
         if dataset.owner_id != user_id {
-            return Err(Status::permission_denied(
-                "Only the dataset's owner can delete it",
-            ));
+            return Err(Status::not_found("Dataset not found"));
         }
+        // Its access tokens go with it.
+        metadata
+            .database()
+            .revoke_dataset_tokens(dataset_id)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to revoke tokens: {}", e)))?;
         metadata
             .database()
             .delete_dataset(dataset_id)

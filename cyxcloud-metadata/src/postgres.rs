@@ -1035,17 +1035,6 @@ impl Database {
         Ok(())
     }
 
-    /// Get user by email or wallet address
-    pub async fn get_user_by_email_or_wallet(&self, identifier: &str) -> Result<Option<User>> {
-        let result = sqlx::query_as::<_, User>(
-            "SELECT * FROM users WHERE email = $1 OR wallet_address = $1",
-        )
-        .bind(identifier)
-        .fetch_optional(&self.pool)
-        .await?;
-        Ok(result)
-    }
-
     // =========================================================================
     // BUCKET OPERATIONS
     // =========================================================================

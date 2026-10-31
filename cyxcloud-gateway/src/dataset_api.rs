@@ -142,6 +142,18 @@ pub struct ShareDatasetRequest {
     pub permissions: Vec<String>,
 }
 
+/// A share's permissions: "read" and "stream" only (both when none given).
+pub(crate) fn share_permissions(asked: Vec<String>) -> Result<Vec<String>, String> {
+    if asked.is_empty() {
+        return Ok(vec!["read".to_string(), "stream".to_string()]);
+    }
+    if asked.iter().all(|p| p == "read" || p == "stream") {
+        Ok(asked)
+    } else {
+        Err("a share's permissions are \"read\" and \"stream\" only".to_string())
+    }
+}
+
 /// Create dataset routes
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
@@ -435,8 +447,8 @@ async fn get_dataset_info(
 
         if has_access.is_none() {
             return Err((
-                StatusCode::FORBIDDEN,
-                Json(ApiError::new("Access denied", "FORBIDDEN")),
+                StatusCode::NOT_FOUND,
+                Json(ApiError::new("Dataset not found", "NOT_FOUND")),
             ));
         }
     }
@@ -523,8 +535,8 @@ async fn verify_dataset(
 
         if has_access.is_none() {
             return Err((
-                StatusCode::FORBIDDEN,
-                Json(ApiError::new("Access denied", "FORBIDDEN")),
+                StatusCode::NOT_FOUND,
+                Json(ApiError::new("Dataset not found", "NOT_FOUND")),
             ));
         }
     }
@@ -546,7 +558,8 @@ async fn verify_dataset(
         })?;
 
     // Check against public registry if requested
-    let public_match = if check_public {
+    // Only the owner's verification may raise the dataset's trust level.
+    let public_match = if check_public && dataset.owner_id == user_id {
         let registry = PublicDatasetRegistry::new(state);
         registry
             .verify_dataset(dataset_uuid)
@@ -628,37 +641,32 @@ async fn share_dataset(
 
     if dataset.owner_id != user_id {
         return Err((
-            StatusCode::FORBIDDEN,
-            Json(ApiError::new(
-                "Only the owner can share a dataset",
-                "FORBIDDEN",
-            )),
+            StatusCode::NOT_FOUND,
+            Json(ApiError::new("Dataset not found", "NOT_FOUND")),
         ));
     }
 
-    // Find target user
-    let target_user = metadata
-        .database()
-        .get_user_by_email_or_wallet(&req.share_with)
-        .await
-        .map_err(|e| {
-            error!(error = %e, "Failed to find user");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiError::new("Failed to find user", "DB_ERROR")),
-            )
-        })?
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(ApiError::new("User not found", "USER_NOT_FOUND")),
-            )
-        })?;
+    // The target is an account id (the same for an account that exists or
+    // not: no answer tells who has an account).
+    let permissions = share_permissions(req.permissions).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ApiError::new(e, "INVALID_PERMISSION")),
+        )
+    })?;
+    let target_id = crate::auth::user_uuid_for_subject(req.share_with.trim());
+    let target_user = metadata.ensure_user(target_id).await.map_err(|e| {
+        error!(error = %e, "Failed to record the share's user");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError::new("Failed to share dataset", "DB_ERROR")),
+        )
+    })?;
 
     // Create share
     let share = metadata
         .database()
-        .share_dataset(dataset_uuid, target_user.id, req.permissions)
+        .share_dataset(dataset_uuid, target_user.id, permissions)
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to share dataset");
@@ -734,6 +742,17 @@ async fn extract_and_validate_token(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_share_reads_and_streams_only() {
+        assert_eq!(share_permissions(vec![]).unwrap(), vec!["read", "stream"]);
+        assert_eq!(
+            share_permissions(vec!["read".into()]).unwrap(),
+            vec!["read"]
+        );
+        assert!(share_permissions(vec!["reshare".into()]).is_err());
+        assert!(share_permissions(vec!["admin".into()]).is_err());
+    }
 
     #[test]
     fn test_api_error() {

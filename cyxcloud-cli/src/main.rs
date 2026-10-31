@@ -204,11 +204,11 @@ enum DatasetCommands {
         /// Dataset ID
         dataset_id: String,
 
-        /// User email or ID to share with
+        /// Account ID to share with
         #[arg(short, long)]
         with: String,
 
-        /// Permissions: read, stream, reshare
+        /// Permissions: read, stream
         #[arg(short, long, default_value = "read,stream")]
         permissions: String,
     },
