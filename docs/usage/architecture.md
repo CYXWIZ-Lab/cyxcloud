@@ -50,7 +50,7 @@ What a node loss costs: a chunk needs any 10 of its 14 shards. With one node eve
 
 Every token the gateway issues carries `typ`: `access` (1 h), `refresh`
 (7 days), `node` (24 h) or `api_key` (the `expires_in_days` asked for,
-1 to 3650, default 365). A refresh token is accepted only by
+1 to 365, default 90). A refresh token is accepted only by
 `POST /api/v1/auth/refresh` (which answers a new access token) and refused
 everywhere else; anything but a refresh token is refused there.
 
@@ -61,7 +61,14 @@ everywhere else; anything but a refresh token is refused there.
   (CyxWiz API sign-in tokens, the website's API tokens), even with
   `JWT_SKIP_ISSUER_VALIDATION`; it counts as an access token.
 - `POST /api/v1/auth/api-keys` takes a user's access token only (not an API
-  key or a node token).
+  key or a node token) and must name the key's permissions, one or more of
+  `storage:read`, `storage:write`, `storage:delete`, `dataset:read`,
+  `dataset:write` (no `*`, no node rights). Every route checks them for an
+  API key: S3 GET/HEAD need `storage:read`, PUT `storage:write`, DELETE
+  `storage:delete`; the dataset REST API and the DataStream gRPC methods need
+  `dataset:read` or `dataset:write`; DataService `GetDataset`/`Prefetch`
+  need `storage:read`; anything else (node RPCs) refuses API keys. A user's
+  own access or sign-in token acts for the whole account.
 - `POST /api/v1/auth/logout` revokes the access token it is called with and,
   given `{"refresh_token": ...}` of the same user, the refresh token too.
   A revocation lasts until the token would have expired.

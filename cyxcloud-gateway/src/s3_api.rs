@@ -11,13 +11,14 @@
 use axum::{
     body::Body,
     extract::{Extension, Path, Query, Request, State},
-    http::{header, HeaderMap, StatusCode},
+    http::{header, HeaderMap, Method, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{delete, get, head, put},
     Router,
 };
 use bytes::Bytes;
+use crate::auth::AuthService;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
@@ -283,6 +284,16 @@ async fn require_bucket_owner(
             return S3Error::Unauthenticated.into_response();
         }
     };
+    // An API key may do only what it was given.
+    let needed = match *req.method() {
+        Method::GET | Method::HEAD => "storage:read",
+        Method::DELETE => "storage:delete",
+        _ => "storage:write",
+    };
+    if !AuthService::allows(&claims, needed) {
+        info!(user = %claims.sub, needed, "S3 request with an API key lacking the permission refused");
+        return S3Error::AccessDenied.into_response();
+    }
     // Inside the nest the path starts at the bucket: /<bucket>[/<key>].
     let bucket = req.uri().path().trim_start_matches('/').split('/').next().unwrap_or("");
     if bucket != bucket_for_user(&claims.sub) {

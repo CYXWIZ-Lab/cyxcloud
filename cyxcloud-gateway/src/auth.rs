@@ -97,6 +97,19 @@ pub struct Claims {
     pub iss: Option<String>,
 }
 
+/// What an API key can be allowed to do (`POST /api/v1/auth/api-keys`):
+/// storage and datasets only, never node or admin rights.
+pub const API_KEY_PERMISSIONS: &[&str] = &[
+    "storage:read",
+    "storage:write",
+    "storage:delete",
+    "dataset:read",
+    "dataset:write",
+];
+
+/// An API key lives at most this many days (default 90).
+pub const API_KEY_MAX_DAYS: i64 = 365;
+
 /// The issuer of CyxWiz API sign-in tokens (and the website's 5-minute API
 /// tokens): the only tokens without a jti the gateway accepts, whatever the
 /// issuer settings (central's P2P tokens share the secret in some setups).
@@ -538,15 +551,13 @@ impl AuthService {
         (nonce, message)
     }
 
-    /// Check if claims have a specific permission
-    pub fn has_permission(claims: &Claims, permission: &str) -> bool {
-        claims.permissions.contains(&permission.to_string())
-            || claims.permissions.contains(&"*".to_string())
-    }
-
-    /// Check if claims have any of the specified permissions
-    pub fn has_any_permission(claims: &Claims, permissions: &[&str]) -> bool {
-        permissions.iter().any(|p| Self::has_permission(claims, p))
+    /// Whether these claims may do something that needs `permission`. A
+    /// user's sign-in or access token acts for the whole account (its own
+    /// data); an API key may do only what it was created with
+    /// (API_KEY_PERMISSIONS).
+    pub fn allows(claims: &Claims, permission: &str) -> bool {
+        claims.typ.as_deref() != Some("api_key")
+            || claims.permissions.iter().any(|p| p == permission)
     }
 }
 
@@ -788,9 +799,8 @@ mod tests {
             .is_err());
     }
 
-    #[test]
-    fn test_has_permission() {
-        let claims = Claims {
+    fn claims_of(typ: &str, permissions: &[&str]) -> Claims {
+        Claims {
             sub: "user-123".to_string(),
             exp: 0,
             iat: 0,
@@ -798,33 +808,24 @@ mod tests {
             jti: "jti".to_string(),
             user_type: "user".to_string(),
             wallet: None,
-            permissions: vec!["storage:read".to_string(), "storage:write".to_string()],
-            typ: Some("access".to_string()),
+            permissions: permissions.iter().map(|p| p.to_string()).collect(),
+            typ: Some(typ.to_string()),
             iss: None,
-        };
-
-        assert!(AuthService::has_permission(&claims, "storage:read"));
-        assert!(AuthService::has_permission(&claims, "storage:write"));
-        assert!(!AuthService::has_permission(&claims, "storage:delete"));
+        }
     }
 
     #[test]
-    fn test_admin_permission() {
-        let claims = Claims {
-            sub: "admin".to_string(),
-            exp: 0,
-            iat: 0,
-            nbf: 0,
-            jti: "jti".to_string(),
-            user_type: "user".to_string(),
-            wallet: None,
-            permissions: vec!["*".to_string()],
-            typ: Some("access".to_string()),
-            iss: None,
-        };
-
-        assert!(AuthService::has_permission(&claims, "storage:read"));
-        assert!(AuthService::has_permission(&claims, "anything"));
+    fn an_api_key_may_do_only_what_it_was_given() {
+        let key = claims_of("api_key", &["storage:read"]);
+        assert!(AuthService::allows(&key, "storage:read"));
+        assert!(!AuthService::allows(&key, "storage:write"));
+        assert!(!AuthService::allows(&key, "dataset:read"));
+        // "*" is not a wildcard for keys.
+        let star = claims_of("api_key", &["*"]);
+        assert!(!AuthService::allows(&star, "storage:read"));
+        // A user's own access token acts for the account.
+        let user = claims_of("access", &[]);
+        assert!(AuthService::allows(&user, "storage:delete"));
     }
 
     #[test]

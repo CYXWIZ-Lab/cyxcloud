@@ -73,28 +73,20 @@ async fn test_auth_invalid_token() {
 async fn test_auth_permissions() {
     let auth = AuthService::from_env();
 
-    let token = auth
-        .generate_token(
-            "admin",
-            TokenType::Access,
-            None,
-            vec!["read".into(), "write".into(), "admin".into()],
-        )
+    // An API key may do what it was created with, nothing else.
+    let key = auth
+        .generate_token("user-1", TokenType::ApiKey, None, vec!["storage:read".into()])
         .expect("Failed to generate token");
+    let claims = auth.validate_token(&key).await.expect("Valid token");
+    assert!(AuthService::allows(&claims, "storage:read"));
+    assert!(!AuthService::allows(&claims, "storage:write"));
 
-    let claims = auth.validate_token(&token).await.expect("Valid token");
-
-    assert!(AuthService::has_permission(&claims, "admin"));
-    assert!(AuthService::has_permission(&claims, "read"));
-    assert!(!AuthService::has_permission(&claims, "superuser"));
-    assert!(AuthService::has_any_permission(
-        &claims,
-        &["superuser", "admin"]
-    ));
-    assert!(!AuthService::has_any_permission(
-        &claims,
-        &["superuser", "root"]
-    ));
+    // A user's access token acts for the account.
+    let access = auth
+        .generate_token("user-1", TokenType::Access, None, vec![])
+        .expect("Failed to generate token");
+    let claims = auth.validate_token(&access).await.expect("Valid token");
+    assert!(AuthService::allows(&claims, "storage:delete"));
 }
 
 #[tokio::test]

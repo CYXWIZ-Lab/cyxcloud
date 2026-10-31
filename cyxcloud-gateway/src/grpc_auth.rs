@@ -29,6 +29,28 @@ pub fn needs_jwt(path: &str) -> bool {
     !METHODS_WITHOUT_JWT.contains(&path)
 }
 
+/// The permission an API key needs for a gRPC method; None: API keys may
+/// not call it at all (node RPCs and anything not listed).
+pub fn key_permission(path: &str) -> Option<&'static str> {
+    let method = path.rsplit('/').next().unwrap_or("");
+    if path.starts_with("/cyxcloud.datastream.DataStreamService/") {
+        match method {
+            "StreamBatches" | "GetDatasetInfo" | "ListDatasets" | "ListPublicDatasets"
+            | "VerifyDataset" | "CreateAccessToken" => Some("dataset:read"),
+            "CreateDataset" | "UploadFile" | "DeleteDataset" | "ShareDataset"
+            | "RevokeAccessToken" => Some("dataset:write"),
+            _ => None,
+        }
+    } else if path.starts_with("/cyxcloud.data.DataService/") {
+        match method {
+            "GetDataset" | "Prefetch" => Some("storage:read"),
+            _ => None,
+        }
+    } else {
+        None
+    }
+}
+
 /// The token in an `authorization` header value, or why there is none.
 pub fn bearer_token(header: Option<&str>) -> Result<&str, Status> {
     let value = header.ok_or_else(|| Status::unauthenticated("Missing authorization header"))?;
@@ -108,6 +130,15 @@ where
                         )
                     }
                 };
+                if claims.typ.as_deref() == Some("api_key")
+                    && !key_permission(request.uri().path())
+                        .is_some_and(|p| AuthService::allows(&claims, p))
+                {
+                    return Ok(
+                        Status::permission_denied("this API key does not allow this call")
+                            .to_http(),
+                    );
+                }
                 request.extensions_mut().insert(claims);
             }
             inner.call(request).await
@@ -132,6 +163,27 @@ mod tests {
             "/cyxcloud.datastream.DataStreamService/StreamBatches"
         ));
         assert!(needs_jwt(""));
+    }
+
+    #[test]
+    fn api_keys_reach_only_mapped_methods() {
+        assert_eq!(
+            key_permission("/cyxcloud.datastream.DataStreamService/StreamBatches"),
+            Some("dataset:read")
+        );
+        assert_eq!(
+            key_permission("/cyxcloud.datastream.DataStreamService/UploadFile"),
+            Some("dataset:write")
+        );
+        assert_eq!(
+            key_permission("/cyxcloud.data.DataService/GetDataset"),
+            Some("storage:read")
+        );
+        assert_eq!(key_permission("/cyxcloud.node.NodeService/Heartbeat"), None);
+        assert_eq!(
+            key_permission("/cyxcloud.datastream.DataStreamService/Unknown"),
+            None
+        );
     }
 
     #[test]

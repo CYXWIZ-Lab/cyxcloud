@@ -9,7 +9,7 @@
 
 use crate::auth::{
     AuthError, AuthResponse, AuthService, AuthUser, ChallengeResponse, Claims, CreateApiKeyRequest,
-    TokenType, WalletLoginRequest,
+    TokenType, WalletLoginRequest, API_KEY_MAX_DAYS, API_KEY_PERMISSIONS,
 };
 use crate::AppState;
 use axum::{
@@ -307,17 +307,6 @@ async fn refresh_token(
 }
 
 /// Allowed permissions for API keys
-const ALLOWED_PERMISSIONS: &[&str] = &[
-    "storage:read",
-    "storage:write",
-    "storage:delete",
-    "dataset:read",
-    "dataset:write",
-    "node:register",
-    "node:admin",
-    "*",
-];
-
 /// Create an API key
 async fn create_api_key(
     State(state): State<Arc<AppState>>,
@@ -352,18 +341,28 @@ async fn create_api_key(
             )),
         ));
     }
-    let expires_days = req.expires_in_days.unwrap_or(365);
-    if !(1..=3650).contains(&expires_days) {
+    let expires_days = req.expires_in_days.unwrap_or(90);
+    if !(1..=API_KEY_MAX_DAYS).contains(&expires_days) {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(ApiError::new(
-                "expires_in_days must be between 1 and 3650",
+                format!("expires_in_days must be between 1 and {API_KEY_MAX_DAYS}"),
                 "INVALID_EXPIRY",
             )),
         ));
     }
+    // A key says what it may do: at least one of API_KEY_PERMISSIONS.
+    if req.permissions.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ApiError::new(
+                format!("permissions must name at least one of {API_KEY_PERMISSIONS:?}"),
+                "INVALID_PERMISSION",
+            )),
+        ));
+    }
     for perm in &req.permissions {
-        if !ALLOWED_PERMISSIONS.contains(&perm.as_str()) {
+        if !API_KEY_PERMISSIONS.contains(&perm.as_str()) {
             return Err((
                 StatusCode::BAD_REQUEST,
                 Json(ApiError::new(
@@ -389,11 +388,7 @@ async fn create_api_key(
     }
 
     // Generate API key token
-    let permissions = if req.permissions.is_empty() {
-        claims.permissions.clone()
-    } else {
-        req.permissions
-    };
+    let permissions = req.permissions;
 
     let api_key = auth
         .generate_token_for(

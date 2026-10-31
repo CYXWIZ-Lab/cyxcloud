@@ -164,7 +164,7 @@ async fn list_datasets(
     Query(query): Query<ListDatasetsQuery>,
 ) -> Result<Json<Vec<DatasetResponse>>, (StatusCode, Json<ApiError>)> {
     let auth = state.auth_service();
-    let claims = extract_and_validate_token(&headers, auth).await?;
+    let claims = extract_and_validate_token(&headers, auth, "dataset:read").await?;
 
     let metadata = state.metadata_service().ok_or_else(|| {
         (
@@ -254,7 +254,7 @@ async fn create_dataset(
     Json(req): Json<CreateDatasetRequest>,
 ) -> Result<Json<DatasetResponse>, (StatusCode, Json<ApiError>)> {
     let auth = state.auth_service();
-    let claims = extract_and_validate_token(&headers, auth).await?;
+    let claims = extract_and_validate_token(&headers, auth, "dataset:write").await?;
 
     let metadata = state.metadata_service().ok_or_else(|| {
         (
@@ -364,7 +364,7 @@ async fn get_dataset_info(
     Path(dataset_id): Path<String>,
 ) -> Result<Json<DatasetResponse>, (StatusCode, Json<ApiError>)> {
     let auth = state.auth_service();
-    let claims = extract_and_validate_token(&headers, auth).await?;
+    let claims = extract_and_validate_token(&headers, auth, "dataset:read").await?;
 
     let metadata = state.metadata_service().ok_or_else(|| {
         (
@@ -453,7 +453,7 @@ async fn verify_dataset(
     Query(query): Query<VerifyQuery>,
 ) -> Result<Json<VerificationResponse>, (StatusCode, Json<ApiError>)> {
     let auth = state.auth_service();
-    let claims = extract_and_validate_token(&headers, auth).await?;
+    let claims = extract_and_validate_token(&headers, auth, "dataset:read").await?;
 
     let dataset_uuid = Uuid::parse_str(&dataset_id).map_err(|_| {
         (
@@ -570,7 +570,7 @@ async fn share_dataset(
     Json(req): Json<ShareDatasetRequest>,
 ) -> Result<Json<ShareResponse>, (StatusCode, Json<ApiError>)> {
     let auth = state.auth_service();
-    let claims = extract_and_validate_token(&headers, auth).await?;
+    let claims = extract_and_validate_token(&headers, auth, "dataset:write").await?;
 
     let metadata = state.metadata_service().ok_or_else(|| {
         (
@@ -669,10 +669,12 @@ async fn share_dataset(
     }))
 }
 
-/// Extract and validate JWT from Authorization header
+/// Extract and validate JWT from Authorization header; an API key must have
+/// `permission`.
 async fn extract_and_validate_token(
     headers: &HeaderMap,
     auth: &AuthService,
+    permission: &str,
 ) -> Result<Claims, (StatusCode, Json<ApiError>)> {
     let auth_header = headers
         .get(header::AUTHORIZATION)
@@ -699,13 +701,23 @@ async fn extract_and_validate_token(
 
     let token = &auth_header[7..];
 
-    auth.validate_token(token).await.map_err(|e| {
+    let claims = auth.validate_token(token).await.map_err(|e| {
         warn!(error = %e, "Token validation failed");
         (
             StatusCode::UNAUTHORIZED,
             Json(ApiError::new(format!("{}", e), "INVALID_TOKEN")),
         )
-    })
+    })?;
+    if !AuthService::allows(&claims, permission) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ApiError::new(
+                format!("This API key does not have {permission}"),
+                "MISSING_PERMISSION",
+            )),
+        ));
+    }
+    Ok(claims)
 }
 
 #[cfg(test)]
