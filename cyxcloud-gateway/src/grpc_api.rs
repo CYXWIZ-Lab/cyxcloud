@@ -919,6 +919,7 @@ mod tests {
             wallet: None,
             permissions: vec!["read".to_string(), "write".to_string()],
             typ: Some("access".to_string()),
+            iss: None,
         };
 
         assert_eq!(claims.sub, "user123");

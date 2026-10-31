@@ -54,7 +54,7 @@ async fn test_auth_token_revocation() {
     let claims = auth.validate_token(&token).await.expect("Should be valid");
 
     // Revoke
-    auth.revoke_token(&claims.jti).await;
+    auth.revoke_token(&claims.jti, claims.exp).await;
 
     // Should now fail
     let result = auth.validate_token(&token).await;
@@ -124,18 +124,18 @@ async fn test_auth_multiple_revocations() {
             )
             .expect("Failed to generate token");
         let claims = auth.validate_token(&token).await.expect("Valid");
-        tokens.push((token, claims.jti));
+        tokens.push((token, claims.jti, claims.exp));
     }
 
     // Revoke odd-numbered tokens
-    for (i, (_, jti)) in tokens.iter().enumerate() {
+    for (i, (_, jti, exp)) in tokens.iter().enumerate() {
         if i % 2 == 1 {
-            auth.revoke_token(jti).await;
+            auth.revoke_token(jti, *exp).await;
         }
     }
 
     // Verify
-    for (i, (token, _)) in tokens.iter().enumerate() {
+    for (i, (token, _, _)) in tokens.iter().enumerate() {
         let result = auth.validate_token(token).await;
         if i % 2 == 0 {
             assert!(result.is_ok(), "Token {} should be valid", i);

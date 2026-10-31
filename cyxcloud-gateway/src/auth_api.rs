@@ -373,8 +373,19 @@ async fn create_api_key(
         }
     }
 
-    // Authenticate the request
+    // Authenticate the request: only a user's access token (a gateway access
+    // token or a CyxWiz API sign-in token) may create an API key, not an
+    // API key or a node token.
     let claims = extract_and_validate_token(&headers, auth).await?;
+    if !matches!(claims.typ.as_deref(), Some("access") | None) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ApiError::new(
+                "API keys are created with a signed-in user's access token",
+                "WRONG_TOKEN_TYPE",
+            )),
+        ));
+    }
 
     // Generate API key token
     let permissions = if req.permissions.is_empty() {
@@ -384,7 +395,13 @@ async fn create_api_key(
     };
 
     let api_key = auth
-        .generate_token(&claims.sub, TokenType::ApiKey, claims.wallet, permissions)
+        .generate_token_for(
+            &claims.sub,
+            TokenType::ApiKey,
+            claims.wallet,
+            permissions,
+            expires_days * 24 * 3600,
+        )
         .map_err(|e| {
             error!(error = %e, "Failed to generate API key");
             (
@@ -410,18 +427,55 @@ pub struct ApiKeyResponse {
     pub expires_in_days: i64,
 }
 
-/// Logout (revoke current token)
+/// Optional logout body: the refresh token to revoke with the access token
+#[derive(Debug, Default, Deserialize)]
+pub struct LogoutRequest {
+    pub refresh_token: Option<String>,
+}
+
+/// Logout: revoke the access token in `Authorization` and, when the body
+/// names it, the session's refresh token (it must belong to the same user).
 async fn logout(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
+    body: Option<Json<LogoutRequest>>,
 ) -> Result<StatusCode, (StatusCode, Json<ApiError>)> {
     let auth = state.auth_service();
 
     // Get and validate token
     let claims = extract_and_validate_token(&headers, auth).await?;
 
-    // Revoke the token
-    auth.revoke_token(&claims.jti).await;
+    let refresh = match body.and_then(|Json(b)| b.refresh_token) {
+        Some(token) => {
+            let refresh = auth.validate_refresh_token(&token).await.map_err(|e| {
+                warn!(error = %e, "Logout with an invalid refresh token");
+                (
+                    StatusCode::UNAUTHORIZED,
+                    Json(ApiError::new("Invalid refresh token", "INVALID_TOKEN")),
+                )
+            })?;
+            if refresh.sub != claims.sub {
+                return Err((
+                    StatusCode::FORBIDDEN,
+                    Json(ApiError::new(
+                        "The refresh token belongs to another user",
+                        "TOKEN_MISMATCH",
+                    )),
+                ));
+            }
+            Some(refresh)
+        }
+        None => None,
+    };
+
+    // A CyxWiz API sign-in token has no jti: nothing to revoke here (it
+    // expires within 24 h).
+    if !claims.jti.is_empty() {
+        auth.revoke_token(&claims.jti, claims.exp).await;
+    }
+    if let Some(refresh) = refresh {
+        auth.revoke_token(&refresh.jti, refresh.exp).await;
+    }
 
     info!(user_id = %claims.sub, "User logged out");
 

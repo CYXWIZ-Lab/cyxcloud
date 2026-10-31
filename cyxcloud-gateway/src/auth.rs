@@ -87,7 +87,17 @@ pub struct Claims {
     /// (no `jti`) have none and count as access tokens.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub typ: Option<String>,
+
+    /// Issuer. Gateway tokens have none; CyxWiz API sign-in tokens carry
+    /// `API_TOKEN_ISSUER`, which is the only jti-less token accepted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iss: Option<String>,
 }
+
+/// The issuer of CyxWiz API sign-in tokens (and the website's 5-minute API
+/// tokens): the only tokens without a jti the gateway accepts, whatever the
+/// issuer settings (central's P2P tokens share the secret in some setups).
+pub const API_TOKEN_ISSUER: &str = "cyxwiz-api";
 
 fn default_user_type() -> String {
     "user".to_string()
@@ -299,7 +309,7 @@ impl AuthService {
         self
     }
 
-    /// Generate a JWT token for a user
+    /// Generate a JWT token for a user, with its type's lifetime
     pub fn generate_token(
         &self,
         user_id: &str,
@@ -307,8 +317,22 @@ impl AuthService {
         wallet: Option<String>,
         permissions: Vec<String>,
     ) -> AuthResult<String> {
+        let lifetime = token_type.lifetime_secs();
+        self.generate_token_for(user_id, token_type, wallet, permissions, lifetime)
+    }
+
+    /// Generate a JWT token that lives `lifetime_secs` (an API key's chosen
+    /// expiry).
+    pub fn generate_token_for(
+        &self,
+        user_id: &str,
+        token_type: TokenType,
+        wallet: Option<String>,
+        permissions: Vec<String>,
+        lifetime_secs: i64,
+    ) -> AuthResult<String> {
         let now = Utc::now();
-        let exp = now + Duration::seconds(token_type.lifetime_secs());
+        let exp = now + Duration::seconds(lifetime_secs);
 
         let user_type = match token_type {
             TokenType::Access | TokenType::Refresh => "user",
@@ -326,6 +350,7 @@ impl AuthService {
             wallet,
             permissions,
             typ: Some(token_type.claim().to_string()),
+            iss: None,
         };
 
         encode(&Header::default(), &claims, &self.encoding_key)
@@ -341,6 +366,13 @@ impl AuthService {
         let claims = self.decode_unrevoked(token).await?;
         if claims.jti.is_empty() {
             // A CyxWiz API sign-in token: an access token by definition.
+            // Nothing else without a jti is accepted, even with issuer
+            // checking off.
+            if claims.iss.as_deref() != Some(API_TOKEN_ISSUER) {
+                return Err(AuthError::InvalidToken(
+                    "not a CyxWiz API sign-in token".to_string(),
+                ));
+            }
             return Ok(claims);
         }
         match claims.typ.as_deref() {
@@ -416,12 +448,12 @@ impl AuthService {
         Ok(token_data.claims)
     }
 
-    /// Revoke a token by its JTI
+    /// Revoke a token by its JTI until its expiry `exp` (Unix seconds), so
+    /// a revoked long-lived token (an API key) stays revoked for its life.
     ///
-    /// Stores in both the local in-memory cache (L1) and Redis (L2) if available.
-    /// Redis entries have a TTL matching the maximum token lifetime so they
-    /// auto-expire and don't accumulate indefinitely.
-    pub async fn revoke_token(&self, jti: &str) {
+    /// Stores in both the local in-memory cache (L1) and Redis (L2) if
+    /// available; the Redis entry expires with the token.
+    pub async fn revoke_token(&self, jti: &str, exp: i64) {
         // L1: local cache
         {
             let mut revoked = self.revoked_tokens.write().await;
@@ -431,8 +463,8 @@ impl AuthService {
         // L2: Redis (persistent across restarts)
         if let Some(ref redis) = self.redis {
             let key = format!("revoked:{}", jti);
-            // Use max token lifetime (7 days for refresh tokens) as TTL
-            let ttl_secs = TokenType::Refresh.lifetime_secs() as u64;
+            // Kept until the token would have expired anyway.
+            let ttl_secs = (exp - Utc::now().timestamp()).max(1) as u64;
             let mut conn = redis.write().await;
             if let Err(e) = conn.set_ex::<_, _, ()>(&key, "1", ttl_secs).await {
                 warn!(jti = %jti, error = %e, "Failed to persist token revocation to Redis");
@@ -727,6 +759,32 @@ mod tests {
         assert!(auth.validate_refresh_token(&old).await.is_err());
     }
 
+    #[tokio::test]
+    async fn only_api_sign_in_tokens_may_lack_a_jti() {
+        // Even with issuer checking off, a jti-less token must come from the
+        // CyxWiz API (central's P2P tokens share the secret in some setups).
+        let config = AuthConfig {
+            skip_issuer_validation: true,
+            ..AuthConfig::default()
+        };
+        let secret = config.jwt_secret.clone();
+        let auth = AuthService::new(config);
+        let now = chrono::Utc::now().timestamp();
+        let sign = |iss: &str| {
+            jsonwebtoken::encode(
+                &jsonwebtoken::Header::default(),
+                &serde_json::json!({ "sub": "u1", "iat": now, "exp": now + 600, "iss": iss }),
+                &jsonwebtoken::EncodingKey::from_secret(&secret),
+            )
+            .unwrap()
+        };
+        assert!(auth.validate_token(&sign("cyxwiz-api")).await.is_ok());
+        assert!(auth
+            .validate_token(&sign("CyxWiz-Central-Server"))
+            .await
+            .is_err());
+    }
+
     #[test]
     fn test_has_permission() {
         let claims = Claims {
@@ -739,6 +797,7 @@ mod tests {
             wallet: None,
             permissions: vec!["storage:read".to_string(), "storage:write".to_string()],
             typ: Some("access".to_string()),
+            iss: None,
         };
 
         assert!(AuthService::has_permission(&claims, "storage:read"));
@@ -758,6 +817,7 @@ mod tests {
             wallet: None,
             permissions: vec!["*".to_string()],
             typ: Some("access".to_string()),
+            iss: None,
         };
 
         assert!(AuthService::has_permission(&claims, "storage:read"));

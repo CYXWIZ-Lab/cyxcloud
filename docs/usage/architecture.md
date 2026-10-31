@@ -49,12 +49,22 @@ What a node loss costs: a chunk needs any 10 of its 14 shards. With one node eve
 ## Token types
 
 Every token the gateway issues carries `typ`: `access` (1 h), `refresh`
-(7 days), `node` (24 h) or `api_key`. A refresh token is accepted only by
+(7 days), `node` (24 h) or `api_key` (the `expires_in_days` asked for,
+1 to 3650, default 365). A refresh token is accepted only by
 `POST /api/v1/auth/refresh` (which answers a new access token) and refused
-everywhere else; anything but a refresh token is refused there. A
-gateway-issued token without `typ` (issued before 2026-10-31) is refused:
-sign in again (nodes re-register by themselves when a heartbeat is refused).
-CyxWiz API sign-in tokens (no `jti`) count as access tokens.
+everywhere else; anything but a refresh token is refused there.
+
+- A gateway-issued token without `typ` (issued before 2026-10-31, including
+  API keys) is refused: sign in again or create a new API key (nodes
+  re-register by themselves when a heartbeat is refused).
+- A token without a `jti` is accepted only when its issuer is `cyxwiz-api`
+  (CyxWiz API sign-in tokens, the website's API tokens), even with
+  `JWT_SKIP_ISSUER_VALIDATION`; it counts as an access token.
+- `POST /api/v1/auth/api-keys` takes a user's access token only (not an API
+  key or a node token).
+- `POST /api/v1/auth/logout` revokes the access token it is called with and,
+  given `{"refresh_token": ...}` of the same user, the refresh token too.
+  A revocation lasts until the token would have expired.
 
 ## Running a node
 

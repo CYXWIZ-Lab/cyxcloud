@@ -518,7 +518,7 @@ const ws = new WebSocket("ws://gateway:8080/ws?topics=file,cluster");
 | `DATABASE_URL` | - | PostgreSQL connection string |
 | `REDIS_URL` | - | Redis connection string |
 | `JWT_SECRET` | random | Shared with CyxWiz API |
-| `JWT_SKIP_ISSUER_VALIDATION` | `true` | Accept tokens from CyxWiz API |
+| `JWT_SKIP_ISSUER_VALIDATION` | `false` | Leave off: `JWT_ACCEPTED_ISSUERS` already accepts the CyxWiz API. Even when on, a token without a `jti` is accepted only from issuer `cyxwiz-api` |
 | `JWT_ACCEPTED_ISSUERS` | `cyxwiz-api` | Comma-separated list |
 | `SOLANA_RPC_URL` | `https://api.devnet.solana.com` | Blockchain RPC |
 | `ENABLE_BLOCKCHAIN` | `false` | Enable Solana integration |
@@ -545,6 +545,7 @@ const ws = new WebSocket("ws://gateway:8080/ws?topics=file,cluster");
   "nbf": 1699900000,
   "jti": "unique-token-id",
   "user_type": "user|node|api_key",
+  "typ": "access|refresh|node|api_key",
   "wallet": "optional-solana-pubkey",
   "permissions": ["storage:read", "storage:write"]
 }
@@ -562,10 +563,10 @@ const ws = new WebSocket("ws://gateway:8080/ws?topics=file,cluster");
 
   JWT_SECRET=shared_secret ───────────► JWT_SECRET=shared_secret
   JWT_ISSUER=cyxwiz-api                 JWT_ACCEPTED_ISSUERS=cyxwiz-api
-                                        JWT_SKIP_ISSUER_VALIDATION=true
+                                        (issuer checked; no skip)
 
   Generates tokens ◄─────────────────── Validates tokens
-  (on login)                            (skip issuer check)
+  (on login)                            (iss must be cyxwiz-api)
 ```
 
 ### Token Lifetime
