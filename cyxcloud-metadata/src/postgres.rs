@@ -31,6 +31,10 @@ pub enum DbError {
 
 pub type Result<T> = std::result::Result<T, DbError>;
 
+/// A node held in maintenance serves reads and earns uptime only while its
+/// last heartbeat is this recent (the monitor's offline threshold, 5 min).
+pub const HELD_NODE_HEARTBEAT_SECS: i64 = 300;
+
 /// Database configuration
 #[derive(Debug, Clone)]
 pub struct DbConfig {
@@ -229,13 +233,17 @@ impl Database {
     }
 
     /// Update node status
-    pub async fn update_node_status(&self, node_id: Uuid, status: &str) -> Result<()> {
-        sqlx::query("UPDATE nodes SET status = $1 WHERE id = $2")
-            .bind(status)
-            .bind(node_id)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
+    /// Set a node's status, unless an admin holds it in maintenance (only a
+    /// release, `set_node_maintenance`, ends a hold). Returns whether it
+    /// changed.
+    pub async fn update_node_status(&self, node_id: Uuid, status: &str) -> Result<bool> {
+        let result =
+            sqlx::query("UPDATE nodes SET status = $1 WHERE id = $2 AND status <> 'maintenance'")
+                .bind(status)
+                .bind(node_id)
+                .execute(&self.pool)
+                .await?;
+        Ok(result.rows_affected() > 0)
     }
 
     /// Update node storage usage
@@ -387,7 +395,7 @@ impl Database {
             SET status = 'offline',
                 status_changed_at = NOW(),
                 first_offline_at = COALESCE(first_offline_at, NOW())
-            WHERE id = $1
+            WHERE id = $1 AND status = 'online'
             "#,
         )
         .bind(node_id)
@@ -428,7 +436,7 @@ impl Database {
                 first_offline_at = NULL,
                 last_heartbeat = NOW(),
                 failure_count = 0
-            WHERE id = $1
+            WHERE id = $1 AND status = 'recovering'
             "#,
         )
         .bind(node_id)
@@ -439,12 +447,14 @@ impl Database {
     }
 
     /// An admin holds a node in maintenance (`on`) or releases it. A node
-    /// in maintenance takes no new chunks and is not repaired around; it
-    /// still serves what it holds, and its heartbeats and restarts keep it
-    /// there. Only an online or recovering node can be held; a release puts
-    /// it back online (the monitor marks it offline if its heartbeats have
-    /// stopped). Returns the node, or None when no node had a status the
-    /// change applies to.
+    /// in maintenance takes no new chunks and is never a placement or repair
+    /// target; while it heartbeats (within `HELD_NODE_HEARTBEAT_SECS`) it
+    /// still serves reads and earns uptime. Its heartbeats, restarts and its
+    /// own drain request keep it held, and the monitor does not mark it
+    /// offline: only an admin releases it. Only an online or recovering node
+    /// can be held; a release puts it back online (the monitor marks it
+    /// offline if its heartbeats have stopped). Returns the node, or None
+    /// when no node had a status the change applies to.
     #[instrument(skip(self))]
     pub async fn set_node_maintenance(&self, node_id: Uuid, on: bool) -> Result<Option<Node>> {
         let (to, from): (&str, &[&str]) = if on {
@@ -862,11 +872,13 @@ impl Database {
             FROM chunk_locations cl
             JOIN chunks c ON cl.chunk_id = c.chunk_id
             JOIN nodes n ON cl.node_id = n.id
-            WHERE c.file_id = $1 AND cl.status = 'stored' AND n.status IN ('online', 'maintenance')
+            WHERE c.file_id = $1 AND cl.status = 'stored' AND (n.status = 'online' OR (n.status = 'maintenance'
+                 AND n.last_heartbeat > NOW() - make_interval(secs => $2)))
             ORDER BY cl.chunk_id
             "#,
         )
         .bind(file_id)
+        .bind(HELD_NODE_HEARTBEAT_SECS)
         .fetch_all(&self.pool)
         .await?;
 
@@ -884,10 +896,12 @@ impl Database {
             SELECT n.grpc_address
             FROM chunk_locations cl
             JOIN nodes n ON cl.node_id = n.id
-            WHERE cl.chunk_id = $1 AND cl.status = 'stored' AND n.status IN ('online', 'maintenance')
+            WHERE cl.chunk_id = $1 AND cl.status = 'stored' AND (n.status = 'online' OR (n.status = 'maintenance'
+                 AND n.last_heartbeat > NOW() - make_interval(secs => $2)))
             "#,
         )
         .bind(chunk_id)
+        .bind(HELD_NODE_HEARTBEAT_SECS)
         .fetch_all(&self.pool)
         .await?;
         Ok(result)

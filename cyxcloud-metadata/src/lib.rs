@@ -60,7 +60,7 @@ pub mod topology;
 pub use cache::{Cache, CacheConfig, CacheError, OptionalCache};
 pub use health::{HealthChecker, HealthConfig, HealthMonitor, HealthStatus, HealthSummary};
 pub use models::*;
-pub use postgres::{Database, DbConfig, DbError, FaultToleranceConfig};
+pub use postgres::{Database, DbConfig, DbError, FaultToleranceConfig, HELD_NODE_HEARTBEAT_SECS};
 pub use quorum::{QuorumConfig, QuorumCoordinator, QuorumError, QuorumResult};
 pub use topology::{PlacementConfig, PlacementEngine, PlacementNode, RebalanceSuggestion};
 

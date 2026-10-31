@@ -409,11 +409,19 @@ impl NodeService for NodeServiceImpl {
             .update_node_status(node_uuid, "draining")
             .await
         {
-            Ok(()) => {
+            Ok(true) => {
                 info!(node_id = %req.node_id, "Node marked as draining");
                 Ok(Response::new(DrainNodeResponse {
                     accepted: true,
                     estimated_duration_secs: 300, // 5 minutes default estimate
+                }))
+            }
+            Ok(false) => {
+                // Held in maintenance by an admin: only a release ends that.
+                info!(node_id = %req.node_id, "Drain refused: the node is held in maintenance");
+                Ok(Response::new(DrainNodeResponse {
+                    accepted: false,
+                    estimated_duration_secs: 0,
                 }))
             }
             Err(e) => {

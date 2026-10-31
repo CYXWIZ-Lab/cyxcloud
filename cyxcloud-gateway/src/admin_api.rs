@@ -81,7 +81,7 @@ pub fn routes(admin_secret: Option<String>) -> Router<Arc<AppState>> {
         .map(|s| Arc::new(DecodingKey::from_secret(s.as_bytes())));
     if key.is_none() {
         warn!(
-            "ADMIN_JWT_SECRET unset or shorter than {MIN_ADMIN_SECRET_BYTES} bytes:              the admin API (/api/v1/admin) answers 503"
+            "ADMIN_JWT_SECRET unset or shorter than {MIN_ADMIN_SECRET_BYTES} bytes: the admin API (/api/v1/admin) answers 503"
         );
     }
     Router::new()

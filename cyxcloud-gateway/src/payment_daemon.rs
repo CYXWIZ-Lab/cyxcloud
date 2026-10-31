@@ -224,8 +224,19 @@ impl PaymentDaemon {
                 .await?;
 
             // Update uptime based on status
+            // A node an admin holds in maintenance still serves reads, so it
+            // earns uptime while it heartbeats.
+            let held_and_alive = node.status == "maintenance"
+                && node.last_heartbeat.is_some_and(|t| {
+                    (Utc::now() - t).num_seconds() < cyxcloud_metadata::HELD_NODE_HEARTBEAT_SECS
+                });
             match node.status.as_str() {
                 "online" | "recovering" => {
+                    db.update_uptime_online(node.id, current_epoch, seconds)
+                        .await?;
+                    online_count += 1;
+                }
+                "maintenance" if held_and_alive => {
                     db.update_uptime_online(node.id, current_epoch, seconds)
                         .await?;
                     online_count += 1;

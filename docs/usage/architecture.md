@@ -133,10 +133,13 @@ node services (`cyxcloud-node1`, `cyxcloud-node2`) for a local cluster;
 An admin holds a storage node in `maintenance` from the admin site's Drive page
 (the gateway's admin route above). A node in maintenance:
 
-- takes no new chunks (placement and repair targets read online nodes only);
-- still serves the chunks it holds (chunk reads accept `online` and
-  `maintenance` nodes);
-- stays in maintenance across heartbeats and re-registration (a restart),
-  and is not marked offline by the monitor;
+- takes no new chunks and is never a placement or repair target (those read
+  online nodes only);
+- while it heartbeats (last heartbeat within 5 minutes,
+  `HELD_NODE_HEARTBEAT_SECS`) it still serves the chunks it holds and earns
+  uptime; once its heartbeats stop, reads skip it and it earns none. The
+  Drive page flags a held node that has stopped heartbeating;
+- stays in maintenance across heartbeats, re-registration (a restart) and its
+  own `DrainNode` request (refused), and the monitor does not mark it offline;
 - returns to `online` only when an admin releases it (the monitor then marks
   it offline if its heartbeats have stopped).
