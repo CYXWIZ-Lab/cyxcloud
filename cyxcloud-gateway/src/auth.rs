@@ -81,6 +81,12 @@ pub struct Claims {
     /// Permissions
     #[serde(default)]
     pub permissions: Vec<String>,
+
+    /// What the token is for (`TokenType::claim`): access, refresh, node,
+    /// api_key. Every token CyxCloud issues has it; CyxWiz API sign-in tokens
+    /// (no `jti`) have none and count as access tokens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub typ: Option<String>,
 }
 
 fn default_user_type() -> String {
@@ -121,6 +127,16 @@ pub enum TokenType {
 }
 
 impl TokenType {
+    /// The `typ` claim of a token of this type.
+    pub fn claim(&self) -> &'static str {
+        match self {
+            Self::Access => "access",
+            Self::Refresh => "refresh",
+            Self::Node => "node",
+            Self::ApiKey => "api_key",
+        }
+    }
+
     /// Get token lifetime in seconds
     pub fn lifetime_secs(&self) -> i64 {
         match self {
@@ -309,18 +325,50 @@ impl AuthService {
             user_type: user_type.to_string(),
             wallet,
             permissions,
+            typ: Some(token_type.claim().to_string()),
         };
 
         encode(&Header::default(), &claims, &self.encoding_key)
             .map_err(|e| AuthError::Internal(format!("Failed to generate token: {}", e)))
     }
 
-    /// Validate a JWT token and return claims
+    /// Validate a token presented to use the service (access, node or API key
+    /// token, or a CyxWiz API sign-in token) and return its claims. A
+    /// refresh token is refused here: it is only good at
+    /// /api/v1/auth/refresh (`validate_refresh_token`). A CyxCloud token
+    /// without a `typ` (issued before token types) is refused too.
+    pub async fn validate_token(&self, token: &str) -> AuthResult<Claims> {
+        let claims = self.decode_unrevoked(token).await?;
+        if claims.jti.is_empty() {
+            // A CyxWiz API sign-in token: an access token by definition.
+            return Ok(claims);
+        }
+        match claims.typ.as_deref() {
+            Some("access") | Some("node") | Some("api_key") => Ok(claims),
+            Some("refresh") => Err(AuthError::InvalidToken(
+                "a refresh token cannot be used for access".to_string(),
+            )),
+            _ => Err(AuthError::InvalidToken(
+                "token has no type; sign in again".to_string(),
+            )),
+        }
+    }
+
+    /// Validate a refresh token (only at /api/v1/auth/refresh).
+    pub async fn validate_refresh_token(&self, token: &str) -> AuthResult<Claims> {
+        let claims = self.decode_unrevoked(token).await?;
+        if claims.typ.as_deref() != Some("refresh") {
+            return Err(AuthError::InvalidToken("not a refresh token".to_string()));
+        }
+        Ok(claims)
+    }
+
+    /// Decode a token (signature, expiry, issuer) and check it is not revoked.
     ///
     /// Checks revocation in two tiers:
     /// 1. L1: local in-memory HashSet (fast, but lost on restart)
     /// 2. L2: Redis (persistent, survives restarts)
-    pub async fn validate_token(&self, token: &str) -> AuthResult<Claims> {
+    async fn decode_unrevoked(&self, token: &str) -> AuthResult<Claims> {
         // Decode and validate token
         let token_data: TokenData<Claims> = decode(token, &self.decoding_key, &self.validation)
             .map_err(|e| match e.kind() {
@@ -637,6 +685,48 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn a_refresh_token_is_only_good_for_refreshing() {
+        let config = AuthConfig::default();
+        let secret = config.jwt_secret.clone();
+        let auth = AuthService::new(config);
+        let refresh = auth
+            .generate_token("user-1", TokenType::Refresh, None, vec![])
+            .unwrap();
+        let access = auth
+            .generate_token("user-1", TokenType::Access, None, vec![])
+            .unwrap();
+
+        assert!(
+            auth.validate_token(&refresh).await.is_err(),
+            "refresh refused for access"
+        );
+        assert_eq!(
+            auth.validate_refresh_token(&refresh).await.unwrap().sub,
+            "user-1"
+        );
+        assert!(
+            auth.validate_refresh_token(&access).await.is_err(),
+            "access refused for refresh"
+        );
+        assert!(auth.validate_token(&access).await.is_ok());
+
+        // A CyxCloud token from before token types (a jti, no typ) is refused.
+        let now = chrono::Utc::now().timestamp();
+        let old = serde_json::json!({
+            "sub": "user-1", "iat": now, "nbf": now, "exp": now + 3600,
+            "jti": "old-token", "user_type": "user", "permissions": []
+        });
+        let old = jsonwebtoken::encode(
+            &jsonwebtoken::Header::default(),
+            &old,
+            &jsonwebtoken::EncodingKey::from_secret(&secret),
+        )
+        .unwrap();
+        assert!(auth.validate_token(&old).await.is_err());
+        assert!(auth.validate_refresh_token(&old).await.is_err());
+    }
+
     #[test]
     fn test_has_permission() {
         let claims = Claims {
@@ -648,6 +738,7 @@ mod tests {
             user_type: "user".to_string(),
             wallet: None,
             permissions: vec!["storage:read".to_string(), "storage:write".to_string()],
+            typ: Some("access".to_string()),
         };
 
         assert!(AuthService::has_permission(&claims, "storage:read"));
@@ -666,6 +757,7 @@ mod tests {
             user_type: "user".to_string(),
             wallet: None,
             permissions: vec!["*".to_string()],
+            typ: Some("access".to_string()),
         };
 
         assert!(AuthService::has_permission(&claims, "storage:read"));

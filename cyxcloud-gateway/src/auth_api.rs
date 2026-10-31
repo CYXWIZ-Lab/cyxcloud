@@ -267,13 +267,16 @@ async fn refresh_token(
     let auth = state.auth_service();
 
     // Validate refresh token
-    let claims = auth.validate_token(&req.refresh_token).await.map_err(|e| {
-        warn!(error = %e, "Invalid refresh token");
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(ApiError::new("Invalid refresh token", "INVALID_TOKEN")),
-        )
-    })?;
+    let claims = auth
+        .validate_refresh_token(&req.refresh_token)
+        .await
+        .map_err(|e| {
+            warn!(error = %e, "Invalid refresh token");
+            (
+                StatusCode::UNAUTHORIZED,
+                Json(ApiError::new("Invalid refresh token", "INVALID_TOKEN")),
+            )
+        })?;
 
     // Generate new access token
     let access_token = auth

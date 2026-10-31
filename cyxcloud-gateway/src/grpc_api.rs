@@ -918,6 +918,7 @@ mod tests {
             user_type: "user".to_string(),
             wallet: None,
             permissions: vec!["read".to_string(), "write".to_string()],
+            typ: Some("access".to_string()),
         };
 
         assert_eq!(claims.sub, "user123");
