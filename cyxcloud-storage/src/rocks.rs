@@ -8,7 +8,6 @@ use crate::StorageConfig;
 use bytes::Bytes;
 use cyxcloud_core::chunk::ChunkId;
 use cyxcloud_core::error::{CyxCloudError, Result};
-use parking_lot::RwLock;
 use rocksdb::{BlockBasedOptions, Cache, DBCompressionType, Options, WriteOptions, DB};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -36,8 +35,11 @@ pub struct RocksDbBackend {
     read_latency_total_us: AtomicU64,
     write_latency_total_us: AtomicU64,
 
-    /// Cached statistics (updated periodically)
-    cached_stats: RwLock<StorageStats>,
+    /// Chunks stored and their bytes: counted once at open, then kept by
+    /// put and delete, so stats() is cheap (the health check and the
+    /// heartbeat call it every few seconds).
+    chunk_count: AtomicU64,
+    bytes_used: AtomicU64,
 }
 
 impl RocksDbBackend {
@@ -90,7 +92,21 @@ impl RocksDbBackend {
         let db = DB::open_cf_descriptors(&opts, &config.path, cf_descriptors)
             .map_err(|e| CyxCloudError::Storage(format!("Failed to open RocksDB: {}", e)))?;
 
-        info!("RocksDB storage opened successfully");
+        // One pass over the stored chunks for the starting totals.
+        let (mut chunk_count, mut bytes_used) = (0u64, 0u64);
+        {
+            let cf = db
+                .cf_handle(CF_CHUNKS)
+                .ok_or_else(|| CyxCloudError::Storage("chunks column family missing".into()))?;
+            for (_, value) in db.iterator_cf(&cf, rocksdb::IteratorMode::Start).flatten() {
+                chunk_count += 1;
+                bytes_used += value.len() as u64;
+            }
+        }
+        info!(
+            chunk_count,
+            bytes_used, "RocksDB storage opened successfully"
+        );
 
         Ok(Self {
             db,
@@ -100,7 +116,8 @@ impl RocksDbBackend {
             deletes: AtomicU64::new(0),
             read_latency_total_us: AtomicU64::new(0),
             write_latency_total_us: AtomicU64::new(0),
-            cached_stats: RwLock::new(StorageStats::default()),
+            chunk_count: AtomicU64::new(chunk_count),
+            bytes_used: AtomicU64::new(bytes_used),
         })
     }
 
@@ -131,16 +148,6 @@ impl RocksDbBackend {
             .compact_range_cf(&self.cf_chunks(), None::<&[u8]>, None::<&[u8]>);
         info!("Database compaction complete");
     }
-
-    /// Get approximate storage size
-    pub fn approximate_size(&self) -> u64 {
-        // Get approximate size from RocksDB properties
-        self.db
-            .property_int_value("rocksdb.total-sst-files-size")
-            .ok()
-            .flatten()
-            .unwrap_or(0)
-    }
 }
 
 impl StorageBackendSync for RocksDbBackend {
@@ -148,9 +155,17 @@ impl StorageBackendSync for RocksDbBackend {
         let start = Instant::now();
         let key = id.as_bytes();
 
+        // Chunk ids are content hashes: an id already stored holds the same
+        // bytes, so writing it again neither counts nor needs room.
+        let existing = self
+            .db
+            .get_pinned_cf(&self.cf_chunks(), key)
+            .map_err(|e| CyxCloudError::Storage(format!("Read failed: {}", e)))?
+            .map(|v| v.len() as u64);
+
         // Check capacity if set
-        if self.config.max_capacity > 0 {
-            let current_size = self.approximate_size();
+        if existing.is_none() && self.config.max_capacity > 0 {
+            let current_size = self.bytes_used.load(Ordering::Relaxed);
             if current_size + data.len() as u64 > self.config.max_capacity {
                 return Err(CyxCloudError::StorageFull {
                     used: current_size,
@@ -166,6 +181,18 @@ impl StorageBackendSync for RocksDbBackend {
         self.db
             .put_cf_opt(&self.cf_chunks(), key, &data, &write_opts)
             .map_err(|e| CyxCloudError::Storage(format!("Write failed: {}", e)))?;
+        match existing {
+            None => {
+                self.chunk_count.fetch_add(1, Ordering::Relaxed);
+                self.bytes_used
+                    .fetch_add(data.len() as u64, Ordering::Relaxed);
+            }
+            Some(old) => {
+                self.bytes_used
+                    .fetch_add(data.len() as u64, Ordering::Relaxed);
+                self.bytes_used.fetch_sub(old, Ordering::Relaxed);
+            }
+        }
 
         // Track latency and count
         let elapsed_us = start.elapsed().as_micros() as u64;
@@ -198,15 +225,21 @@ impl StorageBackendSync for RocksDbBackend {
     fn delete(&self, id: ChunkId) -> Result<bool> {
         let key = id.as_bytes();
 
-        // Check if exists first
-        let exists = self.exists(id)?;
-        if !exists {
+        // Its size first (and whether it is there at all)
+        let Some(size) = self
+            .db
+            .get_pinned_cf(&self.cf_chunks(), key)
+            .map_err(|e| CyxCloudError::Storage(format!("Read failed: {}", e)))?
+            .map(|v| v.len() as u64)
+        else {
             return Ok(false);
-        }
+        };
 
         self.db
             .delete_cf(&self.cf_chunks(), key)
             .map_err(|e| CyxCloudError::Storage(format!("Delete failed: {}", e)))?;
+        self.chunk_count.fetch_sub(1, Ordering::Relaxed);
+        self.bytes_used.fetch_sub(size, Ordering::Relaxed);
 
         self.deletes.fetch_add(1, Ordering::Relaxed);
         debug!(chunk_id = %id, "Deleted chunk");
@@ -232,18 +265,8 @@ impl StorageBackendSync for RocksDbBackend {
     }
 
     fn stats(&self) -> Result<StorageStats> {
-        // Count chunks by iterating (expensive, should be cached)
-        let mut chunk_count = 0u64;
-        let mut bytes_used = 0u64;
-
-        let iter = self
-            .db
-            .iterator_cf(&self.cf_chunks(), rocksdb::IteratorMode::Start);
-
-        for (_, value) in iter.flatten() {
-            chunk_count += 1;
-            bytes_used += value.len() as u64;
-        }
+        let chunk_count = self.chunk_count.load(Ordering::Relaxed);
+        let bytes_used = self.bytes_used.load(Ordering::Relaxed);
 
         // Calculate average latencies
         let reads = self.reads.load(Ordering::Relaxed);
@@ -264,9 +287,6 @@ impl StorageBackendSync for RocksDbBackend {
             avg_read_latency_us,
             avg_write_latency_us,
         };
-
-        // Update cached stats
-        *self.cached_stats.write() = stats.clone();
 
         Ok(stats)
     }
@@ -316,6 +336,27 @@ mod tests {
         let config = StorageConfig::new(temp_dir.path());
         let backend = RocksDbBackend::open(config).unwrap();
         (backend, temp_dir)
+    }
+
+    #[test]
+    fn stats_follow_puts_and_deletes_and_survive_a_reopen() {
+        let temp_dir = TempDir::new().unwrap();
+        let backend = RocksDbBackend::open(StorageConfig::new(temp_dir.path())).unwrap();
+        let a = ChunkId::from_data(b"a");
+        let b = ChunkId::from_data(b"b");
+        backend.put(a, Bytes::from_static(b"12345")).unwrap();
+        backend.put(a, Bytes::from_static(b"12345")).unwrap(); // same chunk again
+        backend.put(b, Bytes::from_static(b"123")).unwrap();
+        let s = backend.stats().unwrap();
+        assert_eq!((s.chunk_count, s.bytes_used), (2, 8));
+        assert!(backend.delete(a).unwrap());
+        assert!(!backend.delete(a).unwrap());
+        let s = backend.stats().unwrap();
+        assert_eq!((s.chunk_count, s.bytes_used), (1, 3));
+        drop(backend);
+        let reopened = RocksDbBackend::open(StorageConfig::new(temp_dir.path())).unwrap();
+        let s = reopened.stats().unwrap();
+        assert_eq!((s.chunk_count, s.bytes_used), (1, 3));
     }
 
     #[test]
