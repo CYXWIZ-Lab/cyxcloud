@@ -304,6 +304,15 @@ impl MetadataService {
         Ok(self.db.get_node_by_peer_id(peer_id).await?)
     }
 
+    /// Hold a node in maintenance or release it (see
+    /// `Database::set_node_maintenance`); the online-node cache is dropped so
+    /// placement sees the change at once.
+    pub async fn set_node_maintenance(&self, node_id: Uuid, on: bool) -> Result<Option<Node>> {
+        let node = self.db.set_node_maintenance(node_id, on).await?;
+        self.cache.try_delete("nodes:online").await;
+        Ok(node)
+    }
+
     /// Get online nodes
     pub async fn get_online_nodes(&self) -> Result<Vec<Node>> {
         // Try cache first
@@ -327,21 +336,6 @@ impl MetadataService {
             .await;
 
         Ok(nodes)
-    }
-
-    /// Update node heartbeat (legacy - marks as online immediately)
-    pub async fn heartbeat(&self, node_id: Uuid) -> Result<()> {
-        self.db.update_node_heartbeat(node_id).await?;
-        Ok(())
-    }
-
-    /// Update node heartbeat with recovery-aware logic
-    /// Returns the node's new status after the heartbeat
-    /// - If node was online/recovering: stays in current state, heartbeat updated
-    /// - If node was offline/draining: enters 'recovering' quarantine state
-    pub async fn heartbeat_with_recovery(&self, node_id: Uuid) -> Result<NodeStatus> {
-        let status = self.db.update_node_heartbeat_with_recovery(node_id).await?;
-        Ok(status)
     }
 
     /// Update node heartbeat using peer_id (client-side node identifier)

@@ -164,7 +164,8 @@ impl Database {
                 wallet_address = COALESCE(EXCLUDED.wallet_address, nodes.wallet_address),
                 public_key = COALESCE(EXCLUDED.public_key, nodes.public_key),
                 access_secret = COALESCE(EXCLUDED.access_secret, nodes.access_secret),
-                status = 'online',
+                -- A node an admin holds in maintenance stays there on restart.
+                status = CASE WHEN nodes.status = 'maintenance' THEN 'maintenance' ELSE 'online' END,
                 last_heartbeat = NOW(),
                 first_offline_at = NULL
             RETURNING *
@@ -225,22 +226,6 @@ impl Database {
         .fetch_all(&self.pool)
         .await?;
         Ok(result)
-    }
-
-    /// Update node heartbeat
-    #[instrument(skip(self))]
-    pub async fn update_node_heartbeat(&self, node_id: Uuid) -> Result<()> {
-        sqlx::query(
-            r#"
-            UPDATE nodes
-            SET last_heartbeat = NOW(), status = 'online', failure_count = 0
-            WHERE id = $1
-            "#,
-        )
-        .bind(node_id)
-        .execute(&self.pool)
-        .await?;
-        Ok(())
     }
 
     /// Update node status
@@ -453,6 +438,37 @@ impl Database {
         Ok(())
     }
 
+    /// An admin holds a node in maintenance (`on`) or releases it. A node
+    /// in maintenance takes no new chunks and is not repaired around; it
+    /// still serves what it holds, and its heartbeats and restarts keep it
+    /// there. Only an online or recovering node can be held; a release puts
+    /// it back online (the monitor marks it offline if its heartbeats have
+    /// stopped). Returns the node, or None when no node had a status the
+    /// change applies to.
+    #[instrument(skip(self))]
+    pub async fn set_node_maintenance(&self, node_id: Uuid, on: bool) -> Result<Option<Node>> {
+        let (to, from): (&str, &[&str]) = if on {
+            ("maintenance", &["online", "recovering"])
+        } else {
+            ("online", &["maintenance"])
+        };
+        let node = sqlx::query_as::<_, Node>(
+            r#"
+            UPDATE nodes
+            SET status = $2, status_changed_at = NOW()
+            WHERE id = $1 AND status = ANY($3)
+            RETURNING *
+            "#,
+        )
+        .bind(node_id)
+        .bind(to)
+        .bind(from)
+        .fetch_optional(&self.pool)
+        .await?;
+        debug!(node_id = %node_id, status = to, changed = node.is_some(), "Node maintenance");
+        Ok(node)
+    }
+
     /// Mark a node as draining (chunk evacuation should begin)
     #[instrument(skip(self))]
     pub async fn mark_node_draining(&self, node_id: Uuid) -> Result<()> {
@@ -469,70 +485,6 @@ impl Database {
         .await?;
         debug!(node_id = %node_id, "Node marked as draining");
         Ok(())
-    }
-
-    /// Update node heartbeat with recovery-aware logic
-    /// Returns the new status after the update
-    #[instrument(skip(self))]
-    pub async fn update_node_heartbeat_with_recovery(&self, node_id: Uuid) -> Result<NodeStatus> {
-        // First get the current status
-        let node = self
-            .get_node(node_id)
-            .await?
-            .ok_or_else(|| DbError::NotFound(format!("Node {} not found", node_id)))?;
-
-        match node.status.as_str() {
-            "online" | "recovering" => {
-                // Just update heartbeat timestamp
-                sqlx::query(
-                    r#"
-                    UPDATE nodes
-                    SET last_heartbeat = NOW(), failure_count = 0
-                    WHERE id = $1
-                    "#,
-                )
-                .bind(node_id)
-                .execute(&self.pool)
-                .await?;
-
-                if node.status == "recovering" {
-                    debug!(node_id = %node_id, "Heartbeat updated (recovering)");
-                    Ok(NodeStatus::Recovering)
-                } else {
-                    debug!(node_id = %node_id, "Heartbeat updated (online)");
-                    Ok(NodeStatus::Online)
-                }
-            }
-            "offline" | "draining" => {
-                // Node coming back - enter quarantine
-                sqlx::query(
-                    r#"
-                    UPDATE nodes
-                    SET status = 'recovering',
-                        status_changed_at = NOW(),
-                        last_heartbeat = NOW(),
-                        failure_count = 0
-                    WHERE id = $1
-                    "#,
-                )
-                .bind(node_id)
-                .execute(&self.pool)
-                .await?;
-
-                debug!(node_id = %node_id, "Node entering recovery quarantine");
-                Ok(NodeStatus::Recovering)
-            }
-            _ => {
-                // maintenance or unknown - just update heartbeat
-                sqlx::query("UPDATE nodes SET last_heartbeat = NOW() WHERE id = $1")
-                    .bind(node_id)
-                    .execute(&self.pool)
-                    .await?;
-
-                debug!(node_id = %node_id, status = %node.status, "Heartbeat updated");
-                Ok(NodeStatus::Maintenance)
-            }
-        }
     }
 
     /// Update node heartbeat using peer_id (client-side node identifier)
@@ -910,7 +862,7 @@ impl Database {
             FROM chunk_locations cl
             JOIN chunks c ON cl.chunk_id = c.chunk_id
             JOIN nodes n ON cl.node_id = n.id
-            WHERE c.file_id = $1 AND cl.status = 'stored' AND n.status = 'online'
+            WHERE c.file_id = $1 AND cl.status = 'stored' AND n.status IN ('online', 'maintenance')
             ORDER BY cl.chunk_id
             "#,
         )
@@ -932,7 +884,7 @@ impl Database {
             SELECT n.grpc_address
             FROM chunk_locations cl
             JOIN nodes n ON cl.node_id = n.id
-            WHERE cl.chunk_id = $1 AND cl.status = 'stored' AND n.status = 'online'
+            WHERE cl.chunk_id = $1 AND cl.status = 'stored' AND n.status IN ('online', 'maintenance')
             "#,
         )
         .bind(chunk_id)

@@ -1,5 +1,5 @@
 //! The admin site's view of storage (its Drive page): totals and the storage
-//! nodes, read-only.
+//! nodes, and holding a node in maintenance.
 //!
 //! Every request carries an admin token: HS256, signed with
 //! `ADMIN_JWT_SECRET` (the secret the admin site signs central's admin
@@ -11,17 +11,17 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::{
-    extract::{Query, Request, State},
+    extract::{Path, Query, Request, State},
     http::{header, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
 use chrono::{DateTime, Utc};
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::AppState;
@@ -81,6 +81,7 @@ pub fn routes(admin_secret: Option<String>) -> Router<Arc<AppState>> {
     Router::new()
         .route("/stats", get(stats))
         .route("/nodes", get(nodes))
+        .route("/nodes/:id/maintenance", post(maintenance))
         .route_layer(middleware::from_fn(move |req: Request, next: Next| {
             require_admin(key.clone(), req, next)
         }))
@@ -234,6 +235,63 @@ async fn nodes(State(state): State<Arc<AppState>>, Query(q): Query<NodesQuery>) 
     Json(NodesResponse { nodes, total }).into_response()
 }
 
+#[derive(Debug, Deserialize)]
+pub struct MaintenanceRequest {
+    /// true: hold the node in maintenance; false: release it
+    pub on: bool,
+}
+
+/// POST /api/v1/admin/nodes/:id/maintenance {"on": bool} - hold a node in
+/// maintenance (no new chunks, still serves what it has, heartbeats and
+/// restarts keep it there) or release it. 409 when the node's status does not
+/// allow the change (only online or recovering nodes can be held).
+async fn maintenance(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(req): Json<MaintenanceRequest>,
+) -> Response {
+    let Ok(id) = Uuid::parse_str(&id) else {
+        return refuse(StatusCode::BAD_REQUEST, "the node id is not a UUID");
+    };
+    let Some(meta) = state.metadata_service() else {
+        return refuse(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "the gateway has no metadata store",
+        );
+    };
+    let exists = match meta.database().get_node(id).await {
+        Ok(node) => node.is_some(),
+        Err(e) => {
+            warn!(error = %e, "admin API could not read the node");
+            return refuse(StatusCode::INTERNAL_SERVER_ERROR, "could not read the node");
+        }
+    };
+    if !exists {
+        return refuse(StatusCode::NOT_FOUND, "no such node");
+    }
+    match meta.set_node_maintenance(id, req.on).await {
+        Ok(Some(node)) => {
+            info!(node_id = %id, status = %node.status, "admin changed a node's maintenance");
+            Json(serde_json::json!({ "id": node.id, "status": node.status })).into_response()
+        }
+        Ok(None) => refuse(
+            StatusCode::CONFLICT,
+            if req.on {
+                "only an online or recovering node can be put in maintenance"
+            } else {
+                "the node is not in maintenance"
+            },
+        ),
+        Err(e) => {
+            warn!(error = %e, "admin API could not change the node");
+            refuse(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "could not change the node",
+            )
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -326,6 +384,48 @@ mod tests {
         let admin = format!("Bearer {}", token(SECRET, "admin", 300));
         assert_eq!(
             status(Some(SECRET), Some(admin)).await,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+    }
+
+    #[tokio::test]
+    async fn maintenance_needs_an_admin_and_a_node_id() {
+        let state = Arc::new(AppState::new());
+        let app = routes(Some(SECRET.to_string())).with_state(state);
+        let post = |auth: Option<String>, id: &str| {
+            let mut req = HttpRequest::builder()
+                .method("POST")
+                .uri(format!("/nodes/{id}/maintenance"))
+                .header(header::CONTENT_TYPE, "application/json");
+            if let Some(a) = auth {
+                req = req.header(header::AUTHORIZATION, a);
+            }
+            req.body(Body::from(r#"{"on":true}"#)).unwrap()
+        };
+        let id = Uuid::new_v4().to_string();
+        let user = format!("Bearer {}", token(SECRET, "user", 300));
+        let admin = format!("Bearer {}", token(SECRET, "admin", 300));
+        let status = |r: Response| r.status();
+        assert_eq!(
+            status(app.clone().oneshot(post(None, &id)).await.unwrap()),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            status(app.clone().oneshot(post(Some(user), &id)).await.unwrap()),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            status(
+                app.clone()
+                    .oneshot(post(Some(admin.clone()), "not-a-uuid"))
+                    .await
+                    .unwrap()
+            ),
+            StatusCode::BAD_REQUEST
+        );
+        // In memory there is no metadata store: past the checks, 503.
+        assert_eq!(
+            status(app.oneshot(post(Some(admin), &id)).await.unwrap()),
             StatusCode::SERVICE_UNAVAILABLE
         );
     }

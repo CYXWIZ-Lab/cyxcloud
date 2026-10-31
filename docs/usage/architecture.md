@@ -22,7 +22,7 @@ Clients never hold data for others:
 - The CyxWiz Engine (`DataStreamClient`): lists datasets, uploads files, creates datasets, mints access tokens.
 - The CyxWiz server node (`CloudDatasetFetcher`): streams one file with a token when it trains.
 - The web app: its Drive uses the S3 API with the signed-in user's token (through the front door); each user has one bucket, `user-<their id>`, and reaches only that one.
-- The admin site: its Drive page reads `GET /api/v1/admin/stats` (node counts; capacity and free space of the online nodes, bytes stored on all; chunks) and `GET /api/v1/admin/nodes[?status=]` (each node's capacity, use, chunks, heartbeat, version), read-only, with an admin token (HS256, `ADMIN_JWT_SECRET`, issuer `cyxwiz-admin-dashboard`, `role: "admin"`). It talks to the gateway on the server's network, not through the front door.
+- The admin site: its Drive page reads `GET /api/v1/admin/stats` (node counts; capacity and free space of the online nodes, bytes stored on all; chunks) and `GET /api/v1/admin/nodes[?status=]` (each node's capacity, use, chunks, heartbeat, version), and `POST /api/v1/admin/nodes/:id/maintenance {"on": bool}` to hold an online or recovering node in maintenance or release it (409 otherwise), with an admin token (HS256, `ADMIN_JWT_SECRET`, issuer `cyxwiz-admin-dashboard`, `role: "admin"`). It talks to the gateway on the server's network, not through the front door.
 - The CLI.
 
 Joining the storage means running `cyxcloud-node`. The gateway is the manager; nodes are the members; everything else is a client.
@@ -127,3 +127,16 @@ node services (`cyxcloud-node1`, `cyxcloud-node2`) for a local cluster;
 - Node-to-node transfer and peer discovery exist as code; nothing routes through them.
 - Node registration is JWT-free by design (it is signed instead), with no rate limit yet.
 - The rebalancer's 60 s scans and the metadata pool (10 connections) can starve requests.
+
+## Node maintenance
+
+An admin holds a storage node in `maintenance` from the admin site's Drive page
+(the gateway's admin route above). A node in maintenance:
+
+- takes no new chunks (placement and repair targets read online nodes only);
+- still serves the chunks it holds (chunk reads accept `online` and
+  `maintenance` nodes);
+- stays in maintenance across heartbeats and re-registration (a restart),
+  and is not marked offline by the monitor;
+- returns to `online` only when an admin releases it (the monitor then marks
+  it offline if its heartbeats have stopped).
