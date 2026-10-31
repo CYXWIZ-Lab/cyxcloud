@@ -3,8 +3,9 @@
 //!
 //! Every request carries an admin token: HS256, signed with
 //! `ADMIN_JWT_SECRET` (the secret the admin site signs central's admin
-//! tokens with), `role: "admin"`, not expired. Without `ADMIN_JWT_SECRET`
-//! the routes answer 503: the admin API is off.
+//! tokens with), issued by `cyxwiz-admin-dashboard`, `role: "admin"`, not
+//! expired. Without `ADMIN_JWT_SECRET` the routes answer 503: the admin API
+//! is off.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,6 +26,9 @@ use uuid::Uuid;
 
 use crate::AppState;
 
+/// The issuer the admin site signs its service tokens with.
+const ADMIN_TOKEN_ISSUER: &str = "cyxwiz-admin-dashboard";
+
 fn refuse(status: StatusCode, message: &str) -> Response {
     (status, Json(serde_json::json!({ "error": message }))).into_response()
 }
@@ -40,7 +44,8 @@ fn is_admin(key: &DecodingKey, authorization: Option<&str>) -> bool {
     };
     let mut validation = Validation::new(Algorithm::HS256);
     validation.validate_aud = false;
-    validation.set_required_spec_claims(&["exp"]);
+    validation.set_required_spec_claims(&["exp", "iss"]);
+    validation.set_issuer(&[ADMIN_TOKEN_ISSUER]);
     match decode::<serde_json::Value>(token, key, &validation) {
         Ok(data) => data.claims.get("role").and_then(|r| r.as_str()) == Some("admin"),
         Err(e) => {
@@ -52,10 +57,7 @@ fn is_admin(key: &DecodingKey, authorization: Option<&str>) -> bool {
 
 async fn require_admin(key: Option<Arc<DecodingKey>>, req: Request, next: Next) -> Response {
     let Some(key) = key else {
-        return refuse(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "the admin API is off: ADMIN_JWT_SECRET is not set",
-        );
+        return refuse(StatusCode::SERVICE_UNAVAILABLE, "the admin API is off");
     };
     let authorization = req
         .headers()
@@ -113,9 +115,11 @@ pub struct NodeCounts {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
 pub struct StorageTotals {
-    /// Bytes the nodes offer, less what each keeps reserved
+    /// Bytes the online nodes offer, less what each keeps reserved
     pub total: i64,
+    /// Bytes stored on every node, online or not
     pub used: i64,
+    /// Bytes the online nodes can still take
     pub available: i64,
 }
 
@@ -137,9 +141,11 @@ impl AdminStats {
                 "offline" => s.nodes.offline += 1,
                 _ => s.nodes.other += 1,
             }
-            s.storage.total += (n.storage_total - n.storage_reserved).max(0);
             s.storage.used += n.storage_used;
-            s.storage.available += n.storage_available;
+            if n.status == "online" {
+                s.storage.total += (n.storage_total - n.storage_reserved).max(0);
+                s.storage.available += n.storage_available;
+            }
             s.chunks += n.chunk_count;
         }
         s
@@ -157,7 +163,10 @@ async fn all_nodes(state: &AppState) -> Result<Vec<AdminNode>, Response> {
     let db = meta.database();
     let failed = |e: cyxcloud_metadata::DbError| {
         warn!(error = %e, "admin API could not read the nodes");
-        refuse(StatusCode::INTERNAL_SERVER_ERROR, "could not read the nodes")
+        refuse(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "could not read the nodes",
+        )
     };
     let summary = db.get_node_storage_summary().await.map_err(failed)?;
     let details: HashMap<Uuid, _> = db
@@ -235,16 +244,26 @@ mod tests {
 
     const SECRET: &str = "admin-secret";
 
-    fn token(secret: &str, role: &str, exp_offset: i64) -> String {
-        let now = Utc::now().timestamp();
-        let claims =
-            serde_json::json!({ "sub": "admin-dashboard", "role": role, "exp": now + exp_offset });
+    fn signed(header: Header, secret: &str, claims: serde_json::Value) -> String {
         encode(
-            &Header::default(),
+            &header,
             &claims,
             &EncodingKey::from_secret(secret.as_bytes()),
         )
         .unwrap()
+    }
+
+    fn claims(role: &str, exp_offset: i64) -> serde_json::Value {
+        serde_json::json!({
+            "sub": "admin-dashboard",
+            "iss": ADMIN_TOKEN_ISSUER,
+            "role": role,
+            "exp": Utc::now().timestamp() + exp_offset,
+        })
+    }
+
+    fn token(secret: &str, role: &str, exp_offset: i64) -> String {
+        signed(Header::default(), secret, claims(role, exp_offset))
     }
 
     async fn status(secret: Option<&str>, authorization: Option<String>) -> StatusCode {
@@ -264,11 +283,45 @@ mod tests {
     async fn only_an_admin_token_gets_in() {
         assert_eq!(status(Some(SECRET), None).await, StatusCode::UNAUTHORIZED);
         let user = format!("Bearer {}", token(SECRET, "user", 300));
-        assert_eq!(status(Some(SECRET), Some(user)).await, StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            status(Some(SECRET), Some(user)).await,
+            StatusCode::UNAUTHORIZED
+        );
         let other = format!("Bearer {}", token("someone-else", "admin", 300));
-        assert_eq!(status(Some(SECRET), Some(other)).await, StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            status(Some(SECRET), Some(other)).await,
+            StatusCode::UNAUTHORIZED
+        );
         let expired = format!("Bearer {}", token(SECRET, "admin", -3600));
-        assert_eq!(status(Some(SECRET), Some(expired)).await, StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            status(Some(SECRET), Some(expired)).await,
+            StatusCode::UNAUTHORIZED
+        );
+        let mut no_exp = claims("admin", 300);
+        no_exp.as_object_mut().unwrap().remove("exp");
+        let no_exp = format!("Bearer {}", signed(Header::default(), SECRET, no_exp));
+        assert_eq!(
+            status(Some(SECRET), Some(no_exp)).await,
+            StatusCode::UNAUTHORIZED
+        );
+        let mut other_issuer = claims("admin", 300);
+        other_issuer["iss"] = "cyxwiz-central".into();
+        let other_issuer = format!("Bearer {}", signed(Header::default(), SECRET, other_issuer));
+        assert_eq!(
+            status(Some(SECRET), Some(other_issuer)).await,
+            StatusCode::UNAUTHORIZED
+        );
+        let hs384 = signed(Header::new(Algorithm::HS384), SECRET, claims("admin", 300));
+        let hs384 = format!("Bearer {hs384}");
+        assert_eq!(
+            status(Some(SECRET), Some(hs384)).await,
+            StatusCode::UNAUTHORIZED
+        );
+        let basic = format!("Basic {}", token(SECRET, "admin", 300));
+        assert_eq!(
+            status(Some(SECRET), Some(basic)).await,
+            StatusCode::UNAUTHORIZED
+        );
         // In memory there are no nodes to read: past the check, 503.
         let admin = format!("Bearer {}", token(SECRET, "admin", 300));
         assert_eq!(
@@ -280,7 +333,10 @@ mod tests {
     #[tokio::test]
     async fn without_the_secret_the_api_is_off() {
         let admin = format!("Bearer {}", token(SECRET, "admin", 300));
-        assert_eq!(status(None, Some(admin)).await, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            status(None, Some(admin)).await,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
     }
 
     fn node(status: &str, total: i64, reserved: i64, used: i64, chunks: i64) -> AdminNode {
@@ -320,9 +376,9 @@ mod tests {
         assert_eq!(
             s.storage,
             StorageTotals {
-                total: 160,
+                total: 90,
                 used: 35,
-                available: 125
+                available: 60
             }
         );
         assert_eq!(s.chunks, 5);
