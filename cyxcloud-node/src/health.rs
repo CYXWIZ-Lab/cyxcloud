@@ -26,17 +26,39 @@ pub struct HealthChecker {
     metrics: NodeMetrics,
     state: Arc<RwLock<HealthState>>,
     check_interval: Duration,
+    /// host:port of the gateway (the network check reaches it)
+    gateway: String,
+}
+
+/// The host:port of a gateway address such as `http://gateway:50060`.
+fn host_port(address: &str) -> String {
+    let rest = address.split_once("://").map(|(_, r)| r).unwrap_or(address);
+    let authority = rest.split('/').next().unwrap_or(rest);
+    if authority
+        .rsplit_once(':')
+        .is_some_and(|(_, p)| p.parse::<u16>().is_ok())
+    {
+        authority.to_string()
+    } else if address.starts_with("https://") {
+        format!("{authority}:443")
+    } else {
+        format!("{authority}:80")
+    }
 }
 
 impl HealthChecker {
-    /// Create a new health checker
+    /// Create a new health checker; `gateway_address` is the gateway URL the
+    /// node registers with (its network check reaches that, not a third
+    /// party).
     pub fn new(
         node_id: String,
         storage: Arc<RocksDbBackend>,
         metrics: NodeMetrics,
         state: Arc<RwLock<HealthState>>,
+        gateway_address: &str,
     ) -> Self {
         Self {
+            gateway: host_port(gateway_address),
             node_id,
             storage,
             metrics,
@@ -93,57 +115,10 @@ impl HealthChecker {
         }
     }
 
-    /// Check network connectivity
+    /// Check network connectivity: the gateway this node serves can be
+    /// reached (name resolution and a TCP connect, closed at once).
     async fn check_network(&self) -> bool {
-        // Test DNS resolution and TCP connectivity to well-known endpoints
-        // Run checks concurrently
-        let dns_check = self.check_dns("api.devnet.solana.com");
-        let tcp_check = self.check_tcp_connect("api.devnet.solana.com:443");
-
-        let (dns_ok, tcp_ok) = tokio::join!(dns_check, tcp_check);
-
-        let passed = [dns_ok, tcp_ok].iter().filter(|&&r| r).count();
-
-        if passed == 0 {
-            warn!("All network connectivity checks failed");
-            return false;
-        }
-
-        debug!(
-            passed = passed,
-            total = 2,
-            dns_ok = dns_ok,
-            tcp_ok = tcp_ok,
-            "Network connectivity check completed"
-        );
-        true
-    }
-
-    /// Check DNS resolution
-    async fn check_dns(&self, host: &str) -> bool {
-        use tokio::net::lookup_host;
-
-        match tokio::time::timeout(Duration::from_secs(5), lookup_host(format!("{}:443", host)))
-            .await
-        {
-            Ok(Ok(mut addrs)) => {
-                if addrs.next().is_some() {
-                    debug!(host = %host, "DNS resolution successful");
-                    true
-                } else {
-                    warn!(host = %host, "DNS resolution returned no addresses");
-                    false
-                }
-            }
-            Ok(Err(e)) => {
-                warn!(host = %host, error = %e, "DNS resolution failed");
-                false
-            }
-            Err(_) => {
-                warn!(host = %host, "DNS resolution timed out");
-                false
-            }
-        }
+        self.check_tcp_connect(&self.gateway).await
     }
 
     /// Check TCP connectivity
@@ -779,6 +754,17 @@ pub struct NodeAnnouncement {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_network_check_targets_the_gateway_host_and_port() {
+        assert_eq!(host_port("http://gateway:50060"), "gateway:50060");
+        assert_eq!(host_port("https://cloud.cyxwiz.ai"), "cloud.cyxwiz.ai:443");
+        assert_eq!(
+            host_port("http://192.168.1.180:8000/"),
+            "192.168.1.180:8000"
+        );
+        assert_eq!(host_port("gateway:50060"), "gateway:50060");
+    }
     use cyxcloud_storage::StorageConfig;
     use tempfile::TempDir;
 

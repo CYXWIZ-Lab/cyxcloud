@@ -267,6 +267,7 @@ async fn main() -> anyhow::Result<()> {
         storage.clone(),
         node_metrics.clone(),
         health_state.clone(),
+        &config.central.address,
     );
 
     tokio::spawn(async move {
