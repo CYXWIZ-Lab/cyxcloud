@@ -8,7 +8,10 @@ use crate::StorageConfig;
 use bytes::Bytes;
 use cyxcloud_core::chunk::ChunkId;
 use cyxcloud_core::error::{CyxCloudError, Result};
-use rocksdb::{BlockBasedOptions, Cache, DBCompressionType, Options, WriteOptions, DB};
+use parking_lot::Mutex;
+use rocksdb::{
+    BlockBasedOptions, Cache, DBCompressionType, Options, ReadOptions, WriteBatch, WriteOptions, DB,
+};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
@@ -17,6 +20,36 @@ use tracing::{debug, info};
 /// Column family names
 const CF_CHUNKS: &str = "chunks";
 const CF_METADATA: &str = "metadata";
+
+/// Metadata entry `SIZE_PREFIX ++ chunk id` holds the chunk's byte length
+/// (u64 LE), written in the same batch as the chunk, so the totals come from
+/// these small entries and a put never reads the chunk itself.
+const SIZE_PREFIX: &[u8] = b"size:";
+/// Present once every stored chunk has its size entry (stores written before
+/// size entries get them in one scan at the next open).
+const SIZES_INDEXED: &[u8] = b"sizes-indexed";
+/// Locks that make a put's or delete's check and write one step per chunk id.
+const STRIPES: usize = 64;
+
+fn size_key(id: &[u8]) -> Vec<u8> {
+    [SIZE_PREFIX, id].concat()
+}
+
+fn read_u64(bytes: &[u8]) -> Option<u64> {
+    bytes.try_into().ok().map(u64::from_le_bytes)
+}
+
+fn add_saturating(counter: &AtomicU64, v: u64) {
+    let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |x| {
+        Some(x.saturating_add(v))
+    });
+}
+
+fn sub_saturating(counter: &AtomicU64, v: u64) {
+    let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |x| {
+        Some(x.saturating_sub(v))
+    });
+}
 
 /// RocksDB-based storage backend
 pub struct RocksDbBackend {
@@ -35,11 +68,14 @@ pub struct RocksDbBackend {
     read_latency_total_us: AtomicU64,
     write_latency_total_us: AtomicU64,
 
-    /// Chunks stored and their bytes: counted once at open, then kept by
-    /// put and delete, so stats() is cheap (the health check and the
-    /// heartbeat call it every few seconds).
+    /// Chunks stored and their bytes (value lengths): summed from the size
+    /// entries at open, then kept by put and delete, so stats() is cheap
+    /// (the health check and the heartbeat call it every few seconds).
     chunk_count: AtomicU64,
     bytes_used: AtomicU64,
+
+    /// One lock per stripe of chunk ids (see STRIPES)
+    stripes: Vec<Mutex<()>>,
 }
 
 impl RocksDbBackend {
@@ -69,6 +105,8 @@ impl RocksDbBackend {
         block_opts.set_block_cache(&cache);
         block_opts.set_block_size(64 * 1024); // 64KB blocks (good for 4MB chunks)
         block_opts.set_cache_index_and_filter_blocks(true);
+        // Answers "not stored" for a new chunk without reading the levels.
+        block_opts.set_bloom_filter(10.0, false);
         block_opts.set_pin_l0_filter_and_index_blocks_in_cache(true);
         opts.set_block_based_table_factory(&block_opts);
 
@@ -92,17 +130,14 @@ impl RocksDbBackend {
         let db = DB::open_cf_descriptors(&opts, &config.path, cf_descriptors)
             .map_err(|e| CyxCloudError::Storage(format!("Failed to open RocksDB: {}", e)))?;
 
-        // One pass over the stored chunks for the starting totals.
-        let (mut chunk_count, mut bytes_used) = (0u64, 0u64);
+        if db
+            .get_cf(&Self::cf(&db, CF_METADATA)?, SIZES_INDEXED)
+            .map_err(|e| CyxCloudError::Storage(format!("Read failed: {}", e)))?
+            .is_none()
         {
-            let cf = db
-                .cf_handle(CF_CHUNKS)
-                .ok_or_else(|| CyxCloudError::Storage("chunks column family missing".into()))?;
-            for (_, value) in db.iterator_cf(&cf, rocksdb::IteratorMode::Start).flatten() {
-                chunk_count += 1;
-                bytes_used += value.len() as u64;
-            }
+            Self::index_sizes(&db)?;
         }
+        let (chunk_count, bytes_used) = Self::sum_sizes(&db)?;
         info!(
             chunk_count,
             bytes_used, "RocksDB storage opened successfully"
@@ -118,7 +153,66 @@ impl RocksDbBackend {
             write_latency_total_us: AtomicU64::new(0),
             chunk_count: AtomicU64::new(chunk_count),
             bytes_used: AtomicU64::new(bytes_used),
+            stripes: (0..STRIPES).map(|_| Mutex::new(())).collect(),
         })
+    }
+
+    fn cf<'a>(db: &'a DB, name: &str) -> Result<std::sync::Arc<rocksdb::BoundColumnFamily<'a>>> {
+        db.cf_handle(name)
+            .ok_or_else(|| CyxCloudError::Storage(format!("{} column family missing", name)))
+    }
+
+    /// Give every stored chunk its size entry (a store written before size
+    /// entries): one scan of the chunks, outside the block cache.
+    fn index_sizes(db: &DB) -> Result<()> {
+        info!("Indexing stored chunk sizes (once per store)");
+        let chunks = Self::cf(db, CF_CHUNKS)?;
+        let meta = Self::cf(db, CF_METADATA)?;
+        let mut read_opts = ReadOptions::default();
+        read_opts.fill_cache(false);
+        let mut batch = WriteBatch::default();
+        for item in db.iterator_cf_opt(&chunks, read_opts, rocksdb::IteratorMode::Start) {
+            let (key, value) =
+                item.map_err(|e| CyxCloudError::Storage(format!("Scan failed: {}", e)))?;
+            batch.put_cf(&meta, size_key(&key), (value.len() as u64).to_le_bytes());
+            if batch.len() >= 1000 {
+                db.write(std::mem::take(&mut batch))
+                    .map_err(|e| CyxCloudError::Storage(format!("Write failed: {}", e)))?;
+            }
+        }
+        batch.put_cf(&meta, SIZES_INDEXED, []);
+        db.write(batch)
+            .map_err(|e| CyxCloudError::Storage(format!("Write failed: {}", e)))
+    }
+
+    /// Chunk count and bytes from the size entries.
+    fn sum_sizes(db: &DB) -> Result<(u64, u64)> {
+        let meta = Self::cf(db, CF_METADATA)?;
+        let (mut count, mut bytes) = (0u64, 0u64);
+        let mode = rocksdb::IteratorMode::From(SIZE_PREFIX, rocksdb::Direction::Forward);
+        for item in db.iterator_cf(&meta, mode) {
+            let (key, value) =
+                item.map_err(|e| CyxCloudError::Storage(format!("Scan failed: {}", e)))?;
+            if !key.starts_with(SIZE_PREFIX) {
+                break;
+            }
+            count += 1;
+            bytes = bytes.saturating_add(read_u64(&value).unwrap_or(0));
+        }
+        Ok((count, bytes))
+    }
+
+    /// The stored size of a chunk, from its size entry (None: not stored).
+    fn stored_size(&self, key: &[u8]) -> Result<Option<u64>> {
+        Ok(self
+            .db
+            .get_pinned_cf(&self.cf_metadata(), size_key(key))
+            .map_err(|e| CyxCloudError::Storage(format!("Read failed: {}", e)))?
+            .and_then(|v| read_u64(&v)))
+    }
+
+    fn stripe(&self, key: &[u8]) -> &Mutex<()> {
+        &self.stripes[key.first().copied().unwrap_or(0) as usize % STRIPES]
     }
 
     /// Open with default configuration
@@ -155,18 +249,19 @@ impl StorageBackendSync for RocksDbBackend {
         let start = Instant::now();
         let key = id.as_bytes();
 
+        // Check, write and count as one step for this id.
+        let _guard = self.stripe(key).lock();
+
         // Chunk ids are content hashes: an id already stored holds the same
-        // bytes, so writing it again neither counts nor needs room.
-        let existing = self
-            .db
-            .get_pinned_cf(&self.cf_chunks(), key)
-            .map_err(|e| CyxCloudError::Storage(format!("Read failed: {}", e)))?
-            .map(|v| v.len() as u64);
+        // bytes (or a damaged copy being repaired), so writing it again
+        // needs no new room and does not count again.
+        let existing = self.stored_size(key)?;
+        let len = data.len() as u64;
 
         // Check capacity if set
         if existing.is_none() && self.config.max_capacity > 0 {
             let current_size = self.bytes_used.load(Ordering::Relaxed);
-            if current_size + data.len() as u64 > self.config.max_capacity {
+            if current_size.saturating_add(len) > self.config.max_capacity {
                 return Err(CyxCloudError::StorageFull {
                     used: current_size,
                     capacity: self.config.max_capacity,
@@ -178,19 +273,21 @@ impl StorageBackendSync for RocksDbBackend {
         let mut write_opts = WriteOptions::default();
         write_opts.set_sync(false); // Async writes for performance
 
+        // The chunk and its size entry in one batch
+        let mut batch = WriteBatch::default();
+        batch.put_cf(&self.cf_chunks(), key, &data);
+        batch.put_cf(&self.cf_metadata(), size_key(key), len.to_le_bytes());
         self.db
-            .put_cf_opt(&self.cf_chunks(), key, &data, &write_opts)
+            .write_opt(batch, &write_opts)
             .map_err(|e| CyxCloudError::Storage(format!("Write failed: {}", e)))?;
         match existing {
             None => {
-                self.chunk_count.fetch_add(1, Ordering::Relaxed);
-                self.bytes_used
-                    .fetch_add(data.len() as u64, Ordering::Relaxed);
+                add_saturating(&self.chunk_count, 1);
+                add_saturating(&self.bytes_used, len);
             }
             Some(old) => {
-                self.bytes_used
-                    .fetch_add(data.len() as u64, Ordering::Relaxed);
-                self.bytes_used.fetch_sub(old, Ordering::Relaxed);
+                add_saturating(&self.bytes_used, len);
+                sub_saturating(&self.bytes_used, old);
             }
         }
 
@@ -225,21 +322,21 @@ impl StorageBackendSync for RocksDbBackend {
     fn delete(&self, id: ChunkId) -> Result<bool> {
         let key = id.as_bytes();
 
+        let _guard = self.stripe(key).lock();
+
         // Its size first (and whether it is there at all)
-        let Some(size) = self
-            .db
-            .get_pinned_cf(&self.cf_chunks(), key)
-            .map_err(|e| CyxCloudError::Storage(format!("Read failed: {}", e)))?
-            .map(|v| v.len() as u64)
-        else {
+        let Some(size) = self.stored_size(key)? else {
             return Ok(false);
         };
 
+        let mut batch = WriteBatch::default();
+        batch.delete_cf(&self.cf_chunks(), key);
+        batch.delete_cf(&self.cf_metadata(), size_key(key));
         self.db
-            .delete_cf(&self.cf_chunks(), key)
+            .write(batch)
             .map_err(|e| CyxCloudError::Storage(format!("Delete failed: {}", e)))?;
-        self.chunk_count.fetch_sub(1, Ordering::Relaxed);
-        self.bytes_used.fetch_sub(size, Ordering::Relaxed);
+        sub_saturating(&self.chunk_count, 1);
+        sub_saturating(&self.bytes_used, size);
 
         self.deletes.fetch_add(1, Ordering::Relaxed);
         debug!(chunk_id = %id, "Deleted chunk");
@@ -357,6 +454,73 @@ mod tests {
         let reopened = RocksDbBackend::open(StorageConfig::new(temp_dir.path())).unwrap();
         let s = reopened.stats().unwrap();
         assert_eq!((s.chunk_count, s.bytes_used), (1, 3));
+    }
+
+    #[test]
+    fn concurrent_puts_and_deletes_of_one_chunk_count_it_once() {
+        let temp_dir = TempDir::new().unwrap();
+        let backend =
+            std::sync::Arc::new(RocksDbBackend::open(StorageConfig::new(temp_dir.path())).unwrap());
+        let id = ChunkId::from_data(b"shared");
+        let run = |f: fn(&RocksDbBackend, ChunkId)| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    let b = backend.clone();
+                    std::thread::spawn(move || f(&b, id))
+                })
+                .collect();
+            for h in handles {
+                h.join().unwrap();
+            }
+        };
+        run(|b, id| b.put(id, Bytes::from_static(b"1234")).unwrap());
+        let s = backend.stats().unwrap();
+        assert_eq!((s.chunk_count, s.bytes_used), (1, 4));
+        run(|b, id| {
+            b.delete(id).unwrap();
+        });
+        let s = backend.stats().unwrap();
+        assert_eq!(
+            (s.chunk_count, s.bytes_used),
+            (0, 0),
+            "no double count, no wrap"
+        );
+    }
+
+    #[test]
+    fn a_store_without_size_entries_is_indexed_once_at_open() {
+        let temp_dir = TempDir::new().unwrap();
+        {
+            let backend = RocksDbBackend::open(StorageConfig::new(temp_dir.path())).unwrap();
+            backend
+                .put(ChunkId::from_data(b"x"), Bytes::from_static(b"abcdef"))
+                .unwrap();
+            backend
+                .put(ChunkId::from_data(b"y"), Bytes::from_static(b"gh"))
+                .unwrap();
+            // As a store written before size entries: chunks only.
+            let meta = backend.cf_metadata();
+            for id in [ChunkId::from_data(b"x"), ChunkId::from_data(b"y")] {
+                backend
+                    .db
+                    .delete_cf(&meta, size_key(id.as_bytes()))
+                    .unwrap();
+            }
+            backend.db.delete_cf(&meta, SIZES_INDEXED).unwrap();
+        }
+        let reopened = RocksDbBackend::open(StorageConfig::new(temp_dir.path())).unwrap();
+        let s = reopened.stats().unwrap();
+        assert_eq!((s.chunk_count, s.bytes_used), (2, 8));
+    }
+
+    #[test]
+    fn repairing_a_chunk_with_other_bytes_keeps_one_count() {
+        let (backend, _dir) = create_test_backend();
+        let id = ChunkId::from_data(b"r");
+        backend.put(id, Bytes::from_static(b"damaged!!")).unwrap();
+        backend.put(id, Bytes::from_static(b"good")).unwrap();
+        let s = backend.stats().unwrap();
+        assert_eq!((s.chunk_count, s.bytes_used), (1, 4));
     }
 
     #[test]
