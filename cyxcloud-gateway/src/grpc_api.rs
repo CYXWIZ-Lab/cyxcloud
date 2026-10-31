@@ -235,6 +235,17 @@ impl NodeService for NodeServiceImpl {
         // Update heartbeat with recovery-aware logic
         match metadata.heartbeat_by_peer_id(&node_id_str).await {
             Ok(status) => {
+                // The bytes it stores, as the Drive page and placement read them.
+                if let Some(m) = &req.metrics {
+                    let used = i64::try_from(m.storage_used).unwrap_or(i64::MAX);
+                    if let Err(e) = metadata
+                        .database()
+                        .update_node_storage_by_peer_id(&node_id_str, used)
+                        .await
+                    {
+                        warn!(error = %e, node_id = %node_id_str, "Failed to record storage used");
+                    }
+                }
                 let status_str = status.to_string();
                 if status == cyxcloud_metadata::NodeStatus::Recovering {
                     debug!(

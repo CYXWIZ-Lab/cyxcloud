@@ -246,13 +246,20 @@ impl Database {
         Ok(result.rows_affected() > 0)
     }
 
-    /// Update node storage usage
-    pub async fn update_node_storage(&self, node_id: Uuid, storage_used: i64) -> Result<()> {
-        sqlx::query("UPDATE nodes SET storage_used = $1 WHERE id = $2")
-            .bind(storage_used)
-            .bind(node_id)
-            .execute(&self.pool)
-            .await?;
+    /// Record the bytes a node reports it stores (its heartbeat), clamped
+    /// to 0..storage_total.
+    pub async fn update_node_storage_by_peer_id(
+        &self,
+        peer_id: &str,
+        storage_used: i64,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE nodes SET storage_used = LEAST(GREATEST($1, 0), storage_total) WHERE peer_id = $2",
+        )
+        .bind(storage_used)
+        .bind(peer_id)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
