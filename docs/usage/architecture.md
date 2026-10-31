@@ -67,8 +67,16 @@ everywhere else; anything but a refresh token is refused there.
   API key: S3 GET/HEAD need `storage:read`, PUT `storage:write`, DELETE
   `storage:delete`; the dataset REST API and the DataStream gRPC methods need
   `dataset:read` or `dataset:write`; DataService `GetDataset`/`Prefetch`
-  need `storage:read`; anything else (node RPCs) refuses API keys. A user's
-  own access or sign-in token acts for the whole account.
+  need `storage:read`; anything else (node RPCs) refuses API keys;
+  `UploadFile` needs `storage:write` too. A user's own access or sign-in
+  token acts for the whole account; a node token never acts as a user (it
+  may call node RPCs only).
+- A dataset access token (`CreateAccessToken`, used by `StreamData`) lives
+  at most 24 h, never past the API key that asked for it, with scopes
+  `read`/`stream` only.
+- Logging out with an API key revokes that key. Keys from before
+  2026-11-01 that hold `*`, node rights or no permissions now reach
+  nothing; create new ones.
 - `POST /api/v1/auth/logout` revokes the access token it is called with and,
   given `{"refresh_token": ...}` of the same user, the refresh token too.
   A revocation lasts until the token would have expired.

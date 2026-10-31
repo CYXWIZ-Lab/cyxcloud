@@ -29,21 +29,25 @@ pub fn needs_jwt(path: &str) -> bool {
     !METHODS_WITHOUT_JWT.contains(&path)
 }
 
-/// The permission an API key needs for a gRPC method; None: API keys may
-/// not call it at all (node RPCs and anything not listed).
-pub fn key_permission(path: &str) -> Option<&'static str> {
+/// What a caller acting as a user needs for a gRPC method (an API key must
+/// hold every listed permission); None: the method is not a user's (node
+/// RPCs), so API keys may not call it.
+pub fn key_permission(path: &str) -> Option<&'static [&'static str]> {
     let method = path.rsplit('/').next().unwrap_or("");
     if path.starts_with("/cyxcloud.datastream.DataStreamService/") {
         match method {
             "StreamBatches" | "GetDatasetInfo" | "ListDatasets" | "ListPublicDatasets"
-            | "VerifyDataset" | "CreateAccessToken" => Some("dataset:read"),
-            "CreateDataset" | "UploadFile" | "DeleteDataset" | "ShareDataset"
-            | "RevokeAccessToken" => Some("dataset:write"),
+            | "VerifyDataset" | "CreateAccessToken" => Some(&["dataset:read"]),
+            // Uploads write the file into the caller's bucket too.
+            "UploadFile" => Some(&["dataset:write", "storage:write"]),
+            "CreateDataset" | "DeleteDataset" | "ShareDataset" | "RevokeAccessToken" => {
+                Some(&["dataset:write"])
+            }
             _ => None,
         }
     } else if path.starts_with("/cyxcloud.data.DataService/") {
         match method {
-            "GetDataset" | "Prefetch" => Some("storage:read"),
+            "GetDataset" | "Prefetch" => Some(&["storage:read"]),
             _ => None,
         }
     } else {
@@ -130,13 +134,18 @@ where
                         )
                     }
                 };
-                if claims.typ.as_deref() == Some("api_key")
-                    && !key_permission(request.uri().path())
-                        .is_some_and(|p| AuthService::allows(&claims, p))
-                {
+                // API keys need the method's permissions; node tokens may call
+                // only node RPCs (unmapped paths), never a user's.
+                let needed = key_permission(request.uri().path());
+                let refused = match claims.typ.as_deref() {
+                    Some("api_key") => !needed
+                        .is_some_and(|perms| perms.iter().all(|p| AuthService::allows(&claims, p))),
+                    Some("node") => needed.is_some(),
+                    _ => false,
+                };
+                if refused {
                     return Ok(
-                        Status::permission_denied("this API key does not allow this call")
-                            .to_http(),
+                        Status::permission_denied("this token does not allow this call").to_http(),
                     );
                 }
                 request.extensions_mut().insert(claims);
@@ -169,15 +178,15 @@ mod tests {
     fn api_keys_reach_only_mapped_methods() {
         assert_eq!(
             key_permission("/cyxcloud.datastream.DataStreamService/StreamBatches"),
-            Some("dataset:read")
+            Some(&["dataset:read"][..])
         );
         assert_eq!(
             key_permission("/cyxcloud.datastream.DataStreamService/UploadFile"),
-            Some("dataset:write")
+            Some(&["dataset:write", "storage:write"][..])
         );
         assert_eq!(
             key_permission("/cyxcloud.data.DataService/GetDataset"),
-            Some("storage:read")
+            Some(&["storage:read"][..])
         );
         assert_eq!(key_permission("/cyxcloud.node.NodeService/Heartbeat"), None);
         assert_eq!(

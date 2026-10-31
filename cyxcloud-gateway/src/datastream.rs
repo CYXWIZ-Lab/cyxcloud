@@ -216,6 +216,9 @@ impl DataStreamServiceImpl {
     }
 }
 
+/// A dataset access token lives at most this long (24 h).
+const MAX_ACCESS_TOKEN_SECS: i64 = 24 * 60 * 60;
+
 #[tonic::async_trait]
 impl DataStreamService for DataStreamServiceImpl {
     type StreamBatchesStream =
@@ -625,6 +628,11 @@ impl DataStreamService for DataStreamServiceImpl {
         request: Request<CreateAccessTokenRequest>,
     ) -> Result<Response<AccessTokenResponse>, Status> {
         let user_id = self.user_id(&request).await?;
+        // A token minted by an API key ends no later than the key.
+        let key_expiry = request
+            .claims()
+            .filter(|c| c.typ.as_deref() == Some("api_key"))
+            .map(|c| c.exp);
         let req = request.into_inner();
         tracing::Span::current().record("dataset_id", &req.dataset_id);
 
@@ -673,19 +681,31 @@ impl DataStreamService for DataStreamServiceImpl {
         );
         let token_hash = blake3::hash(token_string.as_bytes()).as_bytes().to_vec();
 
-        // Calculate expiration
-        let ttl_seconds = if req.ttl_seconds > 0 {
-            req.ttl_seconds
+        // Calculate expiration: at most MAX_ACCESS_TOKEN_SECS, and never past
+        // the API key that asked for it.
+        let now = chrono::Utc::now();
+        let mut ttl_seconds = if req.ttl_seconds > 0 {
+            req.ttl_seconds.min(MAX_ACCESS_TOKEN_SECS)
         } else {
-            24 * 60 * 60 // 24 hours default
+            MAX_ACCESS_TOKEN_SECS
         };
-        let expires_at = chrono::Utc::now() + chrono::Duration::seconds(ttl_seconds);
+        if let Some(exp) = key_expiry {
+            ttl_seconds = ttl_seconds.min(exp - now.timestamp());
+        }
+        if ttl_seconds <= 0 {
+            return Err(Status::unauthenticated("the API key has expired"));
+        }
+        let expires_at = now + chrono::Duration::seconds(ttl_seconds);
 
-        // Determine scopes
+        // Determine scopes: an access token reads and streams, nothing else.
         let scopes = if req.scopes.is_empty() {
             vec!["read".to_string(), "stream".to_string()]
-        } else {
+        } else if req.scopes.iter().all(|s| s == "read" || s == "stream") {
             req.scopes
+        } else {
+            return Err(Status::invalid_argument(
+                "scopes may only be \"read\" and \"stream\"",
+            ));
         };
 
         // Store token

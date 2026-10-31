@@ -554,10 +554,14 @@ impl AuthService {
     /// Whether these claims may do something that needs `permission`. A
     /// user's sign-in or access token acts for the whole account (its own
     /// data); an API key may do only what it was created with
-    /// (API_KEY_PERMISSIONS).
+    /// (API_KEY_PERMISSIONS); a node token (anyone can register a node)
+    /// never acts as a user.
     pub fn allows(claims: &Claims, permission: &str) -> bool {
-        claims.typ.as_deref() != Some("api_key")
-            || claims.permissions.iter().any(|p| p == permission)
+        match claims.typ.as_deref() {
+            Some("api_key") => claims.permissions.iter().any(|p| p == permission),
+            Some("node") => false,
+            _ => true,
+        }
     }
 }
 
@@ -826,6 +830,9 @@ mod tests {
         // A user's own access token acts for the account.
         let user = claims_of("access", &[]);
         assert!(AuthService::allows(&user, "storage:delete"));
+        // A node token is not a user.
+        let node = claims_of("node", &[]);
+        assert!(!AuthService::allows(&node, "storage:read"));
     }
 
     #[test]
