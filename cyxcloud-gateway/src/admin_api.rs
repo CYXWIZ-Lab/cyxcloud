@@ -26,6 +26,10 @@ use uuid::Uuid;
 
 use crate::AppState;
 
+/// An admin secret shorter than this turns the admin API off (HS256 keys
+/// need 256 bits; the same rule as central's).
+const MIN_ADMIN_SECRET_BYTES: usize = 32;
+
 /// The issuer the admin site signs its service tokens with.
 const ADMIN_TOKEN_ISSUER: &str = "cyxwiz-admin-dashboard";
 
@@ -73,10 +77,12 @@ async fn require_admin(key: Option<Arc<DecodingKey>>, req: Request, next: Next) 
 /// `ADMIN_JWT_SECRET` value, `None` when unset.
 pub fn routes(admin_secret: Option<String>) -> Router<Arc<AppState>> {
     let key = admin_secret
-        .filter(|s| !s.is_empty())
+        .filter(|s| s.len() >= MIN_ADMIN_SECRET_BYTES)
         .map(|s| Arc::new(DecodingKey::from_secret(s.as_bytes())));
     if key.is_none() {
-        warn!("ADMIN_JWT_SECRET not set: the admin API (/api/v1/admin) answers 503");
+        warn!(
+            "ADMIN_JWT_SECRET unset or shorter than {MIN_ADMIN_SECRET_BYTES} bytes:              the admin API (/api/v1/admin) answers 503"
+        );
     }
     Router::new()
         .route("/stats", get(stats))
@@ -300,7 +306,7 @@ mod tests {
     use jsonwebtoken::{encode, EncodingKey, Header};
     use tower::ServiceExt;
 
-    const SECRET: &str = "admin-secret";
+    const SECRET: &str = "admin-secret-admin-secret-admin-secret";
 
     fn signed(header: Header, secret: &str, claims: serde_json::Value) -> String {
         encode(
@@ -435,6 +441,12 @@ mod tests {
         let admin = format!("Bearer {}", token(SECRET, "admin", 300));
         assert_eq!(
             status(None, Some(admin)).await,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        let short = "short-secret";
+        let admin = format!("Bearer {}", token(short, "admin", 300));
+        assert_eq!(
+            status(Some(short), Some(admin)).await,
             StatusCode::SERVICE_UNAVAILABLE
         );
     }
