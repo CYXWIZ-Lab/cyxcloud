@@ -146,6 +146,8 @@ pub struct CreateNode {
     pub grpc_address: String,
     pub storage_total: i64,
     pub storage_reserved: i64, // Gateway-reserved storage
+    /// Bytes the node already stores (its registration report)
+    pub storage_used: i64,
     pub bandwidth_mbps: i32,
     pub datacenter: Option<String>,
     pub region: Option<String>,

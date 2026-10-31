@@ -286,6 +286,7 @@ impl MetadataService {
                 grpc_address: grpc_address.to_string(),
                 storage_total: 0,
                 storage_reserved: 0,
+                storage_used: 0,
                 bandwidth_mbps: 0,
                 datacenter: None,
                 region: None,

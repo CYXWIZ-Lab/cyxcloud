@@ -131,6 +131,7 @@ impl NodeService for NodeServiceImpl {
             grpc_address: info.listen_addrs.first().cloned().unwrap_or_default(),
             storage_total: capacity.storage_total as i64,
             storage_reserved: GATEWAY_RESERVED_BYTES,
+            storage_used: capacity.storage_used as i64,
             bandwidth_mbps: capacity.bandwidth_mbps as i32,
             datacenter: if location.datacenter.is_empty() {
                 None

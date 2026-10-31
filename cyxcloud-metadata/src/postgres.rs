@@ -31,6 +31,15 @@ pub enum DbError {
 
 pub type Result<T> = std::result::Result<T, DbError>;
 
+/// A node's reported bytes, clamped as `update_node_storage_by_peer_id` does.
+fn clamp_used(used: i64, total: i64) -> i64 {
+    if total > 0 {
+        used.clamp(0, total)
+    } else {
+        used.max(0)
+    }
+}
+
 /// A node held in maintenance serves reads and earns uptime only while its
 /// last heartbeat is this recent (the monitor's offline threshold, 5 min).
 pub const HELD_NODE_HEARTBEAT_SECS: i64 = 300;
@@ -155,11 +164,12 @@ impl Database {
     pub async fn create_node(&self, node: CreateNode) -> Result<Node> {
         let result = sqlx::query_as::<_, Node>(
             r#"
-            INSERT INTO nodes (peer_id, grpc_address, storage_total, storage_reserved, bandwidth_mbps, datacenter, region, version, wallet_address, public_key, access_secret, status)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'online')
+            INSERT INTO nodes (peer_id, grpc_address, storage_total, storage_reserved, bandwidth_mbps, datacenter, region, version, wallet_address, public_key, access_secret, status, storage_used)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'online', $12)
             ON CONFLICT (peer_id) DO UPDATE SET
                 grpc_address = EXCLUDED.grpc_address,
                 storage_total = EXCLUDED.storage_total,
+                storage_used = EXCLUDED.storage_used,
                 storage_reserved = EXCLUDED.storage_reserved,
                 bandwidth_mbps = EXCLUDED.bandwidth_mbps,
                 datacenter = EXCLUDED.datacenter,
@@ -186,6 +196,7 @@ impl Database {
         .bind(&node.wallet_address)
         .bind(&node.public_key)
         .bind(&node.access_secret)
+        .bind(clamp_used(node.storage_used, node.storage_total))
         .fetch_one(&self.pool)
         .await?;
 
@@ -247,14 +258,15 @@ impl Database {
     }
 
     /// Record the bytes a node reports it stores (its heartbeat), clamped
-    /// to 0..storage_total.
+    /// to 0..storage_total (no upper bound when the node set no capacity:
+    /// storage_total 0).
     pub async fn update_node_storage_by_peer_id(
         &self,
         peer_id: &str,
         storage_used: i64,
     ) -> Result<()> {
         sqlx::query(
-            "UPDATE nodes SET storage_used = LEAST(GREATEST($1, 0), storage_total) WHERE peer_id = $2",
+            "UPDATE nodes SET storage_used = CASE WHEN storage_total > 0 THEN LEAST(GREATEST($1, 0), storage_total) ELSE GREATEST($1, 0) END WHERE peer_id = $2",
         )
         .bind(storage_used)
         .bind(peer_id)
