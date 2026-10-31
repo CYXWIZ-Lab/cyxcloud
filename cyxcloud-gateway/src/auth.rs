@@ -31,6 +31,9 @@ pub enum AuthError {
     #[error("Token expired")]
     TokenExpired,
 
+    #[error("Token has been revoked")]
+    Revoked,
+
     #[error("Invalid signature")]
     InvalidSignature,
 
@@ -256,7 +259,9 @@ pub struct AuthService {
     decoding_key: DecodingKey,
     validation: Validation,
     /// Local cache of revoked token IDs (JTIs) — acts as L1 cache
-    revoked_tokens: RwLock<std::collections::HashSet<String>>,
+    /// Revoked token ids and their expiry (Unix seconds); an entry is
+    /// dropped once its token would have expired anyway.
+    revoked_tokens: RwLock<std::collections::HashMap<String, i64>>,
     /// Redis connection for persistent revocation (L2) — survives restarts
     redis: Option<RwLock<redis::aio::MultiplexedConnection>>,
 }
@@ -291,7 +296,7 @@ impl AuthService {
             encoding_key,
             decoding_key,
             validation,
-            revoked_tokens: RwLock::new(std::collections::HashSet::new()),
+            revoked_tokens: RwLock::new(std::collections::HashMap::new()),
             redis: None,
         }
     }
@@ -417,10 +422,8 @@ impl AuthService {
         // L1: check local cache
         {
             let revoked = self.revoked_tokens.read().await;
-            if revoked.contains(jti) {
-                return Err(AuthError::InvalidToken(
-                    "Token has been revoked".to_string(),
-                ));
+            if revoked.contains_key(jti) {
+                return Err(AuthError::Revoked);
             }
         }
 
@@ -432,10 +435,8 @@ impl AuthService {
                 Ok(true) => {
                     // Populate L1 cache so subsequent checks are fast
                     let mut revoked = self.revoked_tokens.write().await;
-                    revoked.insert(jti.clone());
-                    return Err(AuthError::InvalidToken(
-                        "Token has been revoked".to_string(),
-                    ));
+                    revoked.insert(jti.clone(), token_data.claims.exp);
+                    return Err(AuthError::Revoked);
                 }
                 Ok(false) => {} // Not revoked
                 Err(e) => {
@@ -457,7 +458,9 @@ impl AuthService {
         // L1: local cache
         {
             let mut revoked = self.revoked_tokens.write().await;
-            revoked.insert(jti.to_string());
+            let now = Utc::now().timestamp();
+            revoked.retain(|_, until| *until > now);
+            revoked.insert(jti.to_string(), exp);
         }
 
         // L2: Redis (persistent across restarts)

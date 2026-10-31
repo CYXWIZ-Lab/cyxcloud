@@ -8,11 +8,12 @@
 #![allow(unused_imports)]
 
 use crate::auth::{
-    AuthResponse, AuthService, AuthUser, ChallengeResponse, Claims, CreateApiKeyRequest, TokenType,
-    WalletLoginRequest,
+    AuthError, AuthResponse, AuthService, AuthUser, ChallengeResponse, Claims, CreateApiKeyRequest,
+    TokenType, WalletLoginRequest,
 };
 use crate::AppState;
 use axum::{
+    body::Bytes,
     extract::{ConnectInfo, Json, State},
     http::{header, HeaderMap, StatusCode},
     response::IntoResponse,
@@ -434,52 +435,65 @@ pub struct LogoutRequest {
 }
 
 /// Logout: revoke the access token in `Authorization` and, when the body
-/// names it, the session's refresh token (it must belong to the same user).
+/// names it (`{"refresh_token": ...}`), the session's refresh token. The
+/// access token is revoked first, whatever the body holds. A body that is
+/// not that JSON answers 400; a refresh token that is already expired or
+/// revoked is done already; one of another user answers 403.
 async fn logout(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    body: Option<Json<LogoutRequest>>,
+    body: Bytes,
 ) -> Result<StatusCode, (StatusCode, Json<ApiError>)> {
     let auth = state.auth_service();
 
     // Get and validate token
     let claims = extract_and_validate_token(&headers, auth).await?;
 
-    let refresh = match body.and_then(|Json(b)| b.refresh_token) {
-        Some(token) => {
-            let refresh = auth.validate_refresh_token(&token).await.map_err(|e| {
-                warn!(error = %e, "Logout with an invalid refresh token");
-                (
-                    StatusCode::UNAUTHORIZED,
-                    Json(ApiError::new("Invalid refresh token", "INVALID_TOKEN")),
-                )
-            })?;
-            if refresh.sub != claims.sub {
-                return Err((
-                    StatusCode::FORBIDDEN,
-                    Json(ApiError::new(
-                        "The refresh token belongs to another user",
-                        "TOKEN_MISMATCH",
-                    )),
-                ));
-            }
-            Some(refresh)
-        }
-        None => None,
-    };
-
     // A CyxWiz API sign-in token has no jti: nothing to revoke here (it
     // expires within 24 h).
     if !claims.jti.is_empty() {
         auth.revoke_token(&claims.jti, claims.exp).await;
     }
-    if let Some(refresh) = refresh {
-        auth.revoke_token(&refresh.jti, refresh.exp).await;
-    }
-
     info!(user_id = %claims.sub, "User logged out");
 
-    Ok(StatusCode::NO_CONTENT)
+    if body.iter().all(|b| b.is_ascii_whitespace()) {
+        return Ok(StatusCode::NO_CONTENT);
+    }
+    let req: LogoutRequest = serde_json::from_slice(&body).map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ApiError::new(
+                "The body must be {\"refresh_token\": \"...\"}; the access token is revoked",
+                "INVALID_BODY",
+            )),
+        )
+    })?;
+    let Some(token) = req.refresh_token else {
+        return Ok(StatusCode::NO_CONTENT);
+    };
+    match auth.validate_refresh_token(&token).await {
+        Ok(refresh) if refresh.sub == claims.sub => {
+            auth.revoke_token(&refresh.jti, refresh.exp).await;
+            Ok(StatusCode::NO_CONTENT)
+        }
+        Ok(_) => Err((
+            StatusCode::FORBIDDEN,
+            Json(ApiError::new(
+                "The refresh token belongs to another user",
+                "TOKEN_MISMATCH",
+            )),
+        )),
+        // Expired or already revoked: it can no longer be used anyway.
+        Err(AuthError::TokenExpired) => Ok(StatusCode::NO_CONTENT),
+        Err(AuthError::Revoked) => Ok(StatusCode::NO_CONTENT),
+        Err(e) => {
+            warn!(error = %e, "Logout with an invalid refresh token");
+            Err((
+                StatusCode::UNAUTHORIZED,
+                Json(ApiError::new("Invalid refresh token", "INVALID_TOKEN")),
+            ))
+        }
+    }
 }
 
 /// Get current user info
