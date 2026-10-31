@@ -26,39 +26,46 @@ pub struct HealthChecker {
     metrics: NodeMetrics,
     state: Arc<RwLock<HealthState>>,
     check_interval: Duration,
-    /// host:port of the gateway (the network check reaches it)
-    gateway: String,
+    /// How recent the last gateway heartbeat must be for the network to
+    /// count as up; None when the node does not register with a gateway.
+    heartbeat_window: Option<Duration>,
+    started: std::time::Instant,
 }
 
-/// The host:port of a gateway address such as `http://gateway:50060`.
-fn host_port(address: &str) -> String {
-    let rest = address.split_once("://").map(|(_, r)| r).unwrap_or(address);
-    let authority = rest.split('/').next().unwrap_or(rest);
-    if authority
-        .rsplit_once(':')
-        .is_some_and(|(_, p)| p.parse::<u16>().is_ok())
-    {
-        authority.to_string()
-    } else if address.starts_with("https://") {
-        format!("{authority}:443")
-    } else {
-        format!("{authority}:80")
+/// Whether the network counts as up: no gateway to reach, or a heartbeat
+/// (or the start, before the first one) within `window`.
+fn network_up(
+    window: Option<Duration>,
+    last_heartbeat_unix: i64,
+    now_unix: i64,
+    since_start: Duration,
+) -> bool {
+    let Some(window) = window else {
+        return true;
+    };
+    if last_heartbeat_unix <= 0 {
+        return since_start <= window;
     }
+    now_unix - last_heartbeat_unix <= window.as_secs() as i64
 }
 
 impl HealthChecker {
-    /// Create a new health checker; `gateway_address` is the gateway URL the
-    /// node registers with (its network check reaches that, not a third
-    /// party).
+    /// Create a new health checker. The network counts as up while the
+    /// gateway heartbeats succeed (within three intervals); a node that does
+    /// not register (`register` false) has no network to check. No extra
+    /// connection is made: the heartbeat itself is the probe.
     pub fn new(
         node_id: String,
         storage: Arc<RocksDbBackend>,
         metrics: NodeMetrics,
         state: Arc<RwLock<HealthState>>,
-        gateway_address: &str,
+        central: &crate::config::CentralServerSettings,
     ) -> Self {
         Self {
-            gateway: host_port(gateway_address),
+            heartbeat_window: central
+                .register
+                .then(|| Duration::from_secs(3 * central.heartbeat_interval_secs.max(1))),
+            started: std::time::Instant::now(),
             node_id,
             storage,
             metrics,
@@ -115,30 +122,19 @@ impl HealthChecker {
         }
     }
 
-    /// Check network connectivity: the gateway this node serves can be
-    /// reached (name resolution and a TCP connect, closed at once).
+    /// Check network connectivity: the last gateway heartbeat is recent.
     async fn check_network(&self) -> bool {
-        self.check_tcp_connect(&self.gateway).await
-    }
-
-    /// Check TCP connectivity
-    async fn check_tcp_connect(&self, addr: &str) -> bool {
-        use tokio::net::TcpStream;
-
-        match tokio::time::timeout(Duration::from_secs(5), TcpStream::connect(addr)).await {
-            Ok(Ok(_)) => {
-                debug!(addr = %addr, "TCP connection successful");
-                true
-            }
-            Ok(Err(e)) => {
-                warn!(addr = %addr, error = %e, "TCP connection failed");
-                false
-            }
-            Err(_) => {
-                warn!(addr = %addr, "TCP connection timed out");
-                false
-            }
+        let last = self.state.read().await.report.server.last_heartbeat_unix;
+        let ok = network_up(
+            self.heartbeat_window,
+            last,
+            chrono::Utc::now().timestamp(),
+            self.started.elapsed(),
+        );
+        if !ok {
+            warn!("No successful gateway heartbeat within three intervals");
         }
+        ok
     }
 }
 
@@ -756,14 +752,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_network_check_targets_the_gateway_host_and_port() {
-        assert_eq!(host_port("http://gateway:50060"), "gateway:50060");
-        assert_eq!(host_port("https://cloud.cyxwiz.ai"), "cloud.cyxwiz.ai:443");
-        assert_eq!(
-            host_port("http://192.168.1.180:8000/"),
-            "192.168.1.180:8000"
-        );
-        assert_eq!(host_port("gateway:50060"), "gateway:50060");
+    fn the_network_is_up_while_gateway_heartbeats_succeed() {
+        let window = Some(Duration::from_secs(90));
+        let now = 1_000_000;
+        // No gateway to reach: always up.
+        assert!(network_up(None, 0, now, Duration::from_secs(9999)));
+        // Recent heartbeat: up; stale: down.
+        assert!(network_up(window, now - 30, now, Duration::from_secs(600)));
+        assert!(!network_up(
+            window,
+            now - 120,
+            now,
+            Duration::from_secs(600)
+        ));
+        // Before the first heartbeat: up for one window after the start.
+        assert!(network_up(window, 0, now, Duration::from_secs(20)));
+        assert!(!network_up(window, 0, now, Duration::from_secs(120)));
     }
     use cyxcloud_storage::StorageConfig;
     use tempfile::TempDir;

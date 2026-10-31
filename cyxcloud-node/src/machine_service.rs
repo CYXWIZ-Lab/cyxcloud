@@ -676,12 +676,15 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn outbound_ip_leaves_no_socket_open() {
+        // The process count moves with other tests running in parallel, so
+        // the margin is far below the 200 a leak of one per call would add.
         let open = || std::fs::read_dir("/proc/self/fd").unwrap().count();
+        let _ = outbound_ip();
         let before = open();
         for _ in 0..200 {
             let _ = outbound_ip();
         }
-        assert!(open() <= before + 2, "outbound_ip leaks descriptors");
+        assert!(open() < before + 50, "outbound_ip leaks descriptors");
     }
 
     #[test]
