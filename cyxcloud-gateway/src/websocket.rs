@@ -256,12 +256,29 @@ pub fn routes() -> Router<Arc<AppState>> {
     Router::new().route("/ws", get(ws_handler))
 }
 
-/// WebSocket upgrade handler
+/// WebSocket upgrade handler: a signed-in user (Authorization: Bearer, or
+/// `?token=`), who then receives only their own bucket's file events.
 async fn ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Query(query): Query<WsQuery>,
-) -> impl IntoResponse {
+) -> axum::response::Response {
+    let token = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(str::to_owned)
+        .or_else(|| query.token.clone());
+    let Some(token) = token else {
+        return axum::http::StatusCode::UNAUTHORIZED.into_response();
+    };
+    let claims = match state.auth_service().validate_token(&token).await {
+        Ok(c) if crate::auth::AuthService::allows(&c, "storage:read") => c,
+        _ => return axum::http::StatusCode::UNAUTHORIZED.into_response(),
+    };
+    let bucket = crate::s3_api::bucket_for_user(&claims.sub);
+
     // Parse topics
     let topics: Vec<String> = query
         .topics
@@ -271,11 +288,28 @@ async fn ws_handler(
 
     info!(topics = ?topics, "WebSocket connection request");
 
-    ws.on_upgrade(move |socket| handle_socket(socket, state, topics))
+    ws.on_upgrade(move |socket| handle_socket(socket, state, topics, bucket))
+}
+
+/// Whether a user whose bucket is `bucket` may see `event`: file events of
+/// that bucket and heartbeats; nothing from other users or the cluster.
+fn visible_to(event: &Event, bucket: &str) -> bool {
+    match event {
+        Event::FileCreated { bucket: b, .. }
+        | Event::FileDeleted { bucket: b, .. }
+        | Event::UploadComplete { bucket: b, .. } => b == bucket,
+        Event::Heartbeat { .. } => true,
+        _ => false,
+    }
 }
 
 /// Handle WebSocket connection
-async fn handle_socket(socket: WebSocket, state: Arc<AppState>, topics: Vec<String>) {
+async fn handle_socket(
+    socket: WebSocket,
+    state: Arc<AppState>,
+    topics: Vec<String>,
+    bucket: String,
+) {
     let (mut sender, mut receiver) = socket.split();
 
     // Subscribe to events
@@ -338,6 +372,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, topics: Vec<Stri
             // Handle events to send to client
             event = event_rx.recv() => {
                 match event {
+                    Some(event) if !visible_to(&event, &bucket) => continue,
                     Some(event) => {
                         let json = match serde_json::to_string(&event) {
                             Ok(j) => j,
@@ -489,6 +524,26 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_user_sees_only_their_own_bucket() {
+        let mine = Event::FileCreated {
+            bucket: "user-a".into(),
+            key: "k".into(),
+            size: 1,
+        };
+        let theirs = Event::FileDeleted {
+            bucket: "user-b".into(),
+            key: "k".into(),
+        };
+        let cluster = Event::NodeJoined {
+            node_id: "n".into(),
+            address: "x".into(),
+        };
+        assert!(visible_to(&mine, "user-a"));
+        assert!(!visible_to(&theirs, "user-a"));
+        assert!(!visible_to(&cluster, "user-a"));
+    }
 
     #[test]
     fn test_event_category() {

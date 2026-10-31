@@ -155,6 +155,29 @@ impl DataStreamServiceImpl {
             .map_err(Status::internal)
     }
 
+    /// The dataset when `user_id` owns it or it is shared with them; a
+    /// dataset they may not read answers "not found", as an unknown one.
+    async fn readable_dataset(&self, dataset_id: Uuid, user_id: Uuid) -> Result<Dataset, Status> {
+        let metadata = self.metadata()?;
+        let dataset = metadata
+            .database()
+            .get_dataset(dataset_id)
+            .await
+            .map_err(|e| Status::internal(format!("Database error: {}", e)))?
+            .ok_or_else(|| Status::not_found("Dataset not found"))?;
+        if dataset.owner_id != user_id {
+            let share = metadata
+                .database()
+                .check_dataset_access(dataset_id, user_id)
+                .await
+                .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
+            if share.is_none() {
+                return Err(Status::not_found("Dataset not found"));
+            }
+        }
+        Ok(dataset)
+    }
+
     /// Convert internal Dataset to proto DatasetInfo
     fn dataset_to_proto(dataset: &Dataset) -> DatasetInfo {
         DatasetInfo {
@@ -233,6 +256,7 @@ impl DataStreamService for DataStreamServiceImpl {
         &self,
         request: Request<StreamBatchesRequest>,
     ) -> Result<Response<Self::StreamBatchesStream>, Status> {
+        let user_id = self.user_id(&request).await?;
         let req = request.into_inner();
         let dataset_id_str = req.dataset_id.clone();
         tracing::Span::current().record("dataset_id", &dataset_id_str);
@@ -252,12 +276,8 @@ impl DataStreamService for DataStreamServiceImpl {
             .map_err(|e| Status::invalid_argument(format!("Invalid dataset_id: {}", e)))?;
 
         // Get dataset info
-        let dataset = metadata
-            .database()
-            .get_dataset(dataset_id)
-            .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?
-            .ok_or_else(|| Status::not_found("Dataset not found"))?;
+        // Only the owner or a user it is shared with.
+        let dataset = self.readable_dataset(dataset_id, user_id).await?;
 
         // Check trust level
         let max_trust = if req.max_trust_level > 0 {
@@ -402,6 +422,7 @@ impl DataStreamService for DataStreamServiceImpl {
         &self,
         request: Request<GetDatasetInfoRequest>,
     ) -> Result<Response<DatasetInfoResponse>, Status> {
+        let user_id = self.user_id(&request).await?;
         let req = request.into_inner();
         tracing::Span::current().record("dataset_id", &req.dataset_id);
 
@@ -410,12 +431,8 @@ impl DataStreamService for DataStreamServiceImpl {
         let dataset_id = Uuid::parse_str(&req.dataset_id)
             .map_err(|e| Status::invalid_argument(format!("Invalid dataset_id: {}", e)))?;
 
-        let dataset = metadata
-            .database()
-            .get_dataset(dataset_id)
-            .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?
-            .ok_or_else(|| Status::not_found("Dataset not found"))?;
+        // Only the owner or a user it is shared with.
+        let dataset = self.readable_dataset(dataset_id, user_id).await?;
 
         let files = metadata
             .database()
@@ -542,6 +559,11 @@ impl DataStreamService for DataStreamServiceImpl {
                 .await
                 .map_err(|e| Status::internal(format!("Database error: {}", e)))?
                 .ok_or_else(|| Status::not_found(format!("File not found: {}", file_id)))?;
+            // Only the caller's own files go into a dataset (another
+            // user's file answers as not found).
+            if file.owner_id != Some(user_id) {
+                return Err(Status::not_found(format!("File not found: {}", file_id)));
+            }
 
             total_size += file.size_bytes;
             file_infos.push((*file_id, file, idx as i32));
@@ -642,25 +664,7 @@ impl DataStreamService for DataStreamServiceImpl {
             .map_err(|e| Status::invalid_argument(format!("Invalid dataset_id: {}", e)))?;
 
         // Verify user has access to dataset
-        let dataset = metadata
-            .database()
-            .get_dataset(dataset_id)
-            .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?
-            .ok_or_else(|| Status::not_found("Dataset not found"))?;
-
-        if dataset.owner_id != user_id {
-            // Check if shared
-            let share = metadata
-                .database()
-                .check_dataset_access(dataset_id, user_id)
-                .await
-                .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
-
-            if share.is_none() {
-                return Err(Status::permission_denied("No access to dataset"));
-            }
-        }
+        self.readable_dataset(dataset_id, user_id).await?;
 
         // Parse node ID if provided
         let node_id = if !req.node_id.is_empty() {
@@ -749,7 +753,7 @@ impl DataStreamService for DataStreamServiceImpl {
         &self,
         request: Request<RevokeAccessTokenRequest>,
     ) -> Result<Response<RevokeAccessTokenResponse>, Status> {
-        let _user_id = self.user_id(&request).await?;
+        let user_id = self.user_id(&request).await?;
         let req = request.into_inner();
         tracing::Span::current().record("token_id", &req.token_id);
 
@@ -757,6 +761,25 @@ impl DataStreamService for DataStreamServiceImpl {
 
         let token_id = Uuid::parse_str(&req.token_id)
             .map_err(|e| Status::invalid_argument(format!("Invalid token_id: {}", e)))?;
+
+        // Only the user it was issued to, or the dataset's owner.
+        let token = metadata
+            .database()
+            .get_data_access_token(token_id)
+            .await
+            .map_err(|e| Status::internal(format!("Database error: {}", e)))?
+            .ok_or_else(|| Status::not_found("Access token not found"))?;
+        if token.user_id != user_id {
+            let owner = metadata
+                .database()
+                .get_dataset(token.dataset_id)
+                .await
+                .map_err(|e| Status::internal(format!("Database error: {}", e)))?
+                .map(|d| d.owner_id);
+            if owner != Some(user_id) {
+                return Err(Status::not_found("Access token not found"));
+            }
+        }
 
         metadata
             .database()
@@ -778,6 +801,7 @@ impl DataStreamService for DataStreamServiceImpl {
         &self,
         request: Request<VerifyDatasetRequest>,
     ) -> Result<Response<VerificationResult>, Status> {
+        let user_id = self.user_id(&request).await?;
         let req = request.into_inner();
         tracing::Span::current().record("dataset_id", &req.dataset_id);
 
@@ -786,12 +810,8 @@ impl DataStreamService for DataStreamServiceImpl {
         let dataset_id = Uuid::parse_str(&req.dataset_id)
             .map_err(|e| Status::invalid_argument(format!("Invalid dataset_id: {}", e)))?;
 
-        let dataset = metadata
-            .database()
-            .get_dataset(dataset_id)
-            .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?
-            .ok_or_else(|| Status::not_found("Dataset not found"))?;
+        // Only the owner or a user it is shared with.
+        let dataset = self.readable_dataset(dataset_id, user_id).await?;
 
         let files = metadata
             .database()

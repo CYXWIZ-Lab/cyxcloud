@@ -662,8 +662,14 @@ impl DataService for DataServiceImpl {
         &self,
         request: Request<GetDatasetRequest>,
     ) -> Result<Response<ProtoDatasetInfo>, Status> {
+        let claims = request.require_auth()?.clone();
         let req = request.into_inner();
         tracing::Span::current().record("dataset_id", &req.dataset_id);
+        let caller = self
+            .state
+            .user_for_claims(&claims)
+            .await
+            .map_err(Status::internal)?;
 
         let metadata = self
             .metadata()
@@ -679,7 +685,9 @@ impl DataService for DataServiceImpl {
             Status::internal(format!("Database error: {}", e))
         })?;
 
+        // Only the owner's file (another user's answers as not found).
         let file = file
+            .filter(|f| f.owner_id == Some(caller))
             .ok_or_else(|| Status::not_found(format!("Dataset not found: {}", req.dataset_id)))?;
 
         // Get chunk count
@@ -716,8 +724,14 @@ impl DataService for DataServiceImpl {
         &self,
         request: Request<PrefetchRequest>,
     ) -> Result<Response<PrefetchResponse>, Status> {
+        let claims = request.require_auth()?.clone();
         let req = request.into_inner();
         tracing::Span::current().record("dataset_id", &req.dataset_id);
+        let caller = self
+            .state
+            .user_for_claims(&claims)
+            .await
+            .map_err(Status::internal)?;
 
         info!(
             dataset_id = %req.dataset_id,
@@ -732,24 +746,34 @@ impl DataService for DataServiceImpl {
         let mut cached_chunks = 0u64;
         let mut failed_chunks = 0u64;
 
-        // If specific chunk IDs provided, prefetch those
-        // Otherwise, prefetch all chunks for the dataset
+        // Only the caller's own file, and only its chunks.
+        let file_uuid = Uuid::parse_str(&req.dataset_id)
+            .map_err(|e| Status::invalid_argument(format!("Invalid dataset_id: {}", e)))?;
+        let owned = metadata
+            .get_file(file_uuid)
+            .await
+            .map_err(|e| Status::internal(format!("Database error: {}", e)))?
+            .is_some_and(|f| f.owner_id == Some(caller));
+        if !owned {
+            return Err(Status::not_found(format!(
+                "Dataset not found: {}",
+                req.dataset_id
+            )));
+        }
+        let file_chunks: Vec<Vec<u8>> = metadata
+            .get_file_chunks(file_uuid)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to get chunks: {}", e)))?
+            .into_iter()
+            .map(|c| c.chunk_id)
+            .collect();
         let chunk_ids: Vec<Vec<u8>> = if req.chunk_ids.is_empty() {
-            // Get all chunks for dataset
-            let file_uuid = Uuid::parse_str(&req.dataset_id)
-                .map_err(|e| Status::invalid_argument(format!("Invalid dataset_id: {}", e)))?;
-
-            metadata
-                .get_file_chunks(file_uuid)
-                .await
-                .map_err(|e| Status::internal(format!("Failed to get chunks: {}", e)))?
-                .into_iter()
-                .map(|c| c.chunk_id)
-                .collect()
+            file_chunks
         } else {
             req.chunk_ids
                 .into_iter()
                 .filter_map(|s| hex::decode(&s).ok())
+                .filter(|id| file_chunks.contains(id))
                 .collect()
         };
 

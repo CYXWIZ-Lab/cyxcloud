@@ -150,11 +150,11 @@ pub fn routes() -> Router<Arc<AppState>> {
         // List public datasets
         .route("/public", get(list_public_datasets))
         // Get dataset info
-        .route("/{dataset_id}", get(get_dataset_info))
+        .route("/:dataset_id", get(get_dataset_info))
         // Verify dataset
-        .route("/{dataset_id}/verify", post(verify_dataset))
+        .route("/:dataset_id/verify", post(verify_dataset))
         // Share dataset
-        .route("/{dataset_id}/share", post(share_dataset))
+        .route("/:dataset_id/share", post(share_dataset))
 }
 
 /// List user's datasets
@@ -272,6 +272,17 @@ async fn create_dataset(
             Json(ApiError::new(e, "USER_RECORD")),
         )
     })?;
+
+    // Only the caller's own bucket
+    if req.bucket != crate::s3_api::bucket_for_user(&claims.sub) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ApiError::new(
+                "A dataset is made from your own bucket",
+                "NOT_YOUR_BUCKET",
+            )),
+        ));
+    }
 
     // List files in the bucket with optional prefix to calculate dataset stats
     let files = metadata
