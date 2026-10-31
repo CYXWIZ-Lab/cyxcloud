@@ -105,7 +105,7 @@ impl RocksDbBackend {
         block_opts.set_block_cache(&cache);
         block_opts.set_block_size(64 * 1024); // 64KB blocks (good for 4MB chunks)
         block_opts.set_cache_index_and_filter_blocks(true);
-        // Answers "not stored" for a new chunk without reading the levels.
+        // exists() and get() answer "not stored" without reading the levels.
         block_opts.set_bloom_filter(10.0, false);
         block_opts.set_pin_l0_filter_and_index_blocks_in_cache(true);
         opts.set_block_based_table_factory(&block_opts);
@@ -118,7 +118,7 @@ impl RocksDbBackend {
         // Column family options
         let cf_descriptors = vec![
             rocksdb::ColumnFamilyDescriptor::new(CF_CHUNKS, opts.clone()),
-            rocksdb::ColumnFamilyDescriptor::new(CF_METADATA, Options::default()),
+            rocksdb::ColumnFamilyDescriptor::new(CF_METADATA, Self::metadata_options()),
         ];
 
         // Create directory if it doesn't exist
@@ -157,6 +157,16 @@ impl RocksDbBackend {
         })
     }
 
+    /// The metadata family holds the size entries put and delete look up
+    /// first: a bloom filter answers "no entry" (a new chunk) cheaply.
+    fn metadata_options() -> Options {
+        let mut block_opts = BlockBasedOptions::default();
+        block_opts.set_bloom_filter(10.0, false);
+        let mut opts = Options::default();
+        opts.set_block_based_table_factory(&block_opts);
+        opts
+    }
+
     fn cf<'a>(db: &'a DB, name: &str) -> Result<std::sync::Arc<rocksdb::BoundColumnFamily<'a>>> {
         db.cf_handle(name)
             .ok_or_else(|| CyxCloudError::Storage(format!("{} column family missing", name)))
@@ -171,15 +181,22 @@ impl RocksDbBackend {
         let mut read_opts = ReadOptions::default();
         read_opts.fill_cache(false);
         let mut batch = WriteBatch::default();
+        let (mut indexed, mut bytes) = (0u64, 0u64);
         for item in db.iterator_cf_opt(&chunks, read_opts, rocksdb::IteratorMode::Start) {
             let (key, value) =
                 item.map_err(|e| CyxCloudError::Storage(format!("Scan failed: {}", e)))?;
             batch.put_cf(&meta, size_key(&key), (value.len() as u64).to_le_bytes());
+            indexed += 1;
+            bytes += value.len() as u64;
+            if indexed % 10_000 == 0 {
+                info!(indexed, bytes, "Indexing stored chunk sizes");
+            }
             if batch.len() >= 1000 {
                 db.write(std::mem::take(&mut batch))
                     .map_err(|e| CyxCloudError::Storage(format!("Write failed: {}", e)))?;
             }
         }
+        info!(indexed, bytes, "Chunk sizes indexed");
         batch.put_cf(&meta, SIZES_INDEXED, []);
         db.write(batch)
             .map_err(|e| CyxCloudError::Storage(format!("Write failed: {}", e)))
@@ -202,13 +219,14 @@ impl RocksDbBackend {
         Ok((count, bytes))
     }
 
-    /// The stored size of a chunk, from its size entry (None: not stored).
+    /// The stored size of a chunk, from its size entry (None: not stored;
+    /// a damaged entry counts as 0 bytes, as sum_sizes counts it).
     fn stored_size(&self, key: &[u8]) -> Result<Option<u64>> {
         Ok(self
             .db
             .get_pinned_cf(&self.cf_metadata(), size_key(key))
             .map_err(|e| CyxCloudError::Storage(format!("Read failed: {}", e)))?
-            .and_then(|v| read_u64(&v)))
+            .map(|v| read_u64(&v).unwrap_or(0)))
     }
 
     fn stripe(&self, key: &[u8]) -> &Mutex<()> {
@@ -476,14 +494,19 @@ mod tests {
         run(|b, id| b.put(id, Bytes::from_static(b"1234")).unwrap());
         let s = backend.stats().unwrap();
         assert_eq!((s.chunk_count, s.bytes_used), (1, 4));
+        // Another chunk stays, so a delete counted twice would show (not
+        // floor at zero).
+        backend
+            .put(ChunkId::from_data(b"other"), Bytes::from_static(b"12"))
+            .unwrap();
         run(|b, id| {
             b.delete(id).unwrap();
         });
         let s = backend.stats().unwrap();
         assert_eq!(
             (s.chunk_count, s.bytes_used),
-            (0, 0),
-            "no double count, no wrap"
+            (1, 2),
+            "each delete counted once"
         );
     }
 
@@ -511,6 +534,14 @@ mod tests {
         let reopened = RocksDbBackend::open(StorageConfig::new(temp_dir.path())).unwrap();
         let s = reopened.stats().unwrap();
         assert_eq!((s.chunk_count, s.bytes_used), (2, 8));
+        assert!(
+            reopened
+                .db
+                .get_cf(&reopened.cf_metadata(), SIZES_INDEXED)
+                .unwrap()
+                .is_some(),
+            "indexed once: the marker is set"
+        );
     }
 
     #[test]
