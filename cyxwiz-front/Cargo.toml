@@ -33,7 +33,7 @@ clap = { workspace = true }
 socket2 = "0.6"
 
 [dev-dependencies]
-reqwest = { version = "0.11", default-features = false }
+reqwest = { workspace = true }
 
 [lints]
 workspace = true

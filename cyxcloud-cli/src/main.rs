@@ -320,6 +320,9 @@ enum ConfigCommands {
 
 #[tokio::main]
 async fn main() {
+    // One crypto provider (ring) for every TLS client in this process,
+    // set before any is built (reqwest and tonic use the process default).
+    let _ = rustls::crypto::ring::default_provider().install_default();
     if let Err(e) = run().await {
         let kind = exit::classify(&e);
         eprintln!(

@@ -500,8 +500,15 @@ impl CyxWizApiClient {
 mod tests {
     use super::*;
 
+    /// reqwest builds on the process's rustls provider; main installs ring,
+    /// a test does it here.
+    fn ring() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+
     #[test]
     fn test_client_creation() {
+        ring();
         let config = CyxWizApiSettings {
             base_url: "http://localhost:3002".to_string(),
             owner_id: None,
@@ -519,6 +526,7 @@ mod tests {
 
     #[test]
     fn test_credentials() {
+        ring();
         let config = CyxWizApiSettings::default();
         let mut client = CyxWizApiClient::new(&config).unwrap();
 

@@ -96,6 +96,13 @@ async fn front_door_at(upstream_port: u16, listen: &str) -> std::net::SocketAddr
     addr
 }
 
+/// reqwest builds on the process's rustls provider; the door's main
+/// installs ring, a test does it here.
+fn http_client() -> reqwest::Client {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    reqwest::Client::new()
+}
+
 fn token(secret: &str) -> String {
     let exp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -115,7 +122,7 @@ async fn the_door_routes_checks_and_refuses() {
     let hits = Arc::new(AtomicUsize::new(0));
     let up = stand_in(hits.clone()).await;
     let door = front_door(up).await;
-    let http = reqwest::Client::new();
+    let http = http_client();
 
     // routed, with the path, query and the client's address forwarded
     let r = http
@@ -193,7 +200,7 @@ async fn the_door_routes_checks_and_refuses() {
 async fn the_door_answers_on_ipv4_and_ipv6() {
     let up = stand_in(Arc::new(AtomicUsize::new(0))).await;
     let port = front_door_at(up, "[::]:0").await.port();
-    let http = reqwest::Client::new();
+    let http = http_client();
     let r = http
         .get(format!("http://127.0.0.1:{}/api/x", port))
         .send()

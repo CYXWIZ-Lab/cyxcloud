@@ -424,6 +424,9 @@ impl detector::NetworkClient for MockNetworkClient {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // One crypto provider (ring) for every TLS client in this process,
+    // set before any is built (reqwest and tonic use the process default).
+    let _ = rustls::crypto::ring::default_provider().install_default();
     // Initialize tracing
     tracing_subscriber::fmt()
         .with_max_level(Level::INFO)

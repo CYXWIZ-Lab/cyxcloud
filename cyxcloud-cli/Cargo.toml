@@ -10,6 +10,7 @@ name = "cyxcloud"
 path = "src/main.rs"
 
 [dependencies]
+rustls = { workspace = true }
 cyxcloud-core = { path = "../cyxcloud-core" }
 cyxcloud-protocol = { path = "../cyxcloud-protocol" }
 tonic = { workspace = true }
@@ -21,7 +22,7 @@ tokio = { workspace = true }
 futures = { workspace = true }
 
 # HTTP client
-reqwest = { version = "0.11", default-features = false, features = ["json", "stream", "rustls-tls"] }
+reqwest = { workspace = true, features = ["stream"] }
 
 # CLI
 clap = { workspace = true }

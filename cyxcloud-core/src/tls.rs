@@ -301,6 +301,18 @@ mod tests {
         assert!(!config.require_client_cert);
     }
 
+    /// rustls picks the crate-level provider only when exactly one is
+    /// compiled in. A dependency that turns on a second one (axum-server's
+    /// and reqwest's default TLS features bring aws-lc-rs) makes every
+    /// config built before a provider is installed panic at run time. This
+    /// test installs none, so in a workspace run (features unified) a
+    /// second provider fails here first.
+    #[test]
+    fn a_config_builds_with_the_one_compiled_in_provider() {
+        assert!(rustls::crypto::CryptoProvider::get_default().is_none());
+        assert!(load_client_config_with_system_roots().is_ok());
+    }
+
     #[test]
     fn test_tls_client_config_creation() {
         let config = TlsClientConfig {

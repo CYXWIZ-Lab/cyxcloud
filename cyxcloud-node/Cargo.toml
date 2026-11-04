@@ -59,7 +59,7 @@ blake3 = "1.5"
 sysinfo = "0.31"
 
 # HTTP client for cyxwiz-api
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { workspace = true }
 serde_json = "1"
 rpassword = "7"
 dirs = "5.0"
