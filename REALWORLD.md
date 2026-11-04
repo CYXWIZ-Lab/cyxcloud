@@ -1,5 +1,7 @@
 # CyxCloud: From Local to Production
 
+> Note: the Solana integration (the gateway and node `blockchain` build feature) was removed on 2026-11-04. Solana and on-chain parts of this document are historical.
+
 This document outlines the strategy and steps to take CyxCloud from local development to a production system serving real users worldwide, with budget constraints in mind.
 
 ## Current State

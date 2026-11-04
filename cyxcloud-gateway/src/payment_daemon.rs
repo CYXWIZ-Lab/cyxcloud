@@ -15,24 +15,6 @@ use tokio::sync::RwLock;
 use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 
-#[cfg(feature = "blockchain")]
-use crate::blockchain::CyxCloudBlockchainClient;
-#[cfg(feature = "blockchain")]
-use solana_sdk::pubkey::Pubkey;
-#[cfg(feature = "blockchain")]
-use std::str::FromStr;
-
-/// Stub type when blockchain feature is disabled
-#[cfg(not(feature = "blockchain"))]
-pub struct CyxCloudBlockchainClientStub;
-
-/// Type alias for blockchain client reference
-#[cfg(feature = "blockchain")]
-type BlockchainRef<'a> = Option<&'a CyxCloudBlockchainClient>;
-
-#[cfg(not(feature = "blockchain"))]
-type BlockchainRef<'a> = Option<&'a CyxCloudBlockchainClientStub>;
-
 /// Payment daemon configuration
 #[derive(Debug, Clone)]
 pub struct PaymentDaemonConfig {
@@ -40,8 +22,6 @@ pub struct PaymentDaemonConfig {
     pub accumulate_interval: Duration,
     /// Extended downtime threshold for slashing (default: 4 hours)
     pub extended_downtime_threshold: Duration,
-    /// Enable blockchain transactions (false for dry-run mode)
-    pub enable_blockchain: bool,
 }
 
 impl Default for PaymentDaemonConfig {
@@ -49,7 +29,6 @@ impl Default for PaymentDaemonConfig {
         Self {
             accumulate_interval: Duration::from_secs(60),
             extended_downtime_threshold: Duration::from_secs(4 * 60 * 60), // 4 hours
-            enable_blockchain: true,
         }
     }
 }
@@ -70,9 +49,6 @@ impl PaymentDaemonConfig {
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(4 * 60 * 60),
             ),
-            enable_blockchain: std::env::var("ENABLE_BLOCKCHAIN_PAYMENTS")
-                .map(|v| v == "true" || v == "1")
-                .unwrap_or(true),
         }
     }
 }
@@ -122,7 +98,6 @@ impl PaymentDaemon {
                 epoch_duration_days = EPOCH_DURATION_SECONDS / 86400,
                 extended_downtime_threshold_hours =
                     daemon.config.extended_downtime_threshold.as_secs() / 3600,
-                blockchain_enabled = daemon.config.enable_blockchain,
                 "Payment daemon started"
             );
 
@@ -139,10 +114,6 @@ impl PaymentDaemon {
                 let metadata = state.metadata_service();
 
                 if let Some(metadata) = metadata {
-                    #[cfg(feature = "blockchain")]
-                    let blockchain: BlockchainRef = state.blockchain_client();
-                    #[cfg(not(feature = "blockchain"))]
-                    let blockchain: BlockchainRef = None;
                     // Step 1: Accumulate uptime for all nodes
                     if let Err(e) = daemon.accumulate_uptime(metadata).await {
                         error!(error = %e, "Failed to accumulate uptime");
@@ -150,7 +121,7 @@ impl PaymentDaemon {
                     }
 
                     // Step 2: Check if epoch should end
-                    if let Err(e) = daemon.check_epoch_end(metadata, blockchain).await {
+                    if let Err(e) = daemon.check_epoch_end(metadata).await {
                         error!(error = %e, "Failed to check epoch end");
                         daemon.record_error(&e.to_string()).await;
                     }
@@ -268,11 +239,7 @@ impl PaymentDaemon {
     }
 
     /// Check if the current epoch should end and process payments
-    async fn check_epoch_end(
-        &self,
-        metadata: &MetadataService,
-        blockchain: BlockchainRef<'_>,
-    ) -> anyhow::Result<()> {
+    async fn check_epoch_end(&self, metadata: &MetadataService) -> anyhow::Result<()> {
         let db = metadata.database();
 
         // Get current epoch info
@@ -308,12 +275,10 @@ impl PaymentDaemon {
         db.end_epoch_uptime(current_epoch).await?;
 
         // Step 2: Check for slashing conditions
-        self.check_and_slash_nodes(metadata, blockchain, current_epoch)
-            .await?;
+        self.check_and_slash_nodes(metadata, current_epoch).await?;
 
         // Step 3: Calculate weights and distribute payments
-        self.finalize_and_pay_epoch(metadata, blockchain, current_epoch)
-            .await?;
+        self.finalize_and_pay_epoch(metadata, current_epoch).await?;
 
         // Step 4: Start new epoch
         let new_epoch = current_epoch + 1;
@@ -338,12 +303,10 @@ impl PaymentDaemon {
         Ok(())
     }
 
-    /// Check for slashing conditions and apply penalties
-    #[cfg(feature = "blockchain")]
+    /// Check for slashing conditions and record the penalties
     async fn check_and_slash_nodes(
         &self,
         metadata: &MetadataService,
-        blockchain: BlockchainRef<'_>,
         epoch: i64,
     ) -> anyhow::Result<()> {
         let db = metadata.database();
@@ -363,113 +326,7 @@ impl PaymentDaemon {
             epoch = epoch,
             count = extended_downtime_nodes.len(),
             threshold_hours = threshold_seconds / 3600,
-            "Found nodes with extended downtime, applying slashing"
-        );
-
-        for uptime in &extended_downtime_nodes {
-            // Get node info for wallet address
-            let node = match db.get_node(uptime.node_id).await? {
-                Some(n) => n,
-                None => continue,
-            };
-
-            let reason = SlashReason::ExtendedDowntime;
-            let slash_percent = reason.slash_percent();
-
-            // Record slashing event in database
-            let details = serde_json::json!({
-                "seconds_offline": uptime.seconds_offline,
-                "threshold_seconds": threshold_seconds,
-            });
-
-            // Execute slash on blockchain if enabled
-            let tx_signature = if self.config.enable_blockchain {
-                if let Some(blockchain) = blockchain {
-                    if let Some(ref wallet) = node.wallet_address {
-                        if let Ok(owner) = Pubkey::from_str(wallet) {
-                            match blockchain
-                                .slash_node(&owner, &node.peer_id, 0, &reason.to_string())
-                                .await
-                            {
-                                Ok(sig) => Some(sig),
-                                Err(e) => {
-                                    warn!(
-                                        error = %e,
-                                        node_id = %node.id,
-                                        "Failed to execute slash on blockchain"
-                                    );
-                                    None
-                                }
-                            }
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-            db.record_slashing_event(
-                uptime.node_id,
-                epoch,
-                &reason.to_string(),
-                slash_percent,
-                None, // Amount calculated on-chain
-                tx_signature.as_deref(),
-                Some(details),
-            )
-            .await?;
-
-            // Update metrics
-            {
-                let mut metrics = self.metrics.write().await;
-                metrics.slashing_events += 1;
-            }
-
-            info!(
-                node_id = %uptime.node_id,
-                peer_id = %node.peer_id,
-                reason = %reason,
-                slash_percent = slash_percent,
-                seconds_offline = uptime.seconds_offline,
-                "Slashing applied for extended downtime"
-            );
-        }
-
-        Ok(())
-    }
-
-    /// Check for slashing conditions and apply penalties (no-op when blockchain disabled)
-    #[cfg(not(feature = "blockchain"))]
-    async fn check_and_slash_nodes(
-        &self,
-        metadata: &MetadataService,
-        _blockchain: BlockchainRef<'_>,
-        epoch: i64,
-    ) -> anyhow::Result<()> {
-        let db = metadata.database();
-        let threshold_seconds = self.config.extended_downtime_threshold.as_secs() as i64;
-
-        // Get nodes with extended downtime
-        let extended_downtime_nodes = db
-            .get_nodes_with_extended_downtime(epoch, threshold_seconds)
-            .await?;
-
-        if extended_downtime_nodes.is_empty() {
-            debug!(epoch = epoch, "No nodes with extended downtime");
-            return Ok(());
-        }
-
-        info!(
-            epoch = epoch,
-            count = extended_downtime_nodes.len(),
-            threshold_hours = threshold_seconds / 3600,
-            "Found nodes with extended downtime, recording slashing (blockchain disabled)"
+            "Found nodes with extended downtime, recording slashing"
         );
 
         for uptime in &extended_downtime_nodes {
@@ -492,7 +349,7 @@ impl PaymentDaemon {
                 &reason.to_string(),
                 slash_percent,
                 None,
-                None, // No tx signature without blockchain
+                None, // No transaction signature
                 Some(details),
             )
             .await?;
@@ -507,190 +364,18 @@ impl PaymentDaemon {
                 peer_id = %node.peer_id,
                 reason = %reason,
                 slash_percent = slash_percent,
-                "Slashing recorded (blockchain disabled)"
+                "Slashing recorded"
             );
         }
 
         Ok(())
     }
 
-    /// Finalize epoch and distribute payments (with blockchain)
-    #[cfg(feature = "blockchain")]
+    /// Finalize the epoch and record each node's share of a fixed theoretical
+    /// pool (dry-run mode)
     async fn finalize_and_pay_epoch(
         &self,
         metadata: &MetadataService,
-        blockchain: BlockchainRef<'_>,
-        epoch: i64,
-    ) -> anyhow::Result<()> {
-        let db = metadata.database();
-
-        // Get all uptime records for this epoch
-        let uptimes = db.get_epoch_uptime(epoch).await?;
-
-        if uptimes.is_empty() {
-            warn!(
-                epoch = epoch,
-                "No uptime records for epoch, skipping payment"
-            );
-            return Ok(());
-        }
-
-        // Get node info for each uptime record to calculate weights
-        let mut weights: Vec<NodeWeight> = Vec::new();
-
-        for uptime in &uptimes {
-            if let Some(node) = db.get_node(uptime.node_id).await? {
-                let reputation = 5000u16; // Average reputation
-                let weight = NodeWeight::calculate(
-                    uptime.node_id,
-                    node.peer_id.clone(),
-                    node.wallet_address.clone(),
-                    node.storage_total,
-                    uptime.seconds_online,
-                    EPOCH_DURATION_SECONDS,
-                    reputation,
-                );
-                weights.push(weight);
-            }
-        }
-
-        if weights.is_empty() {
-            warn!(epoch = epoch, "No valid node weights for epoch");
-            return Ok(());
-        }
-
-        let total_weight: u64 = weights.iter().map(|w| w.weight).sum();
-
-        // Get pool amount from blockchain
-        let (total_pool_amount, nodes_share) = if self.config.enable_blockchain {
-            if let Some(blockchain) = blockchain {
-                if let Ok(Some(rewards)) = blockchain.get_epoch_rewards(epoch as u64).await {
-                    (rewards.total_pool_amount, rewards.nodes_share)
-                } else {
-                    warn!(epoch = epoch, "No pool data available for epoch");
-                    return Ok(());
-                }
-            } else {
-                (0, 0)
-            }
-        } else {
-            (1_000_000_000, 850_000_000) // Dry-run mode
-        };
-
-        if nodes_share == 0 {
-            warn!(epoch = epoch, "No tokens in pool for distribution");
-            return Ok(());
-        }
-
-        info!(
-            epoch = epoch,
-            total_pool = total_pool_amount,
-            nodes_share = nodes_share,
-            total_weight = total_weight,
-            node_count = weights.len(),
-            "Distributing epoch rewards"
-        );
-
-        let mut nodes_paid = 0;
-        let mut total_paid = 0u64;
-
-        for weight in &weights {
-            let reward = weight.calculate_share(nodes_share, total_weight);
-            if reward == 0 {
-                continue;
-            }
-
-            let tx_signature = if self.config.enable_blockchain {
-                if let Some(blockchain) = blockchain {
-                    if let Some(ref wallet) = weight.wallet_address {
-                        if let Ok(owner) = Pubkey::from_str(wallet) {
-                            match blockchain
-                                .allocate_node_reward(epoch as u64, &owner, &weight.peer_id, reward)
-                                .await
-                            {
-                                Ok(sig) => Some(sig),
-                                Err(e) => {
-                                    warn!(error = %e, node_id = %weight.node_id, "Failed to allocate reward");
-                                    None
-                                }
-                            }
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-            db.mark_payment_allocated(
-                weight.node_id,
-                epoch,
-                reward as i64,
-                tx_signature.as_deref(),
-            )
-            .await?;
-            nodes_paid += 1;
-            total_paid += reward;
-
-            debug!(
-                node_id = %weight.node_id,
-                peer_id = %weight.peer_id,
-                reward = reward,
-                weight = weight.weight,
-                "Reward allocated"
-            );
-        }
-
-        let finalize_tx = if self.config.enable_blockchain {
-            if let Some(blockchain) = blockchain {
-                blockchain.finalize_epoch(epoch as u64).await.ok()
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        let platform_share = (total_pool_amount as f64 * 0.10) as i64;
-        let community_share = (total_pool_amount as f64 * 0.05) as i64;
-
-        db.finalize_payment_epoch(
-            epoch,
-            total_pool_amount as i64,
-            nodes_share as i64,
-            platform_share,
-            community_share,
-            nodes_paid,
-            finalize_tx.as_deref(),
-        )
-        .await?;
-
-        {
-            let mut metrics = self.metrics.write().await;
-            metrics.nodes_paid += nodes_paid as u64;
-            metrics.total_paid_amount += total_paid;
-        }
-
-        info!(
-            epoch = epoch,
-            nodes_paid = nodes_paid,
-            total_paid = total_paid,
-            "Epoch payment complete"
-        );
-        Ok(())
-    }
-
-    /// Finalize epoch and distribute payments (without blockchain - dry-run mode)
-    #[cfg(not(feature = "blockchain"))]
-    async fn finalize_and_pay_epoch(
-        &self,
-        metadata: &MetadataService,
-        _blockchain: BlockchainRef<'_>,
         epoch: i64,
     ) -> anyhow::Result<()> {
         let db = metadata.database();
@@ -813,7 +498,6 @@ mod tests {
         let config = PaymentDaemonConfig::default();
         assert_eq!(config.accumulate_interval.as_secs(), 60);
         assert_eq!(config.extended_downtime_threshold.as_secs(), 4 * 60 * 60);
-        assert!(config.enable_blockchain);
     }
 
     #[test]

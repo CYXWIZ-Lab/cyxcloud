@@ -1,5 +1,7 @@
 # CyxCloud Production Readiness Assessment
 
+> Note: the Solana integration (the gateway and node `blockchain` build feature) was removed on 2026-11-04. Solana and on-chain parts of this document are historical.
+
 **Date:** 2025-12-31
 
 ## Ready (Core Features Working)

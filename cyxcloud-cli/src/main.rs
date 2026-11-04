@@ -560,9 +560,6 @@ fn handle_config_command(command: Option<ConfigCommands>) -> Result<()> {
             println!("{}", style("[auth]").cyan());
             println!("  api_url = \"{}\"", cfg.auth.api_url);
             println!();
-            println!("{}", style("[blockchain]").cyan());
-            println!("  solana_rpc_url = \"{}\"", cfg.blockchain.solana_rpc_url);
-            println!();
             if let Some(bucket) = &cfg.cli.default_bucket {
                 println!("{}", style("[cli]").cyan());
                 println!("  default_bucket = \"{}\"", bucket);
@@ -621,11 +618,10 @@ fn handle_config_command(command: Option<ConfigCommands>) -> Result<()> {
                 "gateway.http_url" => cfg.gateway.http_url = value,
                 "gateway.grpc_url" => cfg.gateway.grpc_url = value,
                 "auth.api_url" => cfg.auth.api_url = value,
-                "blockchain.solana_rpc_url" => cfg.blockchain.solana_rpc_url = value,
                 "cli.default_bucket" => cfg.cli.default_bucket = Some(value),
                 _ => {
                     anyhow::bail!(
-                        "Unknown config key: {}. Valid keys: server, gateway.http_url, gateway.grpc_url, auth.api_url, blockchain.solana_rpc_url, cli.default_bucket",
+                        "Unknown config key: {}. Valid keys: server, gateway.http_url, gateway.grpc_url, auth.api_url, cli.default_bucket",
                         key
                     );
                 }

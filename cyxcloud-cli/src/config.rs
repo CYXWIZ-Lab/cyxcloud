@@ -40,10 +40,6 @@ pub struct CyxCloudConfig {
     /// CLI-specific settings
     #[serde(default)]
     pub cli: CliSettings,
-
-    /// Blockchain settings (optional)
-    #[serde(default)]
-    pub blockchain: BlockchainConfig,
 }
 
 /// The server the user set once; the service URLs below are derived from it
@@ -123,27 +119,6 @@ pub struct CliSettings {
     /// Default bucket name for operations
     #[serde(default)]
     pub default_bucket: Option<String>,
-}
-
-/// Blockchain settings
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BlockchainConfig {
-    /// Solana RPC URL
-    #[serde(default = "default_solana_rpc_url")]
-    pub solana_rpc_url: String,
-}
-
-impl Default for BlockchainConfig {
-    fn default() -> Self {
-        Self {
-            solana_rpc_url: default_solana_rpc_url(),
-        }
-    }
-}
-
-fn default_solana_rpc_url() -> String {
-    std::env::var("CYXCLOUD_SOLANA_RPC_URL")
-        .unwrap_or_else(|_| "https://api.devnet.solana.com".to_string())
 }
 
 /// User credentials stored after login

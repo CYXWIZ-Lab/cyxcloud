@@ -1,5 +1,7 @@
 # CyxCloud: Datacenter-Grade Distributed Storage Architecture
 
+> Note: the Solana integration (the gateway and node `blockchain` build feature) was removed on 2026-11-04. Solana and on-chain parts of this document are historical.
+
 ## 1. RAID Implementation Strategy for Distributed Storage
 
 ### Software RAID vs Hardware RAID in Distributed Systems

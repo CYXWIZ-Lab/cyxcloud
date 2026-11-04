@@ -93,11 +93,6 @@ crossbeam = "0.8"
 parking_lot = "0.12"
 memmap2 = "0.9"
 
-# ===== Blockchain =====
-# Using 2.1 which has better zeroize compatibility
-solana-sdk = "2.1"
-solana-client = "2.1"
-
 # ===== Utilities =====
 uuid = { version = "1.6", features = ["v4", "v5", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
@@ -109,7 +104,7 @@ rand = "0.8"
 base64 = "0.21"
 bs58 = "0.5"
 jsonwebtoken = "9.2"
-# ed25519-dalek version must be compatible with zeroize used by libp2p
+# ed25519-dalek: node identity keys (cyxcloud-core node_identity)
 ed25519-dalek = { version = "2.1", features = ["rand_core"] }
 
 # ===== HTTP/API =====

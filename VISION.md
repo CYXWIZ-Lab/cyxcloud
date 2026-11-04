@@ -1,5 +1,7 @@
 # CyxCloud Vision & Ecosystem Integration
 
+> Note: the Solana integration (the gateway and node `blockchain` build feature) was removed on 2026-11-04. Solana and on-chain parts of this document are historical.
+
 This document outlines how CyxCloud integrates with the CyxWiz ecosystem, its use cases, and considerations for building a distributed storage platform.
 
 ## Table of Contents

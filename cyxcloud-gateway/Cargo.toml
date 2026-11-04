@@ -75,15 +75,10 @@ bs58 = { workspace = true }
 # Redis (for persistent token revocation)
 redis = { workspace = true }
 
-# Blockchain (Solana) - optional, requires OpenSSL on Windows
-solana-sdk = { workspace = true, optional = true }
-solana-client = { workspace = true, optional = true }
 sha2 = "0.10"
 
 [features]
 default = []
-# Enable blockchain integration (requires OpenSSL on Windows)
-blockchain = ["solana-sdk", "solana-client"]
 
 [dev-dependencies]
 reqwest = { workspace = true }

@@ -1,5 +1,7 @@
 # CyxCloud Node Payment System
 
+> Note: the Solana integration (the gateway and node `blockchain` build feature) was removed on 2026-11-04. Solana and on-chain parts of this document are historical.
+
 ## Overview
 
 Storage nodes are paid weekly based on their contribution to the network. Payment is pro-rated by uptime, weighted by storage capacity and reputation, with penalties (slashing) for misbehavior.

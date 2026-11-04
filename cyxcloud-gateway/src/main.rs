@@ -20,8 +20,6 @@ mod admin_api;
 mod audit;
 pub mod auth;
 mod auth_api;
-#[cfg(feature = "blockchain")]
-pub mod blockchain;
 mod client_ip;
 mod data_access;
 mod dataset_api;
@@ -42,8 +40,6 @@ mod verification;
 mod websocket;
 
 pub use auth::{AuthConfig, AuthService};
-#[cfg(feature = "blockchain")]
-pub use blockchain::{BlockchainConfig, CyxCloudBlockchainClient};
 pub use state::{AppState, GatewayConfig};
 
 use axum::{extract::DefaultBodyLimit, routing::get, Router};
@@ -113,25 +109,6 @@ struct Cli {
     /// Require client certificates for mTLS (node authentication)
     #[arg(long, default_value = "false", env = "TLS_REQUIRE_CLIENT_CERT")]
     tls_require_client_cert: bool,
-
-    /// Solana RPC URL for blockchain operations (requires 'blockchain' feature)
-    #[cfg(feature = "blockchain")]
-    #[arg(
-        long,
-        env = "SOLANA_RPC_URL",
-        default_value = "https://api.devnet.solana.com"
-    )]
-    solana_rpc_url: String,
-
-    /// Path to gateway authority keypair file (requires 'blockchain' feature)
-    #[cfg(feature = "blockchain")]
-    #[arg(long, env = "GATEWAY_KEYPAIR_PATH")]
-    keypair_path: Option<String>,
-
-    /// Enable blockchain integration (requires 'blockchain' feature)
-    #[cfg(feature = "blockchain")]
-    #[arg(long, default_value = "false")]
-    enable_blockchain: bool,
 }
 
 async fn health() -> &'static str {
@@ -176,18 +153,6 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // Create gateway configuration
-    #[cfg(feature = "blockchain")]
-    let config = GatewayConfig {
-        database_url: cli.database_url,
-        redis_url: cli.redis_url,
-        use_memory_storage: cli.memory_only,
-        database_connect_wait: GatewayConfig::default().database_connect_wait,
-        enable_blockchain: cli.enable_blockchain,
-        solana_rpc_url: Some(cli.solana_rpc_url),
-        keypair_path: cli.keypair_path,
-    };
-
-    #[cfg(not(feature = "blockchain"))]
     let config = GatewayConfig {
         database_url: cli.database_url,
         redis_url: cli.redis_url,

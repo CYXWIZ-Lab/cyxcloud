@@ -67,14 +67,8 @@ dirs = "5.0"
 # TTY detection for non-interactive mode
 atty = "0.2"
 
-# Blockchain (optional, for Solana integration)
-solana-sdk = { workspace = true, optional = true }
-solana-client = { workspace = true, optional = true }
-sha2 = { version = "0.10", optional = true }
-
 [features]
 default = []
-blockchain = ["solana-sdk", "solana-client", "sha2"]
 
 [dev-dependencies]
 tempfile = { workspace = true }

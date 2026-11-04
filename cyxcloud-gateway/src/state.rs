@@ -3,7 +3,6 @@
 //! Shared state for all gateway components.
 //! Integrates with cyxcloud-metadata for persistent storage.
 //! Uses NodeClient for chunk operations with storage nodes.
-//! Optionally integrates with Solana blockchain for payments.
 
 #![allow(unused_imports)]
 #![allow(unused_variables)]
@@ -24,8 +23,6 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::auth::{AuthConfig, AuthService, Claims};
-#[cfg(feature = "blockchain")]
-use crate::blockchain::{BlockchainConfig, CyxCloudBlockchainClient};
 use crate::node_client::{ChunkMeta, NodeClient, NodeClientConfig};
 use crate::s3_api::{ObjectInfo, ObjectMetadata, S3Error, S3Result};
 use crate::websocket::EventHub;
@@ -51,18 +48,6 @@ pub struct GatewayConfig {
     /// How long to keep retrying the metadata database at start-up before
     /// giving up. A gateway with a database URL never runs from memory.
     pub database_connect_wait: std::time::Duration,
-
-    /// Enable blockchain integration
-    #[cfg(feature = "blockchain")]
-    pub enable_blockchain: bool,
-
-    /// Solana RPC URL
-    #[cfg(feature = "blockchain")]
-    pub solana_rpc_url: Option<String>,
-
-    /// Gateway authority keypair path
-    #[cfg(feature = "blockchain")]
-    pub keypair_path: Option<String>,
 }
 
 impl Default for GatewayConfig {
@@ -72,12 +57,6 @@ impl Default for GatewayConfig {
             redis_url: None,
             use_memory_storage: true, // Default to memory for easy development
             database_connect_wait: std::time::Duration::from_secs(60),
-            #[cfg(feature = "blockchain")]
-            enable_blockchain: false,
-            #[cfg(feature = "blockchain")]
-            solana_rpc_url: None,
-            #[cfg(feature = "blockchain")]
-            keypair_path: None,
         }
     }
 }
@@ -96,12 +75,6 @@ impl GatewayConfig {
             redis_url: None,
             use_memory_storage: false,
             database_connect_wait: std::time::Duration::from_secs(60),
-            #[cfg(feature = "blockchain")]
-            enable_blockchain: false,
-            #[cfg(feature = "blockchain")]
-            solana_rpc_url: None,
-            #[cfg(feature = "blockchain")]
-            keypair_path: None,
         }
     }
 
@@ -113,26 +86,11 @@ impl GatewayConfig {
             .map(|v| v == "1" || v.to_lowercase() == "true")
             .unwrap_or(database_url.is_none());
 
-        #[cfg(feature = "blockchain")]
-        let enable_blockchain = std::env::var("ENABLE_BLOCKCHAIN")
-            .map(|v| v == "1" || v.to_lowercase() == "true")
-            .unwrap_or(false);
-        #[cfg(feature = "blockchain")]
-        let solana_rpc_url = std::env::var("SOLANA_RPC_URL").ok();
-        #[cfg(feature = "blockchain")]
-        let keypair_path = std::env::var("GATEWAY_KEYPAIR_PATH").ok();
-
         Self {
             database_url,
             redis_url,
             use_memory_storage: use_memory,
             database_connect_wait: std::time::Duration::from_secs(60),
-            #[cfg(feature = "blockchain")]
-            enable_blockchain,
-            #[cfg(feature = "blockchain")]
-            solana_rpc_url,
-            #[cfg(feature = "blockchain")]
-            keypair_path,
         }
     }
 }
@@ -150,10 +108,6 @@ pub struct AppState {
 
     /// Authentication service
     auth: Arc<AuthService>,
-
-    /// Blockchain client (optional, for Solana integration)
-    #[cfg(feature = "blockchain")]
-    blockchain: Option<Arc<CyxCloudBlockchainClient>>,
 
     /// In-memory bucket storage (for development)
     memory_buckets: RwLock<HashMap<String, BucketState>>,
@@ -210,8 +164,6 @@ impl AppState {
             metadata: None,
             node_client: Arc::new(NodeClient::new(NodeClientConfig::default())),
             auth: Arc::new(AuthService::from_env()),
-            #[cfg(feature = "blockchain")]
-            blockchain: None,
             memory_buckets: RwLock::new(HashMap::new()),
             memory_bytes_used: std::sync::atomic::AtomicUsize::new(0),
             use_memory: true,
@@ -271,24 +223,6 @@ impl AppState {
             info!("Using in-memory storage");
         }
 
-        // Initialize blockchain client if enabled (requires 'blockchain' feature)
-        #[cfg(feature = "blockchain")]
-        let blockchain = if config.enable_blockchain {
-            match Self::init_blockchain_client(&config) {
-                Ok(client) => {
-                    info!("Blockchain client initialized");
-                    Some(Arc::new(client))
-                }
-                Err(e) => {
-                    warn!(error = %e, "Failed to initialize blockchain client");
-                    None
-                }
-            }
-        } else {
-            debug!("Blockchain integration disabled");
-            None
-        };
-
         // Build auth service, optionally with Redis for persistent token revocation
         let mut auth_service = AuthService::from_env();
         if let Some(ref redis_url) = config.redis_url {
@@ -312,44 +246,10 @@ impl AppState {
             metadata,
             node_client: Arc::new(NodeClient::new(NodeClientConfig::default())),
             auth: Arc::new(auth_service),
-            #[cfg(feature = "blockchain")]
-            blockchain,
             memory_buckets: RwLock::new(HashMap::new()),
             memory_bytes_used: std::sync::atomic::AtomicUsize::new(0),
             use_memory,
         })
-    }
-
-    /// Initialize blockchain client from config
-    #[cfg(feature = "blockchain")]
-    fn init_blockchain_client(config: &GatewayConfig) -> anyhow::Result<CyxCloudBlockchainClient> {
-        use solana_sdk::signature::Keypair;
-
-        // Build blockchain config
-        let bc_config = BlockchainConfig {
-            rpc_url: config
-                .solana_rpc_url
-                .clone()
-                .unwrap_or_else(|| "https://api.devnet.solana.com".to_string()),
-            keypair_path: config.keypair_path.clone(),
-            ..Default::default()
-        };
-
-        // Load or generate keypair
-        let authority = if let Some(ref path) = config.keypair_path {
-            let keypair_json = std::fs::read_to_string(path)
-                .map_err(|e| anyhow::anyhow!("Failed to read keypair file: {}", e))?;
-            let keypair_bytes: Vec<u8> = serde_json::from_str(&keypair_json)
-                .map_err(|e| anyhow::anyhow!("Failed to parse keypair JSON: {}", e))?;
-            #[allow(deprecated)]
-            Keypair::from_bytes(&keypair_bytes)
-                .map_err(|e| anyhow::anyhow!("Failed to parse keypair: {}", e))?
-        } else {
-            warn!("No keypair path configured, using ephemeral keypair (not recommended for production)");
-            Keypair::new()
-        };
-
-        CyxCloudBlockchainClient::new(bc_config, authority)
     }
 
     /// Get metadata service reference
@@ -388,187 +288,6 @@ impl AppState {
     /// Get cloned Arc to auth service
     pub fn auth_service_arc(&self) -> Arc<AuthService> {
         self.auth.clone()
-    }
-
-    /// Get blockchain client reference
-    #[cfg(feature = "blockchain")]
-    pub fn blockchain_client(&self) -> Option<&CyxCloudBlockchainClient> {
-        self.blockchain.as_ref().map(|b| b.as_ref())
-    }
-
-    /// Get cloned Arc to blockchain client
-    #[cfg(feature = "blockchain")]
-    pub fn blockchain_client_arc(&self) -> Option<Arc<CyxCloudBlockchainClient>> {
-        self.blockchain.clone()
-    }
-
-    /// Check if blockchain integration is enabled
-    #[cfg(feature = "blockchain")]
-    pub fn has_blockchain(&self) -> bool {
-        self.blockchain.is_some()
-    }
-
-    /// Check if blockchain integration is enabled (always false when feature not enabled)
-    #[cfg(not(feature = "blockchain"))]
-    pub fn has_blockchain(&self) -> bool {
-        false
-    }
-
-    // =========================================================================
-    // BLOCKCHAIN USAGE TRACKING
-    // =========================================================================
-
-    /// Update on-chain storage usage for a user
-    ///
-    /// This should be called after successful upload or deletion operations
-    /// to sync usage data with the Solana blockchain.
-    #[cfg(feature = "blockchain")]
-    pub async fn update_blockchain_usage(
-        &self,
-        wallet_address: &str,
-        storage_delta: i64,
-        bandwidth_used: u64,
-    ) -> Result<(), String> {
-        use solana_sdk::pubkey::Pubkey;
-        use std::str::FromStr;
-
-        let blockchain = match &self.blockchain {
-            Some(bc) => bc,
-            None => {
-                debug!("Blockchain not enabled, skipping usage update");
-                return Ok(());
-            }
-        };
-
-        // Parse wallet address as Solana Pubkey
-        let user_pubkey = Pubkey::from_str(wallet_address)
-            .map_err(|e| format!("Invalid wallet address '{}': {}", wallet_address, e))?;
-
-        // Get current subscription to calculate new totals
-        let subscription = match blockchain.get_subscription(&user_pubkey).await {
-            Ok(Some(sub)) => sub,
-            Ok(None) => {
-                debug!(
-                    wallet = wallet_address,
-                    "No subscription found, skipping usage update"
-                );
-                return Ok(());
-            }
-            Err(e) => {
-                warn!(
-                    wallet = wallet_address,
-                    error = %e,
-                    "Failed to get subscription for usage update"
-                );
-                return Err(format!("Failed to get subscription: {}", e));
-            }
-        };
-
-        // Calculate new storage used (handle negative delta for deletions)
-        let new_storage_used = if storage_delta >= 0 {
-            subscription
-                .storage_used_bytes
-                .saturating_add(storage_delta as u64)
-        } else {
-            subscription
-                .storage_used_bytes
-                .saturating_sub((-storage_delta) as u64)
-        };
-
-        // Calculate new bandwidth used (always additive)
-        let new_bandwidth_used = subscription
-            .bandwidth_used_bytes
-            .saturating_add(bandwidth_used);
-
-        // Update on-chain
-        match blockchain
-            .update_usage(&user_pubkey, new_storage_used, new_bandwidth_used)
-            .await
-        {
-            Ok(sig) => {
-                info!(
-                    wallet = wallet_address,
-                    storage_used = new_storage_used,
-                    bandwidth_used = new_bandwidth_used,
-                    signature = %sig,
-                    "Blockchain usage updated"
-                );
-                Ok(())
-            }
-            Err(e) => {
-                error!(
-                    wallet = wallet_address,
-                    error = %e,
-                    "Failed to update blockchain usage"
-                );
-                Err(format!("Blockchain update failed: {}", e))
-            }
-        }
-    }
-
-    /// No-op when blockchain feature is disabled
-    #[cfg(not(feature = "blockchain"))]
-    pub async fn update_blockchain_usage(
-        &self,
-        _wallet_address: &str,
-        _storage_delta: i64,
-        _bandwidth_used: u64,
-    ) -> Result<(), String> {
-        Ok(())
-    }
-
-    /// Check if user has sufficient quota for an upload
-    #[cfg(feature = "blockchain")]
-    pub async fn check_blockchain_quota(
-        &self,
-        wallet_address: &str,
-        bytes_needed: u64,
-    ) -> Result<bool, String> {
-        use solana_sdk::pubkey::Pubkey;
-        use std::str::FromStr;
-
-        let blockchain = match &self.blockchain {
-            Some(bc) => bc,
-            None => {
-                debug!("Blockchain not enabled, quota check passed by default");
-                return Ok(true);
-            }
-        };
-
-        let user_pubkey = Pubkey::from_str(wallet_address)
-            .map_err(|e| format!("Invalid wallet address: {}", e))?;
-
-        match blockchain.has_quota(&user_pubkey, bytes_needed).await {
-            Ok(has_quota) => {
-                if !has_quota {
-                    warn!(
-                        wallet = wallet_address,
-                        bytes_needed = bytes_needed,
-                        "User does not have sufficient storage quota"
-                    );
-                }
-                Ok(has_quota)
-            }
-            Err(e) => {
-                warn!(
-                    wallet = wallet_address,
-                    error = %e,
-                    "Failed to check quota, allowing by default"
-                );
-                // Allow by default if we can't verify quota
-                Ok(true)
-            }
-        }
-    }
-
-    /// No-op when blockchain feature is disabled
-    #[cfg(not(feature = "blockchain"))]
-    pub async fn check_blockchain_quota(
-        &self,
-        _wallet_address: &str,
-        _bytes_needed: u64,
-    ) -> Result<bool, String> {
-        Ok(true)
     }
 
     // =========================================================================

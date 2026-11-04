@@ -103,7 +103,8 @@ docker compose up -d --build
 
 ## 6. Status
 
-CyxCloud is early-phase and being made production ready. The Solana payment
-pool, on-chain subscriptions and wallet sign-in are being removed: storage
-rewards and plans move to account credits, and nodes sign in with the owner's
-CyxWiz account.
+CyxCloud is early-phase and being made production ready. The Solana
+integration (payment pool, on-chain subscriptions, node staking, the gateway's
+and node's `blockchain` build feature) was removed on 2026-11-04. Wallet
+sign-in is being removed too: storage rewards and plans move to account
+credits, and nodes sign in with the owner's CyxWiz account.

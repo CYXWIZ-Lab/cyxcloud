@@ -1,5 +1,7 @@
 # CyxCloud System Flow & Architecture
 
+> Note: the Solana integration (the gateway and node `blockchain` build feature) was removed on 2026-11-04. Solana and on-chain parts of this document are historical.
+
 ## Overview
 
 CyxCloud uses a **hybrid architecture**:

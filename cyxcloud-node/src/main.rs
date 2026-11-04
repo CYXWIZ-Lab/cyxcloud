@@ -16,15 +16,6 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
-#[cfg(feature = "blockchain")]
-use cyxcloud_node::{
-    blockchain::{heartbeat::BlockchainHeartbeatService, NodeBlockchainConfig},
-    DiskType, StorageNodeBlockchainClient, StorageSpec,
-};
-
-#[cfg(feature = "blockchain")]
-use solana_sdk::signer::Signer;
-
 #[derive(Parser)]
 #[command(name = "cyxcloud-node")]
 #[command(about = "CyxCloud storage node daemon")]
@@ -342,31 +333,6 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
-    // Start blockchain service (optional, enabled via feature and config)
-    #[cfg(feature = "blockchain")]
-    {
-        if config.blockchain.enabled {
-            match initialize_blockchain_service(&config).await {
-                Ok(Some((client, heartbeat_handle))) => {
-                    info!(
-                        rpc_url = %config.blockchain.rpc_url,
-                        heartbeat = config.blockchain.heartbeat_enabled,
-                        "Blockchain service started"
-                    );
-                    // Store client and handle for later use
-                    // The heartbeat service runs in the background
-                    let _ = (client, heartbeat_handle);
-                }
-                Ok(None) => {
-                    warn!("Blockchain service enabled but no keypair configured");
-                }
-                Err(e) => {
-                    error!(error = %e, "Failed to initialize blockchain service");
-                }
-            }
-        }
-    }
-
     // Start gRPC server for chunk operations
     let grpc_addr = config.network.grpc_addr();
     info!(addr = %grpc_addr, "Starting gRPC server...");
@@ -456,133 +422,4 @@ async fn start_grpc_server(
         .await?;
 
     Ok(())
-}
-
-/// Initialize blockchain service for Solana integration
-#[cfg(feature = "blockchain")]
-async fn initialize_blockchain_service(
-    config: &NodeConfig,
-) -> anyhow::Result<
-    Option<(
-        Arc<StorageNodeBlockchainClient>,
-        tokio::task::JoinHandle<()>,
-    )>,
-> {
-    use cyxcloud_node::blockchain::heartbeat::HeartbeatOps;
-    use solana_sdk::signature::Keypair;
-    use std::path::Path;
-
-    // Check if keypair is configured
-    let keypair_path = match &config.blockchain.keypair_path {
-        Some(path) => path.clone(),
-        None => {
-            // Try default path
-            let default_path = std::env::var("HOME")
-                .or_else(|_| std::env::var("USERPROFILE"))
-                .map(|home| format!("{}/.config/solana/id.json", home))
-                .unwrap_or_default();
-
-            if !Path::new(&default_path).exists() {
-                return Ok(None);
-            }
-            default_path
-        }
-    };
-
-    // Load keypair
-    let keypair_json = std::fs::read_to_string(&keypair_path)?;
-    let keypair_bytes: Vec<u8> = serde_json::from_str(&keypair_json)?;
-    #[allow(deprecated)]
-    let owner = Keypair::from_bytes(&keypair_bytes)
-        .map_err(|e| anyhow::anyhow!("Failed to parse keypair: {}", e))?;
-
-    info!(
-        pubkey = %owner.pubkey(),
-        keypair_path = %keypair_path,
-        "Loaded blockchain keypair"
-    );
-
-    // Create blockchain config
-    let blockchain_config = NodeBlockchainConfig {
-        rpc_url: config.blockchain.rpc_url.clone(),
-        keypair_path: Some(keypair_path.clone()),
-        ..NodeBlockchainConfig::default()
-    };
-
-    // Create client
-    let client = Arc::new(StorageNodeBlockchainClient::new(blockchain_config, owner)?);
-
-    // Check if node is registered
-    let is_registered = client.is_registered(&config.node.id).await?;
-
-    if !is_registered {
-        info!(
-            node_id = %config.node.id,
-            "Node not registered on-chain, registering..."
-        );
-
-        // Create storage spec from config
-        let spec = StorageSpec::new(
-            config.storage.max_capacity_gb * 1024 * 1024 * 1024,
-            DiskType::SSD, // Default to SSD, could be configurable
-            config
-                .node
-                .region
-                .clone()
-                .unwrap_or_else(|| "unknown".to_string()),
-            1000, // Default bandwidth, could be configurable
-        );
-
-        // Register node
-        match client.register_node(&config.node.id, &spec).await {
-            Ok(sig) => {
-                info!(signature = %sig, "Node registered on blockchain");
-            }
-            Err(e) => {
-                warn!(error = %e, "Failed to register node on blockchain");
-            }
-        }
-    } else {
-        info!(node_id = %config.node.id, "Node already registered on blockchain");
-    }
-
-    // Start blockchain heartbeat service if enabled
-    let heartbeat_handle = if config.blockchain.heartbeat_enabled {
-        let node_registry_program_id = client.config().node_registry_program_id;
-        let rpc_client = Arc::new(solana_client::rpc_client::RpcClient::new(
-            config.blockchain.rpc_url.clone(),
-        ));
-
-        let heartbeat_ops = HeartbeatOps::new(rpc_client, node_registry_program_id);
-
-        let owner_keypair = {
-            let json = std::fs::read_to_string(&keypair_path)?;
-            let bytes: Vec<u8> = serde_json::from_str(&json)?;
-            #[allow(deprecated)]
-            Keypair::from_bytes(&bytes).map_err(|e| anyhow::anyhow!("Keypair error: {}", e))?
-        };
-
-        let heartbeat_service = BlockchainHeartbeatService::new(
-            heartbeat_ops,
-            Arc::new(owner_keypair),
-            config.node.id.clone(),
-            config.blockchain.heartbeat_interval_secs,
-        );
-
-        let handle = tokio::spawn(async move {
-            heartbeat_service.run().await;
-        });
-
-        info!(
-            interval_secs = config.blockchain.heartbeat_interval_secs,
-            "Blockchain heartbeat service started"
-        );
-
-        handle
-    } else {
-        // Return a dummy handle that completes immediately
-        tokio::spawn(async {})
-    };
-
-    Ok(Some((client, heartbeat_handle)))
 }

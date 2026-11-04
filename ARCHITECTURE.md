@@ -1,5 +1,7 @@
 # CyxCloud Technical Architecture
 
+> Note: the Solana integration (the gateway and node `blockchain` build feature) was removed on 2026-11-04. Solana and on-chain parts of this document are historical.
+
 This document provides a complete technical specification of the CyxCloud distributed storage platform, including all APIs, protocols, data flows, and component designs.
 
 ## Table of Contents

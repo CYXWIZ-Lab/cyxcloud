@@ -1,5 +1,7 @@
 # CyxCloud Use Cases Guide
 
+> Note: the Solana integration (the gateway and node `blockchain` build feature) was removed on 2026-11-04. Solana and on-chain parts of this document are historical.
+
 This guide covers real-world use cases for CyxCloud distributed storage. Whether you're storing files, running ML workloads, or earning tokens as a node operator, this document shows you how.
 
 ## Table of Contents

@@ -46,10 +46,6 @@ pub struct NodeConfig {
     /// CyxWiz API connection (for auth, machines, wallets)
     #[serde(default)]
     pub cyxwiz_api: CyxWizApiSettings,
-
-    /// Blockchain (Solana) integration for staking and rewards
-    #[serde(default)]
-    pub blockchain: BlockchainSettings,
 }
 
 impl Default for NodeConfig {
@@ -61,7 +57,6 @@ impl Default for NodeConfig {
             metrics: MetricsSettings::default(),
             central: CentralServerSettings::default(),
             cyxwiz_api: CyxWizApiSettings::default(),
-            blockchain: BlockchainSettings::default(),
         }
     }
 }
@@ -97,9 +92,6 @@ impl NodeConfig {
         }
         if self.cyxwiz_api.base_url == default_cyxwiz_api_url() {
             self.cyxwiz_api.base_url = shared.auth.api_url;
-        }
-        if self.blockchain.rpc_url == default_solana_rpc() {
-            self.blockchain.rpc_url = shared.blockchain.solana_rpc_url;
         }
 
         self
@@ -610,8 +602,6 @@ pub struct SharedConfig {
     pub gateway: SharedGatewayConfig,
     #[serde(default)]
     pub auth: SharedAuthConfig,
-    #[serde(default)]
-    pub blockchain: SharedBlockchainConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -650,20 +640,6 @@ impl Default for SharedAuthConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SharedBlockchainConfig {
-    #[serde(default = "default_solana_rpc")]
-    pub solana_rpc_url: String,
-}
-
-impl Default for SharedBlockchainConfig {
-    fn default() -> Self {
-        Self {
-            solana_rpc_url: default_solana_rpc(),
-        }
-    }
-}
-
 /// Load shared configuration from ~/.cyxcloud/config.toml
 pub fn load_shared_config() -> SharedConfig {
     let path = shared_config_path();
@@ -681,55 +657,6 @@ pub fn load_shared_config() -> SharedConfig {
         }
     }
     SharedConfig::default()
-}
-
-/// Blockchain (Solana) configuration for staking and rewards
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BlockchainSettings {
-    /// Enable blockchain integration
-    #[serde(default)]
-    pub enabled: bool,
-
-    /// Solana RPC URL
-    #[serde(default = "default_solana_rpc")]
-    pub rpc_url: String,
-
-    /// Path to node owner keypair (Solana JSON format)
-    #[serde(default)]
-    pub keypair_path: Option<String>,
-
-    /// Enable automatic heartbeat to blockchain
-    #[serde(default)]
-    pub heartbeat_enabled: bool,
-
-    /// Heartbeat interval in seconds
-    #[serde(default = "default_blockchain_heartbeat_interval")]
-    pub heartbeat_interval_secs: u64,
-
-    /// Enable automatic reward claiming
-    #[serde(default)]
-    pub auto_claim_rewards: bool,
-}
-
-impl Default for BlockchainSettings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            rpc_url: default_solana_rpc(),
-            keypair_path: None,
-            heartbeat_enabled: false,
-            heartbeat_interval_secs: 60,
-            auto_claim_rewards: false,
-        }
-    }
-}
-
-fn default_solana_rpc() -> String {
-    "https://api.devnet.solana.com".to_string()
-}
-
-fn default_blockchain_heartbeat_interval() -> u64 {
-    60
 }
 
 #[cfg(test)]
@@ -770,6 +697,32 @@ mod tests {
         assert_eq!(config.node.region, Some("us-west".to_string()));
         assert_eq!(config.storage.max_capacity_gb, 100);
         assert_eq!(config.network.grpc_port, 9000);
+    }
+
+    #[test]
+    fn old_config_with_blockchain_table_still_loads() {
+        // Configs written before the Solana integration was removed keep a
+        // [blockchain] table (and the shared file a [blockchain] RPC URL).
+        let toml = r#"
+            [node]
+            name = "old-node"
+
+            [blockchain]
+            enabled = true
+            rpc_url = "https://api.devnet.solana.com"
+            heartbeat_enabled = true
+        "#;
+        let config: NodeConfig = toml::from_str(toml).unwrap();
+        assert_eq!(config.node.name, "old-node");
+
+        let shared: SharedConfig = toml::from_str(
+            r#"
+            [blockchain]
+            solana_rpc_url = "https://api.devnet.solana.com"
+        "#,
+        )
+        .unwrap();
+        assert_eq!(shared.auth.api_url, default_cyxwiz_api_url());
     }
 
     #[test]

@@ -83,8 +83,6 @@ services:
       DATABASE_URL: postgres://cyxcloud:${POSTGRES_PASSWORD}@postgres:5432/cyxcloud
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET}
-      # Blockchain (optional - devnet)
-      SOLANA_RPC_URL: https://api.devnet.solana.com
     command: ["--http-addr", "0.0.0.0:8080", "--grpc-addr", "0.0.0.0:50052", "--cors-permissive"]
     volumes:
       - gateway-data:/data

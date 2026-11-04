@@ -1,5 +1,7 @@
 # CyxCloud Communication Architecture
 
+> Note: the Solana integration (the gateway and node `blockchain` build feature) was removed on 2026-11-04. Solana and on-chain parts of this document are historical.
+
 This document describes the complete communication flow between all CyxCloud components:
 - Storage Nodes (miners)
 - Gateway (central coordinator)

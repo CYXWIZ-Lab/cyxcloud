@@ -1,5 +1,7 @@
 # CyxCloud Blockchain Architecture - Implementation Plan
 
+> Note: the Solana integration (the gateway and node `blockchain` build feature) was removed on 2026-11-04. Solana and on-chain parts of this document are historical.
+
 ## Overview
 
 Integrate Solana blockchain with CYXWIZ tokens into CyxCloud distributed storage system. This enables on-chain payments where the Gateway coordinates but never custodies funds.

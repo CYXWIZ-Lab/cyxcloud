@@ -7,7 +7,6 @@
 //! - Command execution (repair, delete, transfer chunks)
 //! - P2P network announcements
 //! - CyxWiz API integration for machine management
-//! - Blockchain integration for Solana (optional)
 
 #![allow(clippy::field_reassign_with_default)]
 #![allow(clippy::derivable_impls)]
@@ -25,19 +24,11 @@ pub mod symbols;
 pub mod training_executor;
 pub mod verification;
 
-#[cfg(feature = "blockchain")]
-pub mod blockchain;
-
 pub use config::{
-    BlockchainSettings, CentralServerSettings, ConfigError, CyxWizApiSettings, MetricsSettings,
-    NetworkSettings, NodeConfig, NodeIdentity, StorageSettings,
+    CentralServerSettings, ConfigError, CyxWizApiSettings, MetricsSettings, NetworkSettings,
+    NodeConfig, NodeIdentity, StorageSettings,
 };
 
-#[cfg(feature = "blockchain")]
-pub use blockchain::{
-    constants as blockchain_constants, DiskType, NodeBlockchainConfig, ProofChallenge,
-    ProofOfStorage, StorageNodeBlockchainClient, StorageNodeStatus, StorageSpec,
-};
 pub use command_executor::{CommandBatchSummary, CommandExecutor, CommandResult, CommandType};
 pub use cyxwiz_api_client::{
     CpuInfo, CyxWizApiClient, DetectedHardware, GpuInfo, LoginResponse, SavedCredentials, UserInfo,

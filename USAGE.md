@@ -5,7 +5,7 @@ This guide explains how to build, run, and use the CyxCloud distributed storage 
 ## Table of Contents
 
 1. [Network Architecture](#network-architecture)
-2. [Blockchain Integration](#blockchain-integration)
+2. [Payments](#payments)
 3. [Prerequisites](#prerequisites)
 4. [Building from Source](#building-from-source)
 5. [Running Components](#running-components)
@@ -549,118 +549,9 @@ Orphaned chunks are cleaned up periodically:
 
 ---
 
-## Blockchain Integration
+## Payments
 
-CyxCloud uses Solana blockchain for on-chain payments, subscriptions, and node staking. All programs are deployed and operational.
-
-### Deployed Solana Programs (Devnet)
-
-| Program | Address | Purpose |
-|---------|---------|---------|
-| **StorageSubscription** | `HZhWDJVkkUuHrgqkNb9bYxiCfqtnv8cnus9UQt843Fro` | User storage plans (Free/Starter/Pro/Enterprise) |
-| **StorageNodeRegistry** | `AQPP8YaiGazv9Mh4bnsVcGiMgTKbarZeCcQsh4jmpi4Z` | Node registration, staking, proof-of-storage |
-| **StoragePaymentPool** | `4wFUJ1SVpVDEpYTobgkLSnwY2yXr4LKAMdWcG3sAe3sX` | Weekly reward distribution (85/10/5 split) |
-| **CYXWIZ Token** | `Az2YZ1hmY5iQ6Gi9rjTPRpNMvcyeYVt1PqjyRSRoNNYi` | SPL Token (9 decimals) |
-
-### Payment Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Payment Flow                                  │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  User                     Gateway                  Blockchain   │
-│  ┌────┐                  ┌────────┐              ┌──────────┐  │
-│  │Pay │──CYXWIZ tokens──▶│ Pool   │──deposit────▶│PaymentPool│  │
-│  │    │                  │        │              │           │  │
-│  └────┘                  └────────┘              └──────────┘  │
-│                                                       │         │
-│                          Weekly Epoch                 │         │
-│                               │                       │         │
-│                               ▼                       ▼         │
-│                    ┌─────────────────────────────────────┐     │
-│                    │         Distribution                 │     │
-│                    │  85% → Storage Nodes                │     │
-│                    │  10% → Platform Treasury            │     │
-│                    │   5% → Community Fund               │     │
-│                    └─────────────────────────────────────┘     │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Node Staking
-
-Storage nodes must stake CYXWIZ tokens to participate:
-
-| Requirement | Value |
-|-------------|-------|
-| **Minimum Stake** | 500 CYXWIZ |
-| **Unstake Lockup** | 7 days |
-| **Heartbeat Timeout** | 5 minutes |
-
-**Slashing Penalties:**
-| Violation | Stake Penalty |
-|-----------|---------------|
-| Failed Proofs (3 consecutive) | 15% |
-| Extended Downtime | 5% |
-| Data Loss | 10% |
-| Corrupted Data | 50% |
-
-### Proof-of-Storage
-
-Nodes must prove they still hold data through challenge-response:
-
-```
-Gateway                    Storage Node                 Blockchain
-   │                            │                            │
-   │── 1. Challenge ───────────▶│                            │
-   │   (chunk_id, nonce)        │                            │
-   │                            │                            │
-   │                            │── 2. Compute proof ────────│
-   │                            │   hash(chunk_data + nonce) │
-   │                            │                            │
-   │                            │── 3. submit_proof() ──────▶│
-   │                            │                            │
-   │◀── 4. Verify ──────────────│◀── result ─────────────────│
-```
-
-### Subscription Tiers
-
-| Plan | Storage | Monthly Price | Yearly (20% off) |
-|------|---------|---------------|------------------|
-| **Free** | 5 GB | 0 CYXWIZ | - |
-| **Starter** | 100 GB | 10 CYXWIZ | 96 CYXWIZ |
-| **Pro** | 1 TB | 50 CYXWIZ | 480 CYXWIZ |
-| **Enterprise** | 10 TB | 200 CYXWIZ | 1,920 CYXWIZ |
-
-### Blockchain Client Integration
-
-**Gateway** (`cyxcloud-gateway/src/blockchain/`):
-- Manages subscriptions and usage tracking
-- Updates node metrics on-chain
-- Initiates weekly payment epochs
-- Slashes misbehaving nodes
-
-**Storage Node** (`cyxcloud-node/src/blockchain/`):
-- Registers and stakes tokens
-- Sends heartbeats with proof-of-storage
-- Claims weekly rewards
-
-### Environment Variables for Blockchain
-
-```bash
-# RPC endpoint
-export SOLANA_RPC_URL="https://api.devnet.solana.com"
-
-# Keypair for signing transactions
-export GATEWAY_KEYPAIR_PATH="~/.config/solana/id.json"
-
-# Program IDs (auto-configured for devnet)
-export SUBSCRIPTION_PROGRAM_ID="HZhWDJVkkUuHrgqkNb9bYxiCfqtnv8cnus9UQt843Fro"
-export NODE_REGISTRY_PROGRAM_ID="AQPP8YaiGazv9Mh4bnsVcGiMgTKbarZeCcQsh4jmpi4Z"
-export PAYMENT_POOL_PROGRAM_ID="4wFUJ1SVpVDEpYTobgkLSnwY2yXr4LKAMdWcG3sAe3sX"
-export CYXWIZ_TOKEN_MINT="Az2YZ1hmY5iQ6Gi9rjTPRpNMvcyeYVt1PqjyRSRoNNYi"
-```
+The Solana integration (on-chain subscriptions, node staking, CYXWIZ token rewards) was removed on 2026-11-04. The gateway still records node uptime, slashing events and per-epoch reward shares in its database; storage plans and node rewards move to account credits.
 
 ---
 
@@ -900,8 +791,6 @@ grpc_url = "http://localhost:50052"
 [auth]
 api_url = "http://localhost:3002"
 
-[blockchain]
-solana_rpc_url = "https://api.devnet.solana.com"
 ```
 
 Create this file using the CLI:
@@ -1050,7 +939,7 @@ Gateway calculates:
 ├── uptime_percentage
 
 Earnings = base_rate × storage + bandwidth_rate × bandwidth
-Payment: platform_wallet → operator_wallet (via Solana)
+Payment: platform_wallet → operator_wallet
 
 Example: 100 GB × 24 hours × 0.001 CYXWIZ = 2.4 CYXWIZ/day
 ```
@@ -1125,18 +1014,9 @@ Why quarantine? Prevents "flapping" nodes from getting data:
   • Quarantine proves the node is stable before trusting it
 ```
 
-#### Staking Requirements (Blockchain-Enabled)
-
-When blockchain integration is enabled, node operators must stake tokens:
-
-| Parameter | Value |
-|-----------|-------|
-| **Minimum Stake** | 500 CYXWIZ |
-| **Unstake Lockup** | 7 days (cooldown to withdraw) |
-
 #### Slashing Penalties
 
-If blockchain is enabled, violations result in stake penalties:
+Violations are recorded as slashing events. The on-chain stake penalties were removed with the Solana integration on 2026-11-04; the percentages are what each event records:
 
 | Violation | Penalty | Description |
 |-----------|---------|-------------|
@@ -1198,7 +1078,6 @@ Example: 100 GB × $0.02/GB/month × 7/30 × 0.85 = $0.40/week
 │  HEARTBEAT           │  Every 30 seconds                            │
 │  GRACE PERIOD        │  5 minutes (before marked offline)           │
 │  RECOVERY TIME       │  5 minutes quarantine after coming back      │
-│  STAKE REQUIRED      │  500 CYXWIZ minimum (if blockchain enabled)  │
 │  EARNINGS            │  85% of storage fees, paid weekly            │
 │  WORST PENALTY       │  50% stake slash for corrupted data          │
 ├─────────────────────────────────────────────────────────────────────┤
@@ -1260,8 +1139,6 @@ api_url = "http://localhost:3002"
 [cli]
 default_bucket = "my-default-bucket"
 
-[blockchain]
-solana_rpc_url = "https://api.devnet.solana.com"
 ```
 
 **View current config:**
@@ -1908,8 +1785,6 @@ api_url = "http://localhost:3002"      # CyxWiz API (authentication)
 [cli]
 default_bucket = ""                    # Optional default bucket
 
-[blockchain]
-solana_rpc_url = "https://api.devnet.solana.com"
 ```
 
 **Modify settings:**
@@ -1920,7 +1795,6 @@ cyxcloud config show
 # Set individual values
 cyxcloud config set gateway.http_url "https://api.cyxcloud.io"
 cyxcloud config set auth.api_url "https://auth.cyxwiz.io"
-cyxcloud config set blockchain.solana_rpc_url "https://api.mainnet-beta.solana.com"
 ```
 
 ### Credentials Storage
@@ -1940,7 +1814,6 @@ Environment variables can override config file settings.
 | `CYXCLOUD_GATEWAY_HTTP_URL` | config file | Gateway HTTP API URL |
 | `CYXCLOUD_GATEWAY_GRPC_URL` | config file | Gateway gRPC URL |
 | `CYXCLOUD_AUTH_API_URL` | config file | CyxWiz API URL |
-| `CYXCLOUD_SOLANA_RPC_URL` | config file | Solana RPC URL |
 | `RUST_LOG` | `info` | Log level (trace/debug/info/warn/error) |
 | `GATEWAY_HOST` | `0.0.0.0` | Gateway bind address |
 | `GATEWAY_PORT` | `8080` | Gateway HTTP port |
@@ -2100,5 +1973,4 @@ export GRPC_MAX_CONCURRENT_STREAMS=100
 ## Next Steps
 
 - [Phase 5 Integration](../docs/cyxwiz_integration.md) - Connect to CyxWiz Engine
-- [Blockchain Integration](../docs/blockchain.md) - Solana payment setup
 - [Production Deployment](../docs/production.md) - Kubernetes manifests
