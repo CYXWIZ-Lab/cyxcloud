@@ -367,11 +367,6 @@ impl AppState {
         &self.node_client
     }
 
-    /// Get cloned Arc to node client (for async operations)
-    pub fn node_client_arc(&self) -> Arc<NodeClient> {
-        self.node_client.clone()
-    }
-
     /// Get authentication service reference
     /// The CyxCloud user id for a validated token, with its users row in
     /// place (buckets reference users). Without a metadata store the id is

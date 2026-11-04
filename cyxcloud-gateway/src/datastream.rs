@@ -313,7 +313,7 @@ impl DataStreamService for DataStreamServiceImpl {
         let (tx, rx) = mpsc::channel(req.prefetch_batches.max(1) as usize);
 
         let metadata_arc = self.state.metadata_service_arc();
-        let node_client = self.state.node_client_arc();
+        let state = self.state.clone();
         let batch_size = req.batch_size.max(1) as usize;
         let shuffle = req.shuffle;
         let seed = req.seed;
@@ -346,37 +346,56 @@ impl DataStreamService for DataStreamServiceImpl {
                 let file = &files[file_idx];
                 let is_last_file = i == file_indices.len() - 1;
 
-                // Get the actual file data
-                if let Some(ref meta) = metadata_arc {
-                    // Get file from storage
-                    if let Ok(Some(_stored_file)) = meta.database().get_file(file.file_id).await {
-                        // Get chunks for this file
-                        if let Ok(chunks) = meta.get_file_chunks(file.file_id).await {
-                            // Retrieve and assemble file data
-                            let mut file_data = Vec::new();
-                            for chunk in &chunks {
-                                if let Ok(addrs) = meta.get_chunk_locations(&chunk.chunk_id).await {
-                                    if !addrs.is_empty() {
-                                        if let Ok(data) = node_client
-                                            .get_chunk_from_any(&addrs, &chunk.chunk_id)
-                                            .await
-                                        {
-                                            file_data.extend_from_slice(&data);
-                                        }
-                                    }
-                                }
-                            }
-
-                            if !file_data.is_empty() {
-                                // Compute hash for verification
-                                let item_hash = blake3::hash(&file_data).as_bytes().to_vec();
-
-                                current_batch_items.push(file_data);
-                                current_batch_hashes.push(item_hash);
-                            }
-                        }
+                // The file's bytes, erasure-decoded as S3 GET and StreamData
+                // read them (shards hold data and parity, not the file) and
+                // checked against the stored hash. A file that cannot be
+                // rebuilt ends the stream with the reason, never a skip.
+                let Some(ref meta) = metadata_arc else {
+                    let _ = tx
+                        .send(Err(Status::unavailable("Metadata service not configured")))
+                        .await;
+                    return;
+                };
+                let stored = match meta.database().get_file(file.file_id).await {
+                    Ok(Some(stored)) => stored,
+                    Ok(None) => {
+                        let _ = tx
+                            .send(Err(Status::data_loss(format!(
+                                "file {} of the dataset is gone",
+                                file.file_id
+                            ))))
+                            .await;
+                        return;
                     }
+                    Err(e) => {
+                        let _ = tx
+                            .send(Err(Status::internal(format!("Database error: {}", e))))
+                            .await;
+                        return;
+                    }
+                };
+                let data = match state.read_file(&stored).await {
+                    Ok(data) => data,
+                    Err(e) => {
+                        let text = match e {
+                            crate::s3_api::S3Error::Internal(text) => text,
+                            other => other.to_string(),
+                        };
+                        let _ = tx.send(Err(Status::data_loss(text))).await;
+                        return;
+                    }
+                };
+                if blake3::hash(&data).as_bytes() != stored.content_hash.as_slice() {
+                    let _ = tx
+                        .send(Err(Status::data_loss(format!(
+                            "file {} does not match its stored content hash",
+                            file.file_id
+                        ))))
+                        .await;
+                    return;
                 }
+                current_batch_hashes.push(blake3::hash(&data).as_bytes().to_vec());
+                current_batch_items.push(data.to_vec());
 
                 // Send batch when full or at end
                 let should_send = current_batch_items.len() >= batch_size || is_last_file;
