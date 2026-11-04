@@ -2,7 +2,6 @@
 //!
 //! Runs a storage node that:
 //! - Stores chunk data locally using RocksDB
-//! - Participates in P2P network for peer discovery
 //! - Serves chunk requests via gRPC
 //! - Reports health metrics via Prometheus endpoint
 

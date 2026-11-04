@@ -7,7 +7,6 @@ use cyxcloud_core::chunk::ChunkId;
 use cyxcloud_network::{
     grpc_client::{get_from_any_node, store_to_multiple_nodes, ChunkClient},
     grpc_server::{start_server, GrpcServerConfig},
-    NetworkConfig, NetworkManager,
 };
 use cyxcloud_storage::{RocksDbBackend, StorageConfig};
 use std::net::SocketAddr;
@@ -181,32 +180,6 @@ async fn test_partial_replication_failure() {
     for node in &nodes {
         node.stop();
     }
-}
-
-#[tokio::test]
-async fn test_network_manager_creation() {
-    let temp_dir = TempDir::new().unwrap();
-    let storage_config = StorageConfig::new(temp_dir.path());
-    let storage = Arc::new(RocksDbBackend::open(storage_config).unwrap());
-
-    let network_config = NetworkConfig::new("test-manager-node");
-    let manager = NetworkManager::new(network_config, storage);
-
-    assert_eq!(manager.node_id(), "test-manager-node");
-    assert_eq!(manager.connection_count(), 0);
-}
-
-#[tokio::test]
-async fn test_network_manager_with_custom_address() {
-    let temp_dir = TempDir::new().unwrap();
-    let storage_config = StorageConfig::new(temp_dir.path());
-    let storage = Arc::new(RocksDbBackend::open(storage_config).unwrap());
-
-    let addr: SocketAddr = "127.0.0.1:60000".parse().unwrap();
-    let network_config = NetworkConfig::new("custom-addr-node").with_grpc_addr(addr);
-    let manager = NetworkManager::new(network_config, storage);
-
-    assert_eq!(manager.node_id(), "custom-addr-node");
 }
 
 #[tokio::test]

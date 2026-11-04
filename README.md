@@ -19,7 +19,7 @@ CyxCloud distributes data across multiple storage nodes using Reed-Solomon erasu
 │  └─────┘                      │                      │    ...      │    │
 │                               │                      └──────┬──────┘    │
 │                               ▼                             │           │
-│                    ┌──────────────────┐              libp2p DHT         │
+│                    ┌──────────────────┐              node registry      │
 │                    │   PostgreSQL     │                     │           │
 │                    │   + Redis        │◀────────────────────┘           │
 │                    └──────────────────┘                                 │
@@ -66,7 +66,7 @@ Pre-built binaries for all platforms:
 | Component | Description | Port |
 |-----------|-------------|------|
 | **cyxcloud-gateway** | S3 API, request routing, blockchain integration | 8080 (HTTP), 50051 (gRPC) |
-| **cyxcloud-node** | Storage node, chunk storage, P2P networking | 50052 (gRPC), 4001 (libp2p) |
+| **cyxcloud-node** | Storage node, chunk storage | 50052 (gRPC) |
 | **cyxcloud-cli** | Command-line client for file operations | - |
 
 ## Blockchain Integration (Fully Implemented)
@@ -153,7 +153,6 @@ cargo run --release -p cyxcloud-gateway
 export NODE_ID="my-node-001"
 export STORAGE_PATH="/data/cyxcloud"
 export GRPC_PORT=50052
-export LIBP2P_PORT=4001
 
 # Run node
 cargo run --release -p cyxcloud-node
@@ -231,9 +230,9 @@ docker compose down
 | PostgreSQL | 5432 | Metadata storage |
 | Redis | 6379 | Caching |
 | Gateway | 8080, 50052 | S3 API + gRPC |
-| Node 1 | 50061, 4001, 9091 | Storage + P2P + Metrics |
-| Node 2 | 50062, 4002, 9092 | Storage + P2P + Metrics |
-| Node 3 | 50063, 4003, 9093 | Storage + P2P + Metrics |
+| Node 1 | 50061, 9091 | Storage + Metrics |
+| Node 2 | 50062, 9092 | Storage + Metrics |
+| Node 3 | 50063, 9093 | Storage + Metrics |
 
 ### Option 2: Run from Pre-built Binaries
 
@@ -351,12 +350,10 @@ systemctl status cyxcloud-node
 # If using ufw
 sudo ufw allow 8080/tcp    # S3 API
 sudo ufw allow 50052/tcp   # gRPC
-sudo ufw allow 4001/tcp    # libp2p
 
 # If using firewalld
 sudo firewall-cmd --permanent --add-port=8080/tcp
 sudo firewall-cmd --permanent --add-port=50052/tcp
-sudo firewall-cmd --permanent --add-port=4001/tcp
 sudo firewall-cmd --reload
 ```
 
@@ -489,7 +486,6 @@ ws://gateway:8080/ws - Real-time events (upload progress, node status)
 | `NODE_ID` | - | Unique node identifier |
 | `STORAGE_PATH` | ./data | Local storage directory |
 | `GRPC_PORT` | 50052 | gRPC port |
-| `LIBP2P_PORT` | 4001 | P2P discovery port |
 | `GATEWAY_URL` | - | Gateway gRPC address |
 
 ## Development

@@ -12,7 +12,6 @@
 #   docker run -d \
 #     --name cyxcloud-node \
 #     -p 50051:50051 \
-#     -p 4001:4001 \
 #     -p 9090:9090 \
 #     -v cyxcloud-data:/data \
 #     -e NODE_ID=my-node-1 \
@@ -28,7 +27,6 @@
 #   docker run -d \
 #     --name cyxcloud-node \
 #     -p 50051:50051 \
-#     -p 4001:4001 \
 #     -p 9090:9090 \
 #     -v cyxcloud-data:/data \
 #     -v ./config.toml:/data/config/config.toml \
@@ -37,7 +35,6 @@
 #
 # Ports:
 #   50051 - gRPC (chunk transfer)
-#   4001  - libp2p (peer discovery)
 #   9090  - Prometheus metrics & health check
 #
 # Volumes:
@@ -113,15 +110,13 @@ ENV RUST_LOG=info
 ENV NODE_ID=node-1
 ENV GRPC_HOST=0.0.0.0
 ENV GRPC_PORT=50051
-ENV LIBP2P_PORT=4001
 ENV STORAGE_PATH=/data/chunks
 ENV CONFIG_PATH=/data/config
 ENV STORAGE_CAPACITY_GB=100
 
 # Expose ports
 # 50051: gRPC for chunk transfer
-# 4001: libp2p for peer discovery
-EXPOSE 50051 4001
+EXPOSE 50051
 
 # Health check via gRPC health endpoint
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \

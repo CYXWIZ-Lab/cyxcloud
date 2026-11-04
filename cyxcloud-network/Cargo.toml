@@ -3,16 +3,12 @@ name = "cyxcloud-network"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "P2P networking layer for CyxCloud using libp2p and gRPC"
+description = "Node-to-node chunk transfer for CyxCloud over gRPC"
 
 [dependencies]
 cyxcloud-core = { path = "../cyxcloud-core" }
 cyxcloud-storage = { path = "../cyxcloud-storage" }
 cyxcloud-protocol = { path = "../cyxcloud-protocol" }
-
-# Networking - libp2p for discovery
-libp2p = { workspace = true }
-quinn = { workspace = true }
 
 # gRPC for data transfer
 tonic = { workspace = true }

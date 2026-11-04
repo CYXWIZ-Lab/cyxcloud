@@ -43,14 +43,11 @@ compaction_threads = 4
 # Network Settings
 # ============================================================
 [network]
-# Address to bind for gRPC and P2P servers
+# Address to bind for the gRPC server
 bind_address = "0.0.0.0"
 
 # gRPC server port for chunk operations
 grpc_port = 50051
-
-# libp2p P2P port for peer discovery
-p2p_port = 4001
 
 # Public address for other nodes to connect (optional, auto-detected)
 # public_address = "203.0.113.10"
@@ -64,12 +61,6 @@ enable_tls = false
 # TLS certificate and key paths (required if enable_tls = true)
 # tls_cert = "/path/to/cert.pem"
 # tls_key = "/path/to/key.pem"
-
-# Bootstrap peers for P2P discovery
-# bootstrap_peers = [
-#     "/dns4/bootstrap1.cyxcloud.io/tcp/4001/p2p/12D3KooW...",
-#     "/dns4/bootstrap2.cyxcloud.io/tcp/4001/p2p/12D3KooW...",
-# ]
 
 # ============================================================
 # Metrics and Monitoring

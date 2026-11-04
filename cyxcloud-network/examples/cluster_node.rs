@@ -3,7 +3,7 @@
 //! Usage:
 //!   cargo run --example cluster_node -- --port 50051 --data-dir ./data1 --node-id node1
 //!
-//! This starts a gRPC ChunkService server and optionally connects to discovery peers.
+//! This starts a gRPC ChunkService server.
 
 use bytes::Bytes;
 use clap::Parser;

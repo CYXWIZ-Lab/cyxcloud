@@ -31,20 +31,6 @@ rust-version = "1.82"
 reed-solomon-erasure = { version = "6.0", features = ["simd-accel"] }
 
 # ===== Networking =====
-libp2p = { version = "0.53", features = [
-    "quic",
-    "kad",
-    "gossipsub",
-    "identify",
-    "ping",
-    "noise",
-    "yamux",
-    "dns",
-    "tcp",
-    "macros",
-    "tokio",
-] }
-quinn = "0.10"
 # One TLS provider everywhere: ring (rustls, tokio-rustls, tonic).
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }

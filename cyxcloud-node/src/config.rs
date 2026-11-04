@@ -141,7 +141,6 @@ impl NodeConfig {
         }
         if let Some(p) = port {
             self.network.grpc_port = p;
-            self.network.p2p_port = p + 1;
         }
         self
     }
@@ -348,10 +347,6 @@ pub struct NetworkSettings {
     #[serde(default = "default_grpc_port")]
     pub grpc_port: u16,
 
-    /// libp2p P2P port
-    #[serde(default = "default_p2p_port")]
-    pub p2p_port: u16,
-
     /// Public address for other nodes to connect (optional, auto-detected)
     #[serde(default)]
     pub public_address: Option<String>,
@@ -383,10 +378,6 @@ pub struct NetworkSettings {
     /// Client key path (for connecting to gateway with mTLS)
     #[serde(default)]
     pub tls_client_key: Option<PathBuf>,
-
-    /// Bootstrap peers for P2P discovery
-    #[serde(default)]
-    pub bootstrap_peers: Vec<String>,
 }
 
 impl Default for NetworkSettings {
@@ -394,7 +385,6 @@ impl Default for NetworkSettings {
         Self {
             bind_address: default_bind_addr(),
             grpc_port: default_grpc_port(),
-            p2p_port: default_p2p_port(),
             public_address: None,
             max_message_size_mb: 64,
             enable_tls: false,
@@ -403,7 +393,6 @@ impl Default for NetworkSettings {
             tls_ca_cert: None,
             tls_client_cert: None,
             tls_client_key: None,
-            bootstrap_peers: Vec::new(),
         }
     }
 }
@@ -415,13 +404,6 @@ impl NetworkSettings {
             .parse()
             .unwrap_or_else(|_| "0.0.0.0:50051".parse().unwrap())
     }
-
-    /// Get the P2P listen address
-    pub fn p2p_addr(&self) -> SocketAddr {
-        format!("{}:{}", self.bind_address, self.p2p_port)
-            .parse()
-            .unwrap_or_else(|_| "0.0.0.0:4001".parse().unwrap())
-    }
 }
 
 fn default_bind_addr() -> String {
@@ -430,10 +412,6 @@ fn default_bind_addr() -> String {
 
 fn default_grpc_port() -> u16 {
     50051
-}
-
-fn default_p2p_port() -> u16 {
-    4001
 }
 
 fn default_max_message_size() -> usize {
@@ -810,7 +788,6 @@ mod tests {
 
         assert_eq!(config.storage.data_dir, PathBuf::from("/custom/path"));
         assert_eq!(config.network.grpc_port, 8000);
-        assert_eq!(config.network.p2p_port, 8001);
     }
 
     #[test]

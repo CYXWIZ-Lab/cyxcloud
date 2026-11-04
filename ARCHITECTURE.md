@@ -84,7 +84,7 @@ CyxCloud is a distributed storage platform that integrates with the CyxWiz ecosy
 2. **Distributed Storage**: Data is distributed across multiple nodes using erasure coding
 3. **Token-Based Payments**: CYXWIZ tokens for storage fees and miner rewards
 4. **Private by Default**: User data is encrypted and private unless explicitly shared
-5. **Hybrid Networking**: gRPC for data transfer, libp2p for peer discovery
+5. **Hybrid Networking**: gRPC for data transfer, libp2p for peer discovery. *(2026-11-04: the libp2p discovery was never wired in and has been removed; nodes find each other through the gateway's registry. The libp2p parts of this design document are history. Current state: docs/usage/architecture.md.)*
 
 ---
 

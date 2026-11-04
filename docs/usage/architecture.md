@@ -11,7 +11,7 @@ Written from the code on branch `distributed-training`, 2026-10-22.
 | `cyxcloud-metadata` | The gateway's memory: Postgres tables for users, buckets, files, chunks, chunk locations, nodes, datasets, dataset files, access tokens, shares; a Redis cache; the placement engine; health and quorum helpers. A library inside the gateway. | Postgres and Redis (containers in local dev). |
 | `cyxcloud-node` | A member of the distributed storage. Holds shards on its disk (RocksDB through `cyxcloud-storage`), serves store-shard and get-shard over gRPC to the gateway, registers and heartbeats with the gateway, signs in to the CyxWiz API as a machine. | Every storage machine. |
 | `cyxcloud-rebalancer` | A daemon inside the gateway process. Every 60 s (`REBALANCER_SCAN_INTERVAL_SECS`) it scans for shards with fewer copies than the target (`REBALANCER_REPLICATION_FACTOR`, default 1: files are erasure-coded, so one copy per shard is complete and a lost shard is rebuilt from parity on read) and plans moves or repairs between nodes. What it cannot repair it reports once per scan. | With the gateway. |
-| `cyxcloud-network` | Node-to-node layer: gRPC for shard transfer, libp2p Kademlia for peer discovery. Not on the gateway's data path today. | Library in the node. |
+| `cyxcloud-network` | Node-to-node shard transfer over gRPC (`ChunkClient`, the node's ChunkService server). Nodes find each other through the gateway's node registry; there is no peer-to-peer discovery (the unused libp2p code was removed 2026-11-04). | Library in the node and the rebalancer. |
 | `cyxcloud-protocol` | The `.proto` files: `node.proto` (register, heartbeat, store, get), `data.proto` (StreamData: one whole file, see `stream_file.md`), `datastream.proto` (datasets, tokens, upload, delete, see `datasets_from_the_engine.md`). | Shared; the Engine compiles verbatim copies. |
 | `cyxcloud-cli` | A client: login, dataset list, config. | Any machine. |
 
@@ -113,7 +113,6 @@ compression = true
 [network]
 bind_address = "0.0.0.0"
 grpc_port = 50051          # shard traffic from the gateway
-p2p_port = 4001            # libp2p discovery
 public_address = "192.168.1.180"   # what the gateway dials back
 [metrics]
 enabled = false
@@ -144,7 +143,7 @@ yet.
 ```
 docker build -f Dockerfile.node -t cyxcloud-node .
 docker run -d --name cyxcloud-node \
-  -p 50051:50051 -p 4001:4001 \
+  -p 50051:50051 \
   -v /path/on/the/disk:/data \
   -e NODE_NAME=hp-linux -e STORAGE_CAPACITY_GB=700 \
   -e CENTRAL_SERVER_ADDR=http://192.168.1.116:50060 \
@@ -161,7 +160,7 @@ node services (`cyxcloud-node1`, `cyxcloud-node2`) for a local cluster;
 
 - The gateway is the single manager and the single data path: every byte goes through it twice.
 - Fewer than four nodes cannot survive a node loss (see above); the rebalancer cannot repair what it has no spare node for.
-- Node-to-node transfer and peer discovery exist as code; nothing routes through them.
+- Node-to-node transfer exists as code (`cyxcloud-network`); the gateway does not route through it.
 - Node registration is JWT-free by design (it is signed and limited per address instead); a host with many addresses can still register many nodes, and nothing ties a node to an account yet.
 - The rebalancer's 60 s scans and the metadata pool (10 connections) can starve requests.
 

@@ -113,7 +113,6 @@ services:
     container_name: cyxcloud-node1
     ports:
       - "50061:50051"   # gRPC
-      - "4001:4001"     # libp2p
       - "9091:9090"     # Metrics
     environment:
       RUST_LOG: info,cyxcloud_node=debug
@@ -122,12 +121,10 @@ services:
       PUBLIC_ADDRESS: node1
       GRPC_HOST: 0.0.0.0
       GRPC_PORT: 50051
-      LIBP2P_PORT: 4001
       METRICS_PORT: 9090
       STORAGE_PATH: /data/storage
       STORAGE_CAPACITY_GB: 100
       CENTRAL_SERVER_ADDR: http://gateway:50052
-      BOOTSTRAP_PEERS: ""
       # CyxWiz API for authentication
       CYXWIZ_API_URL: http://cyxwiz-api:3002
       CYXWIZ_EMAIL: test@example.com
@@ -151,7 +148,6 @@ services:
     container_name: cyxcloud-node2
     ports:
       - "50062:50051"
-      - "4002:4001"
       - "9092:9090"
     environment:
       RUST_LOG: info,cyxcloud_node=debug
@@ -160,12 +156,10 @@ services:
       PUBLIC_ADDRESS: node2
       GRPC_HOST: 0.0.0.0
       GRPC_PORT: 50051
-      LIBP2P_PORT: 4001
       METRICS_PORT: 9090
       STORAGE_PATH: /data/storage
       STORAGE_CAPACITY_GB: 100
       CENTRAL_SERVER_ADDR: http://gateway:50052
-      BOOTSTRAP_PEERS: /dns4/node1/tcp/4001
       # CyxWiz API for authentication
       CYXWIZ_API_URL: http://cyxwiz-api:3002
       CYXWIZ_EMAIL: test@example.com
@@ -191,7 +185,6 @@ services:
     container_name: cyxcloud-node3
     ports:
       - "50063:50051"
-      - "4003:4001"
       - "9093:9090"
     environment:
       RUST_LOG: info,cyxcloud_node=debug
@@ -200,12 +193,10 @@ services:
       PUBLIC_ADDRESS: node3
       GRPC_HOST: 0.0.0.0
       GRPC_PORT: 50051
-      LIBP2P_PORT: 4001
       METRICS_PORT: 9090
       STORAGE_PATH: /data/storage
       STORAGE_CAPACITY_GB: 100
       CENTRAL_SERVER_ADDR: http://gateway:50052
-      BOOTSTRAP_PEERS: /dns4/node1/tcp/4001,/dns4/node2/tcp/4001
       # CyxWiz API for authentication
       CYXWIZ_API_URL: http://cyxwiz-api:3002
       CYXWIZ_EMAIL: test@example.com

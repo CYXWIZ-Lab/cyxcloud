@@ -7,7 +7,7 @@ gateway keeps metadata in Postgres and caches in Redis.
 | Part | Crate / binary | Default ports |
 |---|---|---|
 | Gateway | `cyxcloud-gateway` | HTTP `0.0.0.0:8180`, gRPC `0.0.0.0:50052` |
-| Storage node | `cyxcloud-node` | gRPC 50051, libp2p 4001, metrics 9090 |
+| Storage node | `cyxcloud-node` | gRPC 50051, metrics 9090 |
 | CLI | `cyxcloud-cli` (binary `cyxcloud`) | - |
 | Rebalancer | embedded in the gateway | - |
 
