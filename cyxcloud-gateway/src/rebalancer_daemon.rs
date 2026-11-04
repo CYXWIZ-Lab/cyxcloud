@@ -29,11 +29,18 @@ pub struct RebalancerDaemonConfig {
     pub dry_run: bool,
 }
 
+/// Copies of each shard the rebalancer keeps. Files are erasure-coded: each
+/// shard is stored once and a lost one is rebuilt from the parity shards on
+/// read, so one copy is the target. More (REBALANCER_REPLICATION_FACTOR) is
+/// extra durability that needs that many nodes; asking for 3 with fewer
+/// nodes made every scan plan repairs it could never run (TOFIX171).
+pub const SHARD_COPIES: usize = 1;
+
 impl Default for RebalancerDaemonConfig {
     fn default() -> Self {
         Self {
             scan_interval: Duration::from_secs(60),
-            replication_factor: 3,
+            replication_factor: SHARD_COPIES,
             repair_parallelism: 4,
             rate_limit_gb: 10,
             dry_run: false,
@@ -54,7 +61,7 @@ impl RebalancerDaemonConfig {
             replication_factor: std::env::var("REBALANCER_REPLICATION_FACTOR")
                 .ok()
                 .and_then(|v| v.parse().ok())
-                .unwrap_or(3),
+                .unwrap_or(SHARD_COPIES),
             repair_parallelism: std::env::var("REBALANCER_PARALLELISM")
                 .ok()
                 .and_then(|v| v.parse().ok())

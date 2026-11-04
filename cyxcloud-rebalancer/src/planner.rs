@@ -201,6 +201,7 @@ impl Planner {
 
         // Reset pending load tracking
         self.pending_load.clear();
+        let mut unplanned: usize = 0;
 
         for issue in sorted_issues {
             // Check plan limits
@@ -228,13 +229,23 @@ impl Planner {
                     plan.add_task(task);
                 }
                 Err(e) => {
-                    warn!(
+                    unplanned += 1;
+                    debug!(
                         chunk_id = hex::encode(&issue.chunk_id),
                         error = %e,
                         "Could not plan repair for chunk"
                     );
                 }
             }
+        }
+        // Said once per plan (per chunk at debug): a store with too few
+        // nodes for the target would otherwise warn for every shard on
+        // every scan.
+        if unplanned > 0 {
+            warn!(
+                unplanned,
+                "Chunks the rebalancer cannot repair now (no spare node or no source copy)"
+            );
         }
 
         // Estimate duration based on rate limits

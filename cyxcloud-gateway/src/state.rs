@@ -994,7 +994,7 @@ impl AppState {
                                 shard_index: shard.index as i32,
                                 is_parity: shard.is_parity,
                                 size_bytes: shard.data.len() as i32,
-                                replication_factor: 3, // Target replicas for rebalancer
+                                replication_factor: crate::rebalancer_daemon::SHARD_COPIES as i32,
                             };
                             if let Err(e) = meta.register_chunk(create_chunk).await {
                                 // a shard nobody can find is not stored
@@ -1052,7 +1052,7 @@ impl AppState {
                                         shard_index: shard.index as i32,
                                         is_parity: shard.is_parity,
                                         size_bytes: shard.data.len() as i32,
-                                        replication_factor: 3, // Target replicas for rebalancer
+                                        replication_factor: crate::rebalancer_daemon::SHARD_COPIES as i32,
                                     };
                                     if let Err(e) = meta.register_chunk(create_chunk).await {
                                         warn!(error = %e, "Failed to register chunk in database (backup node)");
