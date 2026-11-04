@@ -45,8 +45,8 @@ struct Cli {
     #[arg(long, default_value = "10")]
     rate_limit_gb: u64,
 
-    /// Target replication factor
-    #[arg(long, default_value = "3")]
+    /// Copies of each shard (1: shards are erasure-coded, parity covers a loss)
+    #[arg(long, default_value = "1")]
     replication_factor: usize,
 
     /// PostgreSQL database URL (enables production mode)
@@ -341,6 +341,7 @@ impl detector::MetadataClient for MockMetadataClient {
     async fn get_under_replicated_chunks(
         &self,
         _limit: usize,
+        _target: usize,
     ) -> Result<Vec<detector::ChunkInfo>, Box<dyn std::error::Error + Send + Sync>> {
         // Return empty for now
         Ok(Vec::new())

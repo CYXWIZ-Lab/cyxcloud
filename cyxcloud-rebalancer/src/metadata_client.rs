@@ -30,11 +30,12 @@ impl MetadataClient for PostgresMetadataClient {
     async fn get_under_replicated_chunks(
         &self,
         limit: usize,
+        target: usize,
     ) -> Result<Vec<ChunkInfo>, Box<dyn std::error::Error + Send + Sync>> {
         // Query under-replicated chunks from the database
         let chunks = self
             .db
-            .get_under_replicated_chunks(limit as i64)
+            .get_under_replicated_chunks(limit as i64, target as i32)
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
 

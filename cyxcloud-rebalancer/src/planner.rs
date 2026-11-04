@@ -148,7 +148,7 @@ pub struct PlannerConfig {
 impl Default for PlannerConfig {
     fn default() -> Self {
         Self {
-            replication_factor: 3,
+            replication_factor: 1, // erasure-coded shards: one copy each
             max_tasks: 100,
             max_bytes: 10 * 1024 * 1024 * 1024, // 10 GB per plan
             prefer_local: true,
@@ -242,9 +242,13 @@ impl Planner {
         // nodes for the target would otherwise warn for every shard on
         // every scan.
         if unplanned > 0 {
+            // A shard with no live copy (its node went dark) cannot be copied;
+            // reads still rebuild it from the other shards, but nothing writes
+            // a rebuilt shard back yet (TOFIX171).
             warn!(
                 unplanned,
-                "Chunks the rebalancer cannot repair now (no spare node or no source copy)"
+                "Shards the rebalancer cannot repair: no live copy to copy from, or no spare node \
+                 (lost shards are rebuilt from parity on read; parity repair is not implemented)"
             );
         }
 
@@ -485,7 +489,7 @@ mod tests {
     #[test]
     fn test_planner_config_default() {
         let config = PlannerConfig::default();
-        assert_eq!(config.replication_factor, 3);
+        assert_eq!(config.replication_factor, 1);
         assert_eq!(config.max_tasks, 100);
         assert!(config.prefer_local);
     }

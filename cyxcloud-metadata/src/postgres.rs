@@ -814,20 +814,42 @@ impl Database {
         Ok(result)
     }
 
-    /// Get under-replicated chunks
+    /// Shards with fewer live copies than `target`: a copy counts while it is
+    /// stored on a node that is up (online, recovering or in maintenance), so
+    /// a node that went dark leaves its shards listed (the stored
+    /// current_replicas count only ever goes up and cannot say that).
     pub async fn get_under_replicated_chunks(
         &self,
         limit: i64,
+        target: i32,
     ) -> Result<Vec<ChunkReplicationStatus>> {
         let result = sqlx::query_as::<_, ChunkReplicationStatus>(
             r#"
-            SELECT * FROM chunk_replication_status
-            WHERE replicas_needed > 0
-            ORDER BY replicas_needed DESC
+            SELECT c.chunk_id,
+                   MIN(c.file_id::text)::uuid AS file_id,
+                   $2::int AS replication_factor,
+                   COALESCE(live.copies, 0)::int AS current_replicas,
+                   ($2 - COALESCE(live.copies, 0))::int AS replicas_needed,
+                   CASE WHEN COALESCE(live.copies, 0) = 0 THEN 'missing'
+                        ELSE 'under_replicated' END AS health_status
+            FROM chunks c
+            LEFT JOIN (
+                SELECT cl.chunk_id, COUNT(DISTINCT cl.node_id) AS copies
+                FROM chunk_locations cl
+                JOIN nodes n ON n.id = cl.node_id
+                WHERE cl.status IN ('stored', 'verified')
+                  AND n.status IN ('online', 'recovering', 'maintenance')
+                GROUP BY cl.chunk_id
+            ) live ON live.chunk_id = c.chunk_id
+            WHERE c.status != 'pending'
+            GROUP BY c.chunk_id, live.copies
+            HAVING COALESCE(live.copies, 0) < $2
+            ORDER BY COALESCE(live.copies, 0) ASC
             LIMIT $1
             "#,
         )
         .bind(limit)
+        .bind(target)
         .fetch_all(&self.pool)
         .await?;
         Ok(result)

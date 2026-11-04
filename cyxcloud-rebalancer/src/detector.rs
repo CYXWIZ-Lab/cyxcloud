@@ -100,7 +100,7 @@ pub struct DetectorConfig {
 impl Default for DetectorConfig {
     fn default() -> Self {
         Self {
-            replication_factor: 3,
+            replication_factor: 1, // erasure-coded shards: one copy each
             batch_size: 1000,
             scan_interval: Duration::from_secs(60),
             verify_integrity: false, // Expensive, enable in production
@@ -213,7 +213,7 @@ impl Detector {
 
         // Step 2: Get under-replicated chunks from metadata
         let under_rep_chunks = metadata_client
-            .get_under_replicated_chunks(self.config.batch_size)
+            .get_under_replicated_chunks(self.config.batch_size, self.config.replication_factor)
             .await
             .map_err(|e| DetectorError::Metadata(e.to_string()))?;
 
@@ -343,9 +343,11 @@ impl Detector {
 /// Metadata client trait for testing
 #[async_trait::async_trait]
 pub trait MetadataClient: Send + Sync {
+    /// Shards with fewer live copies than `target`.
     async fn get_under_replicated_chunks(
         &self,
         limit: usize,
+        target: usize,
     ) -> std::result::Result<Vec<ChunkInfo>, Box<dyn std::error::Error + Send + Sync>>;
 
     async fn get_orphaned_chunks(
@@ -454,7 +456,7 @@ mod tests {
     #[test]
     fn test_detector_config_default() {
         let config = DetectorConfig::default();
-        assert_eq!(config.replication_factor, 3);
+        assert_eq!(config.replication_factor, 1);
         assert_eq!(config.batch_size, 1000);
         assert!(!config.verify_integrity);
     }

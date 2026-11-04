@@ -490,12 +490,13 @@ impl MetadataService {
             .await?)
     }
 
-    /// Get under-replicated chunks
+    /// Shards with fewer live copies than `target` (see Database)
     pub async fn get_under_replicated_chunks(
         &self,
         limit: i64,
+        target: i32,
     ) -> Result<Vec<ChunkReplicationStatus>> {
-        let chunks = self.db.get_under_replicated_chunks(limit).await?;
+        let chunks = self.db.get_under_replicated_chunks(limit, target).await?;
         Ok(chunks)
     }
 

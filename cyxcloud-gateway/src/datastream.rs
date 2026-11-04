@@ -346,9 +346,9 @@ impl DataStreamService for DataStreamServiceImpl {
                 let file = &files[file_idx];
                 let is_last_file = i == file_indices.len() - 1;
 
-                // The file's bytes, erasure-decoded as S3 GET and StreamData
-                // read them (shards hold data and parity, not the file) and
-                // checked against the stored hash. A file that cannot be
+                // The file's bytes, erasure-decoded and checked against the
+                // stored hash by read_file, as S3 GET and StreamData read them
+                // (shards hold data and parity, not the file). A file that cannot be
                 // rebuilt ends the stream with the reason, never a skip.
                 let Some(ref meta) = metadata_arc else {
                     let _ = tx
@@ -385,25 +385,18 @@ impl DataStreamService for DataStreamServiceImpl {
                         return;
                     }
                 };
-                if blake3::hash(&data).as_bytes() != stored.content_hash.as_slice() {
-                    let _ = tx
-                        .send(Err(Status::data_loss(format!(
-                            "file {} does not match its stored content hash",
-                            file.file_id
-                        ))))
-                        .await;
-                    return;
-                }
+                // read_file has checked the bytes against the stored hash.
                 current_batch_hashes.push(blake3::hash(&data).as_bytes().to_vec());
                 current_batch_items.push(data.to_vec());
 
                 // Send batch when full or at end
                 let should_send = current_batch_items.len() >= batch_size || is_last_file;
                 if should_send && !current_batch_items.is_empty() {
-                    // Compute batch hash
+                    // The batch hash covers the items' bytes in order, as the
+                    // clients check it (cyxcloud-node verify_batch).
                     let mut hasher = blake3::Hasher::new();
-                    for hash in &current_batch_hashes {
-                        hasher.update(hash);
+                    for item in &current_batch_items {
+                        hasher.update(item);
                     }
                     let batch_hash = hasher.finalize().as_bytes().to_vec();
 

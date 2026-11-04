@@ -275,7 +275,18 @@ impl DataStreamClient {
 
         // Spawn background task to receive and verify batches
         tokio::spawn(async move {
-            while let Ok(Some(batch)) = stream.message().await {
+            loop {
+                // A stream error (DATA_LOSS: a file could not be rebuilt) is
+                // the reader's to see, not an end of the dataset.
+                let batch = match stream.message().await {
+                    Ok(Some(batch)) => batch,
+                    Ok(None) => break,
+                    Err(status) => {
+                        error!(status = %status, "Batch stream ended with an error");
+                        let _ = tx.send(Err(DataStreamError::from(status))).await;
+                        break;
+                    }
+                };
                 match verify_batch(&batch, max_trust_level) {
                     Ok(verified) => {
                         if tx.send(Ok(verified)).await.is_err() {
