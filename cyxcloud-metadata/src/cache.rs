@@ -128,7 +128,7 @@ impl Cache {
             pipe.set_ex(*key, json, ttl.as_secs());
         }
 
-        pipe.query_async::<_, ()>(&mut conn).await?;
+        pipe.query_async::<()>(&mut conn).await?;
         debug!(count = items.len(), "Cache mset");
         Ok(())
     }
