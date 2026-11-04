@@ -221,7 +221,7 @@ async fn run_scan_cycle(
         Err(cyxcloud_rebalancer::planner::PlannerError::NoTargetNodes) => {
             warn!(
                 shards = issues.len(),
-                "No storage node is online: shards have no live copy and nothing can be repaired                  (reads fail until a node returns)"
+                "No storage node is online: shards have no live copy and nothing can be repaired (reads fail until a node returns)"
             );
             return Ok(());
         }
