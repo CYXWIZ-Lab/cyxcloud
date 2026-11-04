@@ -39,7 +39,7 @@ cyxcloud login --server https://cloud.cyxwiz.ai   # with TLS
 | Route | gRPC by package, HTTP by path prefix; the longest prefix wins. Nothing else is served (HTTP 404 / gRPC UNIMPLEMENTED). |
 | Sign-in | a request with `Authorization: Bearer` must carry a valid, unexpired token signed with `JWT_SECRET` or `ADMIN_JWT_SECRET`; otherwise HTTP 401 / gRPC UNAUTHENTICATED, and the service never sees it. A request without a token goes through and the service decides (sign-in, node registration and dataset streams need none). The services check tokens again. |
 | Size | an HTTP body above `http_body_bytes` (default 16 MB) is refused (413) or cut. gRPC streams (dataset uploads) are left to the services. |
-| Forward | gRPC over HTTP/2, HTTP over HTTP/1.1; streams and trailers pass through; `X-Forwarded-For`, `-Proto` and `-Host` are added, connection headers dropped. A service that does not answer: 502 / gRPC UNAVAILABLE. |
+| Forward | gRPC over HTTP/2, HTTP over HTTP/1.1; streams and trailers pass through; `X-Forwarded-For` gets the client address appended (the gateway, with `TRUSTED_PROXY_HOPS=1`, takes that last entry for its own limits), `-Proto` and `-Host` are added, connection headers dropped. A service that does not answer: 502 / gRPC UNAVAILABLE. |
 | Audit | one log line per request (target `audit`): client address, method, path, route, status, account (the token's `sub`), milliseconds. Never a token. |
 
 `/s3/` reaches the gateway's S3 API (the website's Drive), with its own body

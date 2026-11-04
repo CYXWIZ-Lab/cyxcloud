@@ -22,6 +22,7 @@ pub mod auth;
 mod auth_api;
 #[cfg(feature = "blockchain")]
 pub mod blockchain;
+mod client_ip;
 mod data_access;
 mod dataset_api;
 mod datastream;
@@ -392,7 +393,7 @@ async fn main() -> anyhow::Result<()> {
         info!("HTTPS server listening on {} (TLS enabled)", http_addr);
 
         axum_server::bind_rustls(http_addr, rustls_config)
-            .serve(app.into_make_service())
+            .serve(app.into_make_service_with_connect_info::<std::net::SocketAddr>())
             .await?;
     } else {
         // Plain HTTP mode
@@ -411,9 +412,13 @@ async fn main() -> anyhow::Result<()> {
         info!("HTTP server listening on {} (TLS disabled)", http_addr);
         warn!("Running without TLS - use --tls-cert and --tls-key for production");
 
-        axum::serve(http_listener, app)
-            .with_graceful_shutdown(shutdown_signal())
-            .await?;
+        // The peer address feeds the per-client limits (client_ip.rs)
+        axum::serve(
+            http_listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
     }
 
     info!("Gateway shutdown complete");

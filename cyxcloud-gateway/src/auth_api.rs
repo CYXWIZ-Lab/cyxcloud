@@ -93,14 +93,13 @@ async fn check_rate_limit(
     Ok(())
 }
 
-/// Extract client IP from headers (X-Forwarded-For) or connection
-fn extract_client_ip(headers: &HeaderMap) -> String {
-    headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.split(',').next())
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|| "unknown".to_string())
+/// The client's address for the limits: the connection's peer, or what our
+/// own proxy put in X-Forwarded-For (never the client's own entries).
+fn extract_client_ip(headers: &HeaderMap, peer: Option<ConnectInfo<SocketAddr>>) -> String {
+    crate::client_ip::client_key(
+        headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()),
+        peer.map(|ConnectInfo(addr)| addr.ip()),
+    )
 }
 
 /// API error response
@@ -140,8 +139,9 @@ pub fn routes() -> Router<Arc<AppState>> {
 async fn get_challenge(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
+    peer: Option<ConnectInfo<SocketAddr>>,
 ) -> Result<Json<ChallengeResponse>, (StatusCode, Json<ApiError>)> {
-    let client_ip = extract_client_ip(&headers);
+    let client_ip = extract_client_ip(&headers, peer);
     check_rate_limit(&state, &RATE_LIMIT_CHALLENGE, &client_ip).await?;
 
     let auth = state.auth_service();
@@ -161,9 +161,10 @@ async fn get_challenge(
 async fn wallet_login(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
+    peer: Option<ConnectInfo<SocketAddr>>,
     Json(req): Json<WalletLoginRequest>,
 ) -> Result<Json<AuthResponse>, (StatusCode, Json<ApiError>)> {
-    let client_ip = extract_client_ip(&headers);
+    let client_ip = extract_client_ip(&headers, peer);
     check_rate_limit(&state, &RATE_LIMIT_LOGIN, &client_ip).await?;
 
     let auth = state.auth_service();
@@ -260,9 +261,10 @@ pub struct RefreshTokenRequest {
 async fn refresh_token(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
+    peer: Option<ConnectInfo<SocketAddr>>,
     Json(req): Json<RefreshTokenRequest>,
 ) -> Result<Json<AuthResponse>, (StatusCode, Json<ApiError>)> {
-    let client_ip = extract_client_ip(&headers);
+    let client_ip = extract_client_ip(&headers, peer);
     check_rate_limit(&state, &RATE_LIMIT_REFRESH, &client_ip).await?;
 
     let auth = state.auth_service();
@@ -311,9 +313,10 @@ async fn refresh_token(
 async fn create_api_key(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
+    peer: Option<ConnectInfo<SocketAddr>>,
     Json(req): Json<CreateApiKeyRequest>,
 ) -> Result<Json<ApiKeyResponse>, (StatusCode, Json<ApiError>)> {
-    let client_ip = extract_client_ip(&headers);
+    let client_ip = extract_client_ip(&headers, peer);
     check_rate_limit(&state, &RATE_LIMIT_API_KEY, &client_ip).await?;
 
     let auth = state.auth_service();

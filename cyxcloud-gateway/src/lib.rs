@@ -15,6 +15,7 @@ pub mod auth;
 mod auth_api;
 #[cfg(feature = "blockchain")]
 pub mod blockchain;
+mod client_ip;
 mod data_access;
 mod dataset_api;
 mod datastream;
