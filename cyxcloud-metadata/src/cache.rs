@@ -20,6 +20,9 @@ pub enum CacheError {
 
     #[error("Cache miss")]
     Miss,
+
+    #[error("Redis is configured but not connected")]
+    Unavailable,
 }
 
 pub type Result<T> = std::result::Result<T, CacheError>;
@@ -378,17 +381,34 @@ impl CacheStats {
 /// Optional cache wrapper - allows graceful degradation if Redis is unavailable
 pub struct OptionalCache {
     cache: Option<Cache>,
+    /// Redis was configured but could not be reached: counters that guard
+    /// something (see try_check_rate_limit) must not pretend to be empty.
+    unavailable: bool,
 }
 
 impl OptionalCache {
     /// Create with cache
     pub fn new(cache: Cache) -> Self {
-        Self { cache: Some(cache) }
+        Self {
+            cache: Some(cache),
+            unavailable: false,
+        }
     }
 
-    /// Create without cache (no-op)
+    /// Create without cache (no-op): none was configured
     pub fn none() -> Self {
-        Self { cache: None }
+        Self {
+            cache: None,
+            unavailable: false,
+        }
+    }
+
+    /// A cache was configured but could not be reached
+    pub fn unavailable() -> Self {
+        Self {
+            cache: None,
+            unavailable: true,
+        }
     }
 
     /// Try to get from cache, return None on miss or error
@@ -423,7 +443,9 @@ impl OptionalCache {
     }
 
     /// Check rate limit. Returns Ok(true) if allowed, Ok(false) if rate limited.
-    /// Returns Ok(true) if cache unavailable (fail-open).
+    /// With no cache configured there is nothing to count against: Ok(true).
+    /// With one configured but unreachable: Err(Unavailable), and the caller
+    /// decides whether that fails open or closed.
     pub async fn try_check_rate_limit(
         &self,
         key: &str,
@@ -435,6 +457,7 @@ impl OptionalCache {
                 let (allowed, _count) = cache.check_rate_limit(key, max_requests, window).await?;
                 Ok(allowed)
             }
+            None if self.unavailable => Err(CacheError::Unavailable),
             None => Ok(true),
         }
     }
@@ -459,6 +482,21 @@ mod tests {
             commands: 100,
         };
         assert!((stats.hit_ratio() - 0.8).abs() < 0.001);
+    }
+
+    #[tokio::test]
+    async fn a_limit_without_redis_allows_one_unreachable_cannot_say() {
+        let w = Duration::from_secs(60);
+        assert!(OptionalCache::none()
+            .try_check_rate_limit("k", 1, w)
+            .await
+            .unwrap());
+        assert!(matches!(
+            OptionalCache::unavailable()
+                .try_check_rate_limit("k", 1, w)
+                .await,
+            Err(CacheError::Unavailable)
+        ));
     }
 
     #[test]

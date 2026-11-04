@@ -192,7 +192,7 @@ impl MetadataService {
                 }
                 Err(e) => {
                     warn!(error = %e, "Failed to connect to Redis, running without cache");
-                    OptionalCache::none()
+                    OptionalCache::unavailable()
                 }
             }
         } else {
