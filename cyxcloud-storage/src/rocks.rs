@@ -40,13 +40,13 @@ fn read_u64(bytes: &[u8]) -> Option<u64> {
 }
 
 fn add_saturating(counter: &AtomicU64, v: u64) {
-    let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |x| {
+    let _ = counter.try_update(Ordering::Relaxed, Ordering::Relaxed, |x| {
         Some(x.saturating_add(v))
     });
 }
 
 fn sub_saturating(counter: &AtomicU64, v: u64) {
-    let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |x| {
+    let _ = counter.try_update(Ordering::Relaxed, Ordering::Relaxed, |x| {
         Some(x.saturating_sub(v))
     });
 }

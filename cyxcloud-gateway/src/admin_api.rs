@@ -204,7 +204,7 @@ async fn all_nodes(state: &AppState) -> Result<Vec<AdminNode>, Response> {
             }
         })
         .collect();
-    nodes.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    nodes.sort_by_key(|n| std::cmp::Reverse(n.created_at));
     Ok(nodes)
 }
 
