@@ -214,9 +214,19 @@ async fn run_scan_cycle(
         .map_err(|e| anyhow::anyhow!("Failed to get nodes: {}", e))?;
 
     let issues: Vec<_> = all_issues.into_iter().cloned().collect();
-    let plan = planner
-        .create_plan(&issues, &nodes)
-        .map_err(|e| anyhow::anyhow!("Planning failed: {}", e))?;
+    let plan = match planner.create_plan(&issues, &nodes) {
+        Ok(plan) => plan,
+        // Every storage node is down: nothing to repair onto. A state to
+        // report once per scan, not a failure of the scan.
+        Err(cyxcloud_rebalancer::planner::PlannerError::NoTargetNodes) => {
+            warn!(
+                shards = issues.len(),
+                "No storage node is online: shards have no live copy and nothing can be repaired                  (reads fail until a node returns)"
+            );
+            return Ok(());
+        }
+        Err(e) => return Err(anyhow::anyhow!("Planning failed: {}", e)),
+    };
 
     info!(summary = %plan.summary(), "Repair plan created");
 
