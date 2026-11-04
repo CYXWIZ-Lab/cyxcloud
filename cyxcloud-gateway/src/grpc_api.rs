@@ -6,6 +6,7 @@
 
 use crate::node_client::NodeClient;
 use crate::node_registration::check_registration;
+use crate::rate_limit::{self, RateLimit};
 use crate::AppState;
 use cyxcloud_metadata::{CreateNode, MetadataService, Node};
 use cyxcloud_protocol::data::{
@@ -30,6 +31,13 @@ use uuid::Uuid;
 // =============================================================================
 // NODE SERVICE IMPLEMENTATION
 // =============================================================================
+
+/// New node ids one client address may register per hour.
+const RATE_LIMIT_NEW_NODE: RateLimit = RateLimit {
+    key: "node:register:new",
+    max_requests: 5,
+    window_secs: 3600,
+};
 
 /// gRPC Node Service implementation
 pub struct NodeServiceImpl {
@@ -88,6 +96,13 @@ impl NodeService for NodeServiceImpl {
         &self,
         request: Request<RegisterNodeRequest>,
     ) -> Result<Response<RegisterNodeResponse>, Status> {
+        let client = crate::client_ip::client_key(
+            request
+                .metadata()
+                .get("x-forwarded-for")
+                .and_then(|v| v.to_str().ok()),
+            request.remote_addr().map(|a| a.ip()),
+        );
         let req = request.into_inner();
         let node_id = req.node_id.clone();
         tracing::Span::current().record("node_id", &node_id);
@@ -113,6 +128,28 @@ impl NodeService for NodeServiceImpl {
         .inspect_err(|status| {
             warn!(node_id = %node_id, reason = %status.message(), "Node registration refused");
         })?;
+
+        // A new node id only takes a fresh key, so new ids are limited per
+        // client address (one host cannot fill the node table). A node on
+        // file re-registering (a restart) is not counted. Fails closed: new
+        // nodes wait while the count cannot be read.
+        if existing.is_none() {
+            match rate_limit::allowed(&self.state, &RATE_LIMIT_NEW_NODE, &client).await {
+                Some(true) => {}
+                Some(false) => {
+                    warn!(node_id = %node_id, client = %client, "New node registrations over the limit");
+                    return Err(Status::resource_exhausted(
+                        "too many new nodes registered from this address: try again later",
+                    ));
+                }
+                None => {
+                    warn!(node_id = %node_id, "Registration limit unreadable: new node refused");
+                    return Err(Status::unavailable(
+                        "the gateway cannot check its registration limit right now: try again shortly",
+                    ));
+                }
+            }
+        }
 
         // Extract node info from request
         let info = req

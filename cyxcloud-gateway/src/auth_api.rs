@@ -11,6 +11,7 @@ use crate::auth::{
     AuthError, AuthResponse, AuthService, AuthUser, ChallengeResponse, Claims, CreateApiKeyRequest,
     TokenType, WalletLoginRequest, API_KEY_MAX_DAYS, API_KEY_PERMISSIONS,
 };
+use crate::rate_limit::{self, RateLimit};
 use crate::AppState;
 use axum::{
     body::Bytes,
@@ -24,16 +25,6 @@ use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
-
-/// Rate limit configuration for auth endpoints
-struct RateLimit {
-    /// Key prefix for the rate limit
-    key: &'static str,
-    /// Maximum requests allowed in the window
-    max_requests: u64,
-    /// Window duration in seconds
-    window_secs: u64,
-}
 
 const RATE_LIMIT_CHALLENGE: RateLimit = RateLimit {
     key: "auth:challenge",
@@ -59,36 +50,19 @@ const RATE_LIMIT_API_KEY: RateLimit = RateLimit {
     window_secs: 60,
 };
 
-/// Check rate limit using Redis cache via MetadataService. Fails open if unavailable.
+/// Check an auth rate limit. Fails open when the count cannot be read: a
+/// Redis outage must not lock everyone out of signing in.
 async fn check_rate_limit(
     state: &AppState,
     limit: &RateLimit,
     client_ip: &str,
 ) -> Result<(), (StatusCode, Json<ApiError>)> {
-    if let Some(meta) = state.metadata_service() {
-        let key = format!("{}:{}", limit.key, client_ip);
-        match meta
-            .check_rate_limit(&key, limit.max_requests, limit.window_secs)
-            .await
-        {
-            Ok(allowed) => {
-                if !allowed {
-                    warn!(
-                        key = %limit.key,
-                        ip = %client_ip,
-                        "Rate limit exceeded"
-                    );
-                    return Err((
-                        StatusCode::TOO_MANY_REQUESTS,
-                        Json(ApiError::new("Rate limit exceeded", "RATE_LIMITED")),
-                    ));
-                }
-            }
-            Err(e) => {
-                // Fail open: if Redis is down, allow the request
-                debug!(error = %e, "Rate limit check failed (fail-open)");
-            }
-        }
+    if rate_limit::allowed(state, limit, client_ip).await == Some(false) {
+        warn!(key = %limit.key, ip = %client_ip, "Rate limit exceeded");
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(ApiError::new("Rate limit exceeded", "RATE_LIMITED")),
+        ));
     }
     Ok(())
 }

@@ -42,6 +42,7 @@ What a node loss costs: a chunk needs any 10 of its 14 shards. With one node eve
 ## Who a node is, and who may talk to it
 
 - **Identity.** On first start a node makes an Ed25519 key at `~/.cyxcloud/node/key` (owner-only). Its node id is derived from the public key (the first 16 bytes of its BLAKE3 hash, as hex), so the id cannot be chosen or copied: a registration carries the public key and a signature over the node id, its listen address and a timestamp (300 s of skew allowed), and the gateway accepts a known id only with the key it was registered with. A `[node] id` in the config that is not the key's id stops the node.
+- **Registration limit.** A new node id only takes a fresh key, so the gateway accepts at most 5 new node ids per client address per hour (counted in Redis); over it: RESOURCE_EXHAUSTED. A node already on file re-registering (a restart) is not counted. When the count cannot be read the new node is refused with UNAVAILABLE (fail closed); sign-in limits fail open instead.
 - **Client address.** The gateway's limits use the connection's peer, or, behind our own proxies, the `X-Forwarded-For` entry the outermost of them appended: `TRUSTED_PROXY_HOPS` says how many there are (the server compose sets 1, the front door). Entries to their left come from the client and are ignored, so a client cannot name a new address to dodge a limit. Without the setting (0) the header is ignored entirely.
 - **Node token.** `RegisterNode` answers with a node token; heartbeats, metric reports and drains must carry it and act only on that node. A user's sign-in token is refused for node RPCs.
 - **Access secret.** The node also makes `~/.cyxcloud/node/access_secret` and hands it to the gateway at registration. Every chunk RPC to the node (store, get, delete, stream, verify) must present it as `authorization: Bearer <secret>`; anything else on the network is refused with UNAUTHENTICATED before storage is touched. The gateway and the rebalancer learn the secrets from the `nodes` table when they start and when a node registers.
@@ -161,7 +162,7 @@ node services (`cyxcloud-node1`, `cyxcloud-node2`) for a local cluster;
 - The gateway is the single manager and the single data path: every byte goes through it twice.
 - Fewer than four nodes cannot survive a node loss (see above); the rebalancer cannot repair what it has no spare node for.
 - Node-to-node transfer and peer discovery exist as code; nothing routes through them.
-- Node registration is JWT-free by design (it is signed instead), with no rate limit yet.
+- Node registration is JWT-free by design (it is signed and limited per address instead); a host with many addresses can still register many nodes, and nothing ties a node to an account yet.
 - The rebalancer's 60 s scans and the metadata pool (10 connections) can starve requests.
 
 ## Node maintenance

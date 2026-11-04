@@ -27,6 +27,7 @@ mod node_monitor;
 pub mod node_registration;
 mod payment_daemon;
 mod public_registry;
+mod rate_limit;
 mod rebalancer_daemon;
 mod s3_api;
 pub mod state;
