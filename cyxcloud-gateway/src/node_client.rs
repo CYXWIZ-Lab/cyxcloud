@@ -515,7 +515,7 @@ mod fake_node_tests {
     async fn serve(answer: &[u8]) -> String {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let incoming = TcpIncoming::from_listener(listener, true, None).unwrap();
+        let incoming = TcpIncoming::from(listener).with_nodelay(Some(true));
         let node = FakeNode {
             answer: answer.to_vec(),
         };

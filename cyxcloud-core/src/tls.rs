@@ -5,14 +5,12 @@
 //! - Storage Nodes: gRPC client (to gateway) + gRPC server (for inter-node)
 //! - CLI: HTTPS client with optional client certificate
 
-use std::fs::File;
-use std::io::BufReader;
 use std::path::Path;
 use std::sync::Arc;
 
+use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::{ClientConfig, RootCertStore, ServerConfig};
-use rustls_pemfile::{certs, private_key};
 
 use crate::error::{CyxCloudError, Result};
 
@@ -42,44 +40,26 @@ pub struct TlsClientConfig {
 
 /// Load certificates from a PEM file.
 fn load_certs(path: &Path) -> Result<Vec<CertificateDer<'static>>> {
-    let file = File::open(path).map_err(|e| {
-        CyxCloudError::Io(std::io::Error::new(
-            e.kind(),
-            format!("Failed to open certificate file {:?}: {}", path, e),
-        ))
-    })?;
-    let mut reader = BufReader::new(file);
-    let certs_result: std::result::Result<Vec<_>, _> = certs(&mut reader).collect();
-    certs_result.map_err(|e| {
-        CyxCloudError::Io(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("Failed to parse certificates from {:?}: {}", path, e),
-        ))
-    })
+    CertificateDer::pem_file_iter(path)
+        .and_then(|certs| certs.collect::<std::result::Result<Vec<_>, _>>())
+        .map_err(|e| pem_error("certificates", path, e))
 }
 
 /// Load a private key from a PEM file.
 fn load_private_key(path: &Path) -> Result<PrivateKeyDer<'static>> {
-    let file = File::open(path).map_err(|e| {
-        CyxCloudError::Io(std::io::Error::new(
-            e.kind(),
-            format!("Failed to open private key file {:?}: {}", path, e),
-        ))
-    })?;
-    let mut reader = BufReader::new(file);
-    private_key(&mut reader)
-        .map_err(|e| {
-            CyxCloudError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Failed to parse private key from {:?}: {}", path, e),
-            ))
-        })?
-        .ok_or_else(|| {
-            CyxCloudError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("No private key found in {:?}", path),
-            ))
-        })
+    PrivateKeyDer::from_pem_file(path).map_err(|e| pem_error("private key", path, e))
+}
+
+/// A PEM read failure as an I/O error naming the file.
+fn pem_error(what: &str, path: &Path, e: rustls::pki_types::pem::Error) -> CyxCloudError {
+    let kind = match &e {
+        rustls::pki_types::pem::Error::Io(io) => io.kind(),
+        _ => std::io::ErrorKind::InvalidData,
+    };
+    CyxCloudError::Io(std::io::Error::new(
+        kind,
+        format!("Failed to read {} from {:?}: {}", what, path, e),
+    ))
 }
 
 /// Build a root certificate store from a CA certificate file.

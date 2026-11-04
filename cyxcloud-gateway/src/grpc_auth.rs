@@ -9,7 +9,7 @@ use crate::auth::{AuthService, Claims};
 use futures::future::BoxFuture;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use tonic::body::BoxBody;
+use tonic::body::Body;
 use tonic::codegen::http::{Request, Response};
 use tonic::Status;
 use tower::{Layer, Service};
@@ -98,7 +98,7 @@ pub struct AuthMiddleware<S> {
 
 impl<S, B> Service<Request<B>> for AuthMiddleware<S>
 where
-    S: Service<Request<B>, Response = Response<BoxBody>> + Clone + Send + 'static,
+    S: Service<Request<B>, Response = Response<Body>> + Clone + Send + 'static,
     S::Future: Send + 'static,
     B: Send + 'static,
 {
@@ -124,13 +124,13 @@ where
                     .map(str::to_owned);
                 let token = match bearer_token(header.as_deref()) {
                     Ok(token) => token.to_owned(),
-                    Err(status) => return Ok(status.to_http()),
+                    Err(status) => return Ok(status.into_http()),
                 };
                 let claims: Claims = match auth.validate_token(&token).await {
                     Ok(claims) => claims,
                     Err(e) => {
                         return Ok(
-                            Status::unauthenticated(format!("Invalid token: {}", e)).to_http()
+                            Status::unauthenticated(format!("Invalid token: {}", e)).into_http()
                         )
                     }
                 };
@@ -145,7 +145,8 @@ where
                 };
                 if refused {
                     return Ok(
-                        Status::permission_denied("this token does not allow this call").to_http(),
+                        Status::permission_denied("this token does not allow this call")
+                            .into_http(),
                     );
                 }
                 request.extensions_mut().insert(claims);

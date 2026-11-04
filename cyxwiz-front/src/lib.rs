@@ -390,14 +390,13 @@ pub fn tls_acceptor(config: &FrontConfig) -> anyhow::Result<Option<tokio_rustls:
     let (Some(cert), Some(key)) = (&config.tls_cert, &config.tls_key) else {
         return Ok(None);
     };
-    let certs = rustls_pemfile::certs(&mut std::io::BufReader::new(
-        std::fs::File::open(cert).map_err(|e| anyhow::anyhow!("{}: {}", cert.display(), e))?,
-    ))
-    .collect::<Result<Vec<_>, _>>()?;
-    let key = rustls_pemfile::private_key(&mut std::io::BufReader::new(
-        std::fs::File::open(key).map_err(|e| anyhow::anyhow!("{}: {}", key.display(), e))?,
-    ))?
-    .ok_or_else(|| anyhow::anyhow!("{}: no private key", key.display()))?;
+    use rustls::pki_types::pem::PemObject;
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+    let certs = CertificateDer::pem_file_iter(cert)
+        .and_then(|certs| certs.collect::<Result<Vec<_>, _>>())
+        .map_err(|e| anyhow::anyhow!("{}: {}", cert.display(), e))?;
+    let key = PrivateKeyDer::from_pem_file(key)
+        .map_err(|e| anyhow::anyhow!("{}: {}", key.display(), e))?;
     let mut server = rustls::ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(certs, key)?;

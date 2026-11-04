@@ -19,7 +19,6 @@ tonic = { workspace = true }
 
 # TLS
 rustls = { workspace = true }
-rustls-pemfile = "2.0"
 
 # Async
 tokio = { workspace = true }

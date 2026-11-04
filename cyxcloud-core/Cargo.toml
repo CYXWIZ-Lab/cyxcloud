@@ -33,7 +33,6 @@ rayon = { workspace = true }
 
 # TLS
 rustls = { workspace = true }
-rustls-pemfile = { workspace = true }
 tokio-rustls = { workspace = true }
 webpki-roots = { workspace = true }
 
