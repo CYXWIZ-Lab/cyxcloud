@@ -529,6 +529,81 @@ mod fake_node_tests {
         addr.to_string()
     }
 
+    /// The fake node over TLS with a certificate for "localhost" that no
+    /// public authority signed; returns its port.
+    async fn serve_tls(answer: &[u8], cert_pem: &str, key_pem: &str) -> u16 {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let incoming = TcpIncoming::from(listener).with_nodelay(Some(true));
+        let tls = tonic::transport::ServerTlsConfig::new()
+            .identity(tonic::transport::Identity::from_pem(cert_pem, key_pem));
+        let node = FakeNode {
+            answer: answer.to_vec(),
+        };
+        tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .tls_config(tls)
+                .unwrap()
+                .add_service(ChunkServiceServer::new(node))
+                .serve_with_incoming(incoming)
+                .await
+                .unwrap();
+        });
+        port
+    }
+
+    /// A client given the server's CA reaches it over TLS; one that trusts
+    /// only the system's roots refuses the same server (the private CA is
+    /// not among them). Both sides of cyxcloud-core's client TLS helpers.
+    #[tokio::test]
+    async fn tls_clients_trust_the_given_ca_and_only_the_system_roots_otherwise() {
+        use cyxcloud_core::tls::{
+            create_tonic_client_tls, tonic_client_tls_system_roots, TlsClientConfig,
+        };
+        use cyxcloud_protocol::chunk::chunk_service_client::ChunkServiceClient;
+        use cyxcloud_protocol::chunk::GetChunkRequest;
+
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+        let port = serve_tls(
+            b"over tls",
+            &cert.cert.pem(),
+            &cert.signing_key.serialize_pem(),
+        )
+        .await;
+        let url = format!("https://localhost:{port}");
+        let dir = tempfile::tempdir().unwrap();
+        let ca_path = dir.path().join("ca.crt");
+        std::fs::write(&ca_path, cert.cert.pem()).unwrap();
+
+        let with_ca = create_tonic_client_tls(&TlsClientConfig {
+            ca_cert_path: ca_path,
+            client_cert_path: None,
+            client_key_path: None,
+        })
+        .unwrap();
+        let channel = tonic::transport::Endpoint::from_shared(url.clone())
+            .unwrap()
+            .tls_config(with_ca)
+            .unwrap()
+            .connect()
+            .await
+            .expect("the given CA is trusted");
+        let answer = ChunkServiceClient::new(channel)
+            .get_chunk(GetChunkRequest { chunk_id: vec![1] })
+            .await
+            .unwrap();
+        assert_eq!(answer.into_inner().data, b"over tls".to_vec());
+
+        let refused = tonic::transport::Endpoint::from_shared(url)
+            .unwrap()
+            .tls_config(tonic_client_tls_system_roots())
+            .unwrap()
+            .connect()
+            .await;
+        assert!(refused.is_err(), "a private CA is not a system root");
+    }
+
     #[tokio::test]
     async fn a_node_returning_wrong_bytes_is_a_corrupt_shard() {
         let good = b"the shard as it was written".to_vec();

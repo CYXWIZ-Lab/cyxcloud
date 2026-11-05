@@ -177,7 +177,8 @@ impl DataStreamClient {
                 .map_err(|e| DataStreamError::ConnectionFailed(e.to_string()))?
                 .connect_timeout(std::time::Duration::from_secs(config.connect_timeout_secs));
             if config.gateway_addr.starts_with("https://") {
-                endpoint = endpoint.tls_config(tonic::transport::ClientTlsConfig::new())?;
+                endpoint =
+                    endpoint.tls_config(cyxcloud_core::tls::tonic_client_tls_system_roots())?;
             }
             endpoint.connect().await?
         };

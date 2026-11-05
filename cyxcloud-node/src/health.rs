@@ -389,7 +389,8 @@ impl HeartbeatService {
                 // An https:// server (a front door, TOFIX168) with a public
                 // certificate: the system's trusted roots. This branch used
                 // to log "using system roots" and then dial without TLS.
-                endpoint = endpoint.tls_config(tonic::transport::ClientTlsConfig::new())?;
+                endpoint =
+                    endpoint.tls_config(cyxcloud_core::tls::tonic_client_tls_system_roots())?;
                 info!(central_addr = %self.config.central.address, "TLS with the system's trusted roots");
             }
         }

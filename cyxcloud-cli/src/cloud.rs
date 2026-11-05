@@ -13,7 +13,7 @@ use cyxcloud_protocol::datastream::{
 };
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
-use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
+use tonic::transport::{Channel, Endpoint};
 
 /// Upload pieces, as the Engine sends them.
 pub const UPLOAD_CHUNK: usize = 1024 * 1024;
@@ -31,7 +31,7 @@ impl Cloud {
             .with_context(|| format!("'{}' is not a gateway address", grpc_url))?
             .connect_timeout(std::time::Duration::from_secs(10));
         if grpc_url.starts_with("https://") {
-            endpoint = endpoint.tls_config(ClientTlsConfig::new())?;
+            endpoint = endpoint.tls_config(cyxcloud_core::tls::tonic_client_tls_system_roots())?;
         }
         let channel = endpoint.connect().await.with_context(|| {
             format!(

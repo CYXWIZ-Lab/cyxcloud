@@ -248,6 +248,15 @@ pub fn create_tonic_client_tls(
     Ok(tls_config)
 }
 
+/// gRPC client TLS that trusts the system's certificate store: for an
+/// https:// server with a public certificate. tonic's `ClientTlsConfig::new()`
+/// alone trusts nothing (since tonic 0.12), so every such server would be
+/// refused as "unknown issuer". With a private CA, use
+/// `create_tonic_client_tls`, which trusts that CA only.
+pub fn tonic_client_tls_system_roots() -> tonic::transport::ClientTlsConfig {
+    tonic::transport::ClientTlsConfig::new().with_native_roots()
+}
+
 /// Create a tonic server TLS config from TlsServerConfig.
 ///
 /// This returns a `tonic::transport::ServerTlsConfig` suitable for gRPC servers.
