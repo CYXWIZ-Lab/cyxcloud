@@ -2,7 +2,7 @@
 
 use bytes::Bytes;
 use cyxwiz_front::config::{FrontConfig, Limits, Route};
-use cyxwiz_front::{serve, Front};
+use cyxwiz_front::{serve, tls_acceptor, Front};
 use http_body_util::Full;
 use hyper::{Request, Response};
 use hyper_util::rt::{TokioExecutor, TokioIo};
@@ -59,6 +59,7 @@ async fn front_door_at(upstream_port: u16, listen: &str) -> std::net::SocketAddr
         listen: listen.parse().unwrap(),
         tls_cert: None,
         tls_key: None,
+        internal_listen: None,
         trusted_proxies: vec![],
         client_ip_header: "cf-connecting-ip".into(),
         limits: Limits {
@@ -117,6 +118,90 @@ fn token(secret: &str) -> String {
     .unwrap()
 }
 
+/// TLS outside, plain inside: the same door on two listeners. The service
+/// learns which one a request came through (X-Forwarded-Proto), and the TLS
+/// port refuses plain HTTP.
+#[tokio::test]
+async fn tls_outside_plain_inside() {
+    let hits = Arc::new(AtomicUsize::new(0));
+    let up = stand_in(hits.clone()).await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+    let cert_path = dir.path().join("cert.pem");
+    let key_path = dir.path().join("key.pem");
+    std::fs::write(&cert_path, cert.cert.pem()).unwrap();
+    std::fs::write(&key_path, cert.signing_key.serialize_pem()).unwrap();
+
+    let public = cyxwiz_front::listen("127.0.0.1:0".parse().unwrap()).unwrap();
+    let internal = cyxwiz_front::listen("127.0.0.1:0".parse().unwrap()).unwrap();
+    let (public_addr, internal_addr) =
+        (public.local_addr().unwrap(), internal.local_addr().unwrap());
+    let config = FrontConfig {
+        listen: public_addr,
+        tls_cert: Some(cert_path),
+        tls_key: Some(key_path),
+        internal_listen: Some(internal_addr),
+        trusted_proxies: vec![],
+        client_ip_header: "cf-connecting-ip".into(),
+        limits: Limits {
+            requests_per_minute: 1000,
+            http_body_bytes: 1024,
+        },
+        routes: vec![Route {
+            name: "api".into(),
+            prefix: "/api/".into(),
+            upstream: format!("http://127.0.0.1:{}", up),
+            grpc: false,
+            body_bytes: None,
+        }],
+    };
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let tls = tls_acceptor(&config).unwrap();
+    assert!(tls.is_some());
+    let front = Arc::new(Front::new(config, &[SECRET.into()]).unwrap());
+    tokio::spawn(serve(public, front.clone(), tls));
+    tokio::spawn(serve(internal, front, None));
+
+    let trusting = reqwest::Client::builder()
+        .add_root_certificate(reqwest::Certificate::from_pem(cert.cert.pem().as_bytes()).unwrap())
+        .build()
+        .unwrap();
+    let r = trusting
+        .get(format!("https://localhost:{}/api/x", public_addr.port()))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        r.text().await.unwrap(),
+        "path=/api/x xff=127.0.0.1 proto=https"
+    );
+
+    let r = http_client()
+        .get(format!("http://{}/api/x", internal_addr))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        r.text().await.unwrap(),
+        "path=/api/x xff=127.0.0.1 proto=http"
+    );
+
+    // plain HTTP on the TLS port is not served
+    assert!(http_client()
+        .get(format!("http://{}/api/x", public_addr))
+        .send()
+        .await
+        .is_err());
+    // a client that does not trust the certificate gets no answer
+    assert!(http_client()
+        .get(format!("https://localhost:{}/api/x", public_addr.port()))
+        .send()
+        .await
+        .is_err());
+    assert_eq!(hits.load(Ordering::SeqCst), 2);
+}
+
 #[tokio::test]
 async fn the_door_routes_checks_and_refuses() {
     let hits = Arc::new(AtomicUsize::new(0));
@@ -157,11 +242,7 @@ async fn the_door_routes_checks_and_refuses() {
     assert_eq!(hits.load(Ordering::SeqCst), 2);
 
     // what is not routed is not served
-    let r = http
-        .get(format!("{}/metrics", door))
-        .send()
-        .await
-        .unwrap();
+    let r = http.get(format!("{}/metrics", door)).send().await.unwrap();
     assert_eq!(r.status(), 404);
 
     // a body above the cap

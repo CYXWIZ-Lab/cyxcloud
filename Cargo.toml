@@ -119,6 +119,8 @@ criterion = "0.5"
 proptest = "1.4"
 mockall = "0.12"
 tempfile = "3.8"
+# Self-signed certificates (tests; node certificates), on ring like the rest
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
 
 [workspace.metadata.features]
 io-uring = ["cyxcloud-storage/io-uring", "cyxcloud-node/io-uring"]

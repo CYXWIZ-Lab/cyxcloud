@@ -15,6 +15,11 @@ pub struct FrontConfig {
     /// plain HTTP/1.1 and HTTP/2 (local and LAN use).
     pub tls_cert: Option<PathBuf>,
     pub tls_key: Option<PathBuf>,
+    /// With TLS on `listen`: a second, plain listener for the server's own
+    /// services on its private network (the compose healthcheck, the website
+    /// calling the door). Same checks and routes as `listen`. Never publish
+    /// it: anything that reaches it skips TLS.
+    pub internal_listen: Option<SocketAddr>,
     /// Peers allowed to say who the client is (`client_ip_header`), e.g. the
     /// local Cloudflare tunnel. Anyone else's header is ignored.
     #[serde(default)]
@@ -131,6 +136,16 @@ impl FrontConfig {
         if self.tls_cert.is_some() != self.tls_key.is_some() {
             anyhow::bail!("tls_cert and tls_key go together");
         }
+        if let Some(internal) = self.internal_listen {
+            if self.tls_cert.is_none() {
+                anyhow::bail!(
+                    "internal_listen is the plain port next to a TLS listen: without TLS, use listen alone"
+                );
+            }
+            if internal == self.listen {
+                anyhow::bail!("internal_listen and listen must be different addresses");
+            }
+        }
         for r in &self.routes {
             if !r.prefix.starts_with('/') {
                 anyhow::bail!("route {}: prefix '{}' must start with /", r.name, r.prefix);
@@ -176,6 +191,18 @@ mod tests {
         assert!(FrontConfig::from_toml(bad).is_err());
         let grpc_cap = "[[route]]\nname = \"x\"\nprefix = \"/x.\"\nupstream = \"http://a\"\ngrpc = true\nbody_bytes = 1\n";
         assert!(FrontConfig::from_toml(grpc_cap).is_err());
+    }
+
+    #[test]
+    fn the_internal_listener_comes_only_with_tls() {
+        assert!(FrontConfig::from_toml("internal_listen = \"0.0.0.0:8000\"").is_err());
+        let both = "listen = \"0.0.0.0:443\"\ntls_cert = \"c.pem\"\ntls_key = \"k.pem\"\n";
+        let ok =
+            FrontConfig::from_toml(&format!("{both}internal_listen = \"0.0.0.0:8000\"")).unwrap();
+        assert_eq!(ok.internal_listen.unwrap().port(), 8000);
+        assert!(
+            FrontConfig::from_toml(&format!("{both}internal_listen = \"0.0.0.0:443\"")).is_err()
+        );
     }
 
     #[test]

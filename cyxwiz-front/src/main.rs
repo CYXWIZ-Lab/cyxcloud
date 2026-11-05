@@ -50,9 +50,14 @@ async fn main() -> anyhow::Result<()> {
     let config = FrontConfig::from_toml(&text)?;
     let tls = tls_acceptor(&config)?;
     let listener = cyxwiz_front::listen(config.listen)?;
+    let internal = config
+        .internal_listen
+        .map(cyxwiz_front::listen)
+        .transpose()?;
     info!(
         listen = %config.listen,
         tls = tls.is_some(),
+        internal_listen = ?config.internal_listen,
         routes = config.routes.len(),
         "Front door open"
     );
@@ -66,5 +71,15 @@ async fn main() -> anyhow::Result<()> {
         );
     }
     let front = Arc::new(Front::new(config, &[cli.jwt_secret, cli.admin_jwt_secret])?);
-    serve(listener, front, tls).await
+    match internal {
+        // TLS outside, plain on the private network: both until either fails
+        Some(internal) => {
+            tokio::try_join!(
+                serve(listener, front.clone(), tls),
+                serve(internal, front, None)
+            )?;
+            Ok(())
+        }
+        None => serve(listener, front, tls).await,
+    }
 }

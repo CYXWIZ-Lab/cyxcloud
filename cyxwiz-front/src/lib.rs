@@ -58,7 +58,6 @@ pub struct Front {
     limiter: limits::RateLimiter,
     grpc_client: Client<HttpConnector, Body>,
     http_client: Client<HttpConnector, Body>,
-    tls: bool,
 }
 
 /// What the door decided, for the audit line.
@@ -136,14 +135,12 @@ impl Front {
             .http2_only(true)
             .build_http();
         let http_client = Client::builder(TokioExecutor::new()).build_http();
-        let tls = config.tls_cert.is_some();
         Ok(Self {
             config,
             tokens,
             limiter,
             grpc_client,
             http_client,
-            tls,
         })
     }
 
@@ -151,8 +148,14 @@ impl Front {
         &self.config
     }
 
-    /// Answer one request and write its audit line.
-    pub async fn handle(&self, req: Request<Incoming>, peer: SocketAddr) -> Response<Body> {
+    /// Answer one request and write its audit line. `secure`: it came over
+    /// TLS (the public listener) rather than the plain internal one.
+    pub async fn handle(
+        &self,
+        req: Request<Incoming>,
+        peer: SocketAddr,
+        secure: bool,
+    ) -> Response<Body> {
         let started = Instant::now();
         let ip = limits::client_ip(
             req.headers(),
@@ -163,10 +166,11 @@ impl Front {
         let method = req.method().clone();
         let path = req.uri().path().to_string();
         let grpc = routing::is_grpc(req.headers());
-        let outcome = self.decide(req, ip, grpc).await;
+        let outcome = self.decide(req, ip, grpc, secure).await;
         info!(
             target: "audit",
             ip = %ip,
+            tls = secure,
             method = %method,
             path = %path,
             route = outcome.route,
@@ -178,7 +182,13 @@ impl Front {
         outcome.response
     }
 
-    async fn decide(&self, req: Request<Incoming>, ip: IpAddr, grpc: bool) -> Outcome {
+    async fn decide(
+        &self,
+        req: Request<Incoming>,
+        ip: IpAddr,
+        grpc: bool,
+        secure: bool,
+    ) -> Outcome {
         let refuse = |status: StatusCode, code: u16, message: &str| -> Outcome {
             Outcome {
                 response: if grpc {
@@ -254,7 +264,7 @@ impl Front {
                 return o;
             }
         }
-        let response = self.forward(req, route, ip, grpc).await;
+        let response = self.forward(req, route, ip, grpc, secure).await;
         Outcome {
             response,
             route: route_name,
@@ -311,6 +321,7 @@ impl Front {
         route: &Route,
         ip: IpAddr,
         grpc: bool,
+        secure: bool,
     ) -> Response<Body> {
         let (mut parts, body) = req.into_parts();
         let path_and_query = parts
@@ -348,7 +359,7 @@ impl Front {
         }
         parts.headers.insert(
             HeaderName::from_static("x-forwarded-proto"),
-            HeaderValue::from_static(if self.tls { "https" } else { "http" }),
+            HeaderValue::from_static(if secure { "https" } else { "http" }),
         );
         if let Some(host) = original_host {
             parts.headers.insert("x-forwarded-host", host);
@@ -420,7 +431,8 @@ pub fn listen(addr: SocketAddr) -> std::io::Result<TcpListener> {
     TcpListener::from_std(socket.into())
 }
 
-/// Accept connections until the listener fails.
+/// Accept connections until the listener fails: TLS ones when `tls` is
+/// given, plain ones otherwise.
 pub async fn serve(
     listener: TcpListener,
     front: Arc<Front>,
@@ -433,10 +445,11 @@ pub async fn serve(
         let peer = SocketAddr::new(peer.ip().to_canonical(), peer.port());
         let front = front.clone();
         let tls = tls.clone();
+        let secure = tls.is_some();
         tokio::spawn(async move {
             let service = hyper::service::service_fn(move |req| {
                 let front = front.clone();
-                async move { Ok::<_, Infallible>(front.handle(req, peer).await) }
+                async move { Ok::<_, Infallible>(front.handle(req, peer, secure).await) }
             });
             let builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
             let result = match tls {

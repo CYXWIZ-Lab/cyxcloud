@@ -40,7 +40,7 @@ cyxcloud login --server https://cloud.cyxwiz.ai   # with TLS
 | Sign-in | a request with `Authorization: Bearer` must carry a valid, unexpired token signed with `JWT_SECRET` or `ADMIN_JWT_SECRET`; otherwise HTTP 401 / gRPC UNAUTHENTICATED, and the service never sees it. A request without a token goes through and the service decides (sign-in, node registration and dataset streams need none). The services check tokens again. |
 | Size | an HTTP body above `http_body_bytes` (default 16 MB) is refused (413) or cut. gRPC streams (dataset uploads) are left to the services. |
 | Forward | gRPC over HTTP/2, HTTP over HTTP/1.1; streams and trailers pass through; `X-Forwarded-For` gets the client address appended (the gateway, with `TRUSTED_PROXY_HOPS=1`, takes that last entry for its own limits), `-Proto` and `-Host` are added, connection headers dropped. A service that does not answer: 502 / gRPC UNAVAILABLE. |
-| Audit | one log line per request (target `audit`): client address, method, path, route, status, account (the token's `sub`), milliseconds. Never a token. |
+| Audit | one log line per request (target `audit`): client address, `tls` (which listener), method, path, route, status, account (the token's `sub`), milliseconds. Never a token. |
 
 `/s3/` reaches the gateway's S3 API (the website's Drive), with its own body
 cap of 256 MB, the gateway's own. The gateway takes only a signed-in user's
@@ -53,12 +53,25 @@ gateway's `/ws`, and central's REST (admin, internal).
 "gateway":"up","api":"up"}}`, 503 when a service does not accept a
 connection. `cyxcloud doctor` reads it through the door.
 
+## TLS and the internal listener
+
+With `tls_cert` / `tls_key` the `listen` port speaks TLS only (HTTP/2 and
+HTTP/1.1 by ALPN): a plain request there is not answered. The services on the
+server's private network (the compose healthcheck, the website calling the
+door as `http://front:8000`) use `internal_listen`, a second, plain listener
+with the same routes, sign-in check, limits and audit. Publish only `listen`;
+`X-Forwarded-Proto` tells the services which listener a request came
+through. Certificates, the CyxWiz test CA and the production steps:
+[tls.md](tls.md).
+
 ## front.toml
 
 ```toml
 listen = "[::]:443"                            # IPv4 and IPv6; "0.0.0.0:443" for IPv4 only
 tls_cert = "/etc/cyxwiz/front/fullchain.pem"   # both or neither
 tls_key  = "/etc/cyxwiz/front/privkey.pem"
+internal_listen = "0.0.0.0:8000"               # with TLS only: plain, for the server's own
+                                               # services (healthcheck, website); never publish it
 trusted_proxies = ["127.0.0.1"]                # e.g. cloudflared on this box
 client_ip_header = "cf-connecting-ip"
 
