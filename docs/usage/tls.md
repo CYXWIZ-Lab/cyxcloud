@@ -47,24 +47,119 @@ internal_listen = "0.0.0.0:8000"
   refused without TLS (then `listen` alone is the plain port).
 - The services learn which listener a request came through from
   `X-Forwarded-Proto` (`https` / `http`); the audit line has `tls=true/false`.
-- The key file must be readable by the door only (mode 600, owner the
-  container user); it is never committed. `deploy/server/certs/` is where
-  the server compose mounts them from.
+- The key file is mode 600, owned by the server's deploy user; the door's
+  container reads it as root (the containers do not yet run as their own
+  user, a follow-up). It is never committed. `deploy/server/certs/` is
+  where the server compose mounts them from.
 
 Check it from another machine:
 
 ```
-curl --cacert ca.crt https://SERVER/health      # {"front":"ok",...}
+curl --cacert ca.crt https://SERVER/health      # {"front":"ok",...} (Windows: add --ssl-no-revoke)
 curl http://SERVER:443/health                    # no answer: TLS only
 ```
 
+## The door's certificate
+
+Which certificate depends on whether the server has a public domain name.
+
+- **With a domain** (production, e.g. `cloud.cyxwiz.ai`): a public
+  certificate. Either Let's Encrypt (certbot or another ACME client on the
+  server, writing `fullchain.pem` / `privkey.pem`), or, behind Cloudflare, a
+  Cloudflare origin certificate. Clients then need nothing: the system
+  roots trust it. Renewal is the ACME client's job (every 60-90 days); after
+  each renewal restart the door (see "Renewing").
+- **Without a domain** (a LAN or test server, like the HP at
+  192.168.1.180): a private **CyxWiz test CA**, made on the server, signs the
+  door's certificate, and each client is given the CA's `ca.crt`. The rest
+  of this section is that setup.
+
+### Making the test CA (once per server)
+
+On the server, in the deploy folder (cyxwiz_web `deploy/server`):
+
+```
+./new-certs.sh ca
+```
+
+- It makes an EC P-256 key and a self-signed CA certificate, valid 5 years,
+  in `~/.cyxwiz-ca/` (mode 700; set `CA_DIR` for another place).
+- `ca.key` never leaves that folder: anyone who has it can make
+  certificates every client trusts. Do not copy it into the repo, the
+  containers, or a backup that others can read. If the server is
+  rebuilt, keep the folder (or make a new CA and give every client the new
+  `ca.crt`, below).
+- It refuses to run when a CA is already there. Making a new CA by
+  mistake would leave every client trusting the old one.
+
+### The door's certificate (and renewing it)
+
+```
+./new-certs.sh server cyxwiz-hp 192.168.1.180
+```
+
+- Pass every name and address clients use to reach the server: host names
+  become DNS names, addresses become IP names in the certificate. A client
+  that connects by a name not listed refuses the server. Add the address
+  of every network the server is reached on.
+- It writes `certs/fullchain.pem` (the certificate, valid 397 days),
+  `certs/privkey.pem` (mode 600) and `certs/ca.crt` (a copy of the CA's
+  public certificate, to hand out). `certs/` is git-ignored except its
+  README.
+- It checks the new certificate against the CA before replacing the old
+  files, and replaces the key and certificate together.
+- **Renewing:** run the same command again before it expires, then
+  restart the door (`docker compose up -d --force-recreate front`). Clients
+  need nothing new: they trust the CA, not this certificate.
+- `./new-certs.sh show` prints what is there: names, expiry dates and
+  SHA-256 fingerprints, never a key. It warns when the door's certificate
+  expires within 30 days. Put it in a monthly check.
+
+### Giving clients the CA
+
+Copy `certs/ca.crt` (public, safe to send) to each client machine, and give
+its path to the client *(the client settings come with T1c)*. Before
+trusting a copy that came over email or a chat, compare its fingerprint
+with the one `./new-certs.sh show` prints on the server:
+
+```
+openssl x509 -in ca.crt -noout -fingerprint -sha256
+```
+
+Tools and browsers can also use it:
+
+- `curl --cacert ca.crt https://192.168.1.180/health`. On Windows, curl
+  uses the system TLS (Schannel), which wants revocation information that
+  a private CA does not publish: add `--ssl-no-revoke`, or the request fails
+  with `CERT_TRUST_REVOCATION_STATUS_UNKNOWN`.
+- A browser on a test machine: import `ca.crt` as a trusted authority
+  (Windows: `certutil -addstore -f Root ca.crt` as administrator; macOS:
+  Keychain Access, System, then "Always Trust"; Linux:
+  `/usr/local/share/ca-certificates/cyxwiz-test.crt` and
+  `update-ca-certificates`). Only on machines you control, and remove it
+  when the test server is gone.
+
+### When something goes wrong
+
+| Problem | What to do |
+| --- | --- |
+| The door's certificate expired (clients fail with "certificate expired") | `./new-certs.sh server <same names>` and restart the door. Clients need nothing. |
+| A client says the name does not match | The client used a name or address that is not in the certificate: `./new-certs.sh show` lists them. Issue a new one with the missing name and restart the door. |
+| `privkey.pem` leaked (copied off the server, in a backup others read) | Issue a new door certificate at once (a new key comes with it) and restart the door. The old certificate stays valid until it expires (a private CA has no revocation list), so also replace the CA if the leak is serious. |
+| `ca.key` leaked, or the CA is lost | Replace the CA (below). |
+
+### Replacing the CA
+
+1. Move the old one aside: `mv ~/.cyxwiz-ca ~/.cyxwiz-ca.old-$(date +%F)`.
+2. `./new-certs.sh ca`, then `./new-certs.sh server <names...>`, and
+   restart the door.
+3. Give every client the new `certs/ca.crt` and remove the old one from
+   wherever it was installed. Until then those clients refuse the server.
+4. When every client works, delete the old CA folder.
+
 ## To come in this runbook
 
-- Making the CyxWiz test CA and the server certificate, and installing the
-  CA on the LAN machines (T1b).
 - The client settings that trust it: Engine, server node, CLI, storage node
   (T1c).
 - Switching the HP test server to TLS, and checking every client (T1d).
-- Renewal and rotation, and what to do when a certificate expires or a key
-  leaks (T1b/T1d).
 - Node certificates and pinning (T2, T3).
