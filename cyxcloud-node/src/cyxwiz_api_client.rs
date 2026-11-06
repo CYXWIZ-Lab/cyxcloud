@@ -229,11 +229,24 @@ pub struct CyxWizApiClient {
 }
 
 impl CyxWizApiClient {
-    /// Create a new API client from config
-    pub fn new(config: &CyxWizApiSettings) -> Result<Self, ApiError> {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(config.timeout_secs))
-            .build()?;
+    /// An API client from config. An https:// API is verified against
+    /// `ca_cert` when given (the server's private CA, the same one the node
+    /// uses for the gateway), else the system's roots.
+    pub fn new(
+        config: &CyxWizApiSettings,
+        ca_cert: Option<&std::path::Path>,
+    ) -> Result<Self, ApiError> {
+        let mut builder = Client::builder().timeout(Duration::from_secs(config.timeout_secs));
+        if let Some(ca) = ca_cert {
+            let pem = std::fs::read(ca).map_err(|e| {
+                ApiError::NotConfigured(format!("the CA certificate {}: {}", ca.display(), e))
+            })?;
+            let cert = reqwest::Certificate::from_pem(&pem).map_err(|e| {
+                ApiError::NotConfigured(format!("{} is not a PEM certificate: {}", ca.display(), e))
+            })?;
+            builder = builder.tls_certs_only([cert]);
+        }
+        let client = builder.build()?;
 
         Ok(Self {
             client,
@@ -242,20 +255,6 @@ impl CyxWizApiClient {
             machine_id: config.machine_id.clone(),
             auth_token: None,
             user_id: config.owner_id.clone(),
-        })
-    }
-
-    /// Create a new API client with just base URL
-    pub fn with_base_url(base_url: &str) -> Result<Self, ApiError> {
-        let client = Client::builder().timeout(Duration::from_secs(30)).build()?;
-
-        Ok(Self {
-            client,
-            base_url: base_url.to_string(),
-            api_key: None,
-            machine_id: None,
-            auth_token: None,
-            user_id: None,
         })
     }
 
@@ -520,7 +519,7 @@ mod tests {
             password: None,
         };
 
-        let client = CyxWizApiClient::new(&config);
+        let client = CyxWizApiClient::new(&config, None);
         assert!(client.is_ok());
     }
 
@@ -528,7 +527,7 @@ mod tests {
     fn test_credentials() {
         ring();
         let config = CyxWizApiSettings::default();
-        let mut client = CyxWizApiClient::new(&config).unwrap();
+        let mut client = CyxWizApiClient::new(&config, None).unwrap();
 
         assert!(!client.is_registered());
 

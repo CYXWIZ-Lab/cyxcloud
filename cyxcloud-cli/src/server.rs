@@ -65,6 +65,24 @@ pub fn urls_for_server(server: &str) -> Result<ServerUrls, String> {
     })
 }
 
+/// Plain http:// to another machine on the network: allowed (the rule is
+/// cyxcloud_core::plain_http), but say what it means once, when the server
+/// is set.
+pub fn print_plain_note(url: &str) {
+    if url.starts_with("https://") {
+        return;
+    }
+    if let Some(host) = url_host(url) {
+        if !cyxcloud_core::plain_http::is_loopback(host) {
+            eprintln!(
+                "  note: {} is plain http:// (unencrypted). Fine on your own network; \
+                 over the internet use the server's https:// address.",
+                host
+            );
+        }
+    }
+}
+
 /// Host part of a URL ("http://192.168.1.116:50060" -> "192.168.1.116").
 pub fn url_host(url: &str) -> Option<&str> {
     let rest = url.split("://").nth(1).unwrap_or(url);

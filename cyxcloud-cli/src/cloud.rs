@@ -26,12 +26,26 @@ pub struct Cloud {
 }
 
 impl Cloud {
-    pub async fn connect(grpc_url: &str, jwt: &str) -> Result<Self> {
+    /// Connect to the gateway at `grpc_url`; an https:// one is verified
+    /// against `ca_cert` when given (the server's private CA), else the
+    /// system's roots.
+    pub async fn connect(grpc_url: &str, jwt: &str, ca_cert: Option<&Path>) -> Result<Self> {
         let mut endpoint = Endpoint::from_shared(grpc_url.to_string())
             .with_context(|| format!("'{}' is not a gateway address", grpc_url))?
             .connect_timeout(std::time::Duration::from_secs(10));
         if grpc_url.starts_with("https://") {
-            endpoint = endpoint.tls_config(cyxcloud_core::tls::tonic_client_tls_system_roots())?;
+            let tls = match ca_cert {
+                Some(ca) => cyxcloud_core::tls::create_tonic_client_tls(
+                    &cyxcloud_core::tls::TlsClientConfig {
+                        ca_cert_path: ca.to_path_buf(),
+                        client_cert_path: None,
+                        client_key_path: None,
+                    },
+                )
+                .map_err(|e| anyhow::anyhow!("{}", e))?,
+                None => cyxcloud_core::tls::tonic_client_tls_system_roots(),
+            };
+            endpoint = endpoint.tls_config(tls)?;
         }
         let channel = endpoint.connect().await.with_context(|| {
             format!(

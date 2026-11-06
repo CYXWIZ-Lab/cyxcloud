@@ -16,6 +16,7 @@ pub mod jwt;
 pub mod node_identity;
 pub mod node_status;
 pub mod owner_only;
+pub mod plain_http;
 pub mod tls;
 
 pub use chunk::{reassemble_chunks, split_into_chunks, Chunk, ChunkId, ChunkMetadata};

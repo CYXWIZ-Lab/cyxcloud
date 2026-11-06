@@ -45,7 +45,8 @@ impl MachineService {
         config: NodeConfig,
         metrics: NodeMetrics,
     ) -> Result<Self, crate::cyxwiz_api_client::ApiError> {
-        let client = CyxWizApiClient::new(&config.cyxwiz_api)?;
+        let client =
+            CyxWizApiClient::new(&config.cyxwiz_api, config.network.tls_ca_cert.as_deref())?;
 
         // Initialize system info for hardware detection
         let system = System::new_with_specifics(

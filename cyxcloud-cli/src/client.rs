@@ -54,17 +54,53 @@ pub struct ShareResult {
     pub share_id: String,
 }
 
-/// TLS configuration for the gateway client
+/// How the CLI's clients verify the server (docs/usage/tls.md). Always
+/// verified: with `ca_cert`, against that CA only; without, against the
+/// system's trusted roots.
 #[derive(Debug, Clone, Default)]
 pub struct TlsConfig {
-    /// Path to CA certificate (PEM format) for verifying the gateway
+    /// The server's private CA (PEM)
     pub ca_cert: Option<PathBuf>,
     /// Path to client certificate (PEM format) for mTLS
     pub client_cert: Option<PathBuf>,
     /// Path to client private key (PEM format) for mTLS
     pub client_key: Option<PathBuf>,
-    /// Skip server certificate verification (DANGEROUS - only for development)
-    pub danger_accept_invalid_certs: bool,
+}
+
+impl TlsConfig {
+    /// `builder` with this TLS setup. Certificate files that cannot be read
+    /// or parsed are an error, not silently skipped.
+    pub fn apply(
+        &self,
+        mut builder: reqwest::ClientBuilder,
+    ) -> anyhow::Result<reqwest::ClientBuilder> {
+        use anyhow::Context;
+        if let Some(ref ca_path) = self.ca_cert {
+            let pem = std::fs::read(ca_path)
+                .with_context(|| format!("cannot read the CA certificate {}", ca_path.display()))?;
+            let cert = reqwest::Certificate::from_pem(&pem)
+                .with_context(|| format!("{} is not a PEM certificate", ca_path.display()))?;
+            // The server's own CA, and only it: a public authority cannot
+            // vouch for a server the user said is signed by this CA.
+            builder = builder.tls_certs_only([cert]);
+        }
+        match (&self.client_cert, &self.client_key) {
+            (Some(cert_path), Some(key_path)) => {
+                let mut identity_pem = std::fs::read(cert_path).with_context(|| {
+                    format!("cannot read the client certificate {}", cert_path.display())
+                })?;
+                identity_pem.extend_from_slice(&std::fs::read(key_path).with_context(|| {
+                    format!("cannot read the client key {}", key_path.display())
+                })?);
+                let identity = reqwest::Identity::from_pem(&identity_pem)
+                    .context("the client certificate and key are not a PEM identity")?;
+                builder = builder.identity(identity);
+            }
+            (None, None) => {}
+            _ => anyhow::bail!("mTLS needs both --client-cert and --client-key"),
+        }
+        Ok(builder)
+    }
 }
 
 /// Gateway client
@@ -75,47 +111,14 @@ pub struct GatewayClient {
 }
 
 impl GatewayClient {
-    /// A gateway client; certificate files that cannot be read or parsed are
-    /// an error, not silently skipped.
+    /// A gateway client verifying the server as `tls` says.
     pub fn with_tls(
         base_url: &str,
         auth_token: Option<String>,
-        tls: Option<TlsConfig>,
+        tls: &TlsConfig,
     ) -> anyhow::Result<Self> {
         use anyhow::Context;
-        let mut builder = Client::builder().timeout(Duration::from_secs(300));
-
-        if let Some(tls_config) = tls {
-            if let Some(ref ca_path) = tls_config.ca_cert {
-                let pem = std::fs::read(ca_path).with_context(|| {
-                    format!("cannot read the CA certificate {}", ca_path.display())
-                })?;
-                let cert = reqwest::Certificate::from_pem(&pem)
-                    .with_context(|| format!("{} is not a PEM certificate", ca_path.display()))?;
-                builder = builder.add_root_certificate(cert);
-            }
-
-            match (&tls_config.client_cert, &tls_config.client_key) {
-                (Some(cert_path), Some(key_path)) => {
-                    let mut identity_pem = std::fs::read(cert_path).with_context(|| {
-                        format!("cannot read the client certificate {}", cert_path.display())
-                    })?;
-                    identity_pem.extend_from_slice(&std::fs::read(key_path).with_context(
-                        || format!("cannot read the client key {}", key_path.display()),
-                    )?);
-                    let identity = reqwest::Identity::from_pem(&identity_pem)
-                        .context("the client certificate and key are not a PEM identity")?;
-                    builder = builder.identity(identity);
-                }
-                (None, None) => {}
-                _ => anyhow::bail!("mTLS needs both --client-cert and --client-key"),
-            }
-
-            // Skip certificate verification (DANGEROUS)
-            if tls_config.danger_accept_invalid_certs {
-                builder = builder.danger_accept_invalid_certs(true);
-            }
-        }
+        let builder = tls.apply(Client::builder().timeout(Duration::from_secs(300)))?;
 
         let client = builder.build().context("cannot set up the HTTP client")?;
 

@@ -50,7 +50,8 @@ struct Cli {
     api_url: Option<String>,
 
     // ===== TLS Configuration =====
-    /// Path to CA certificate for verifying the gateway (PEM format)
+    /// The server's private CA (PEM), for a server whose certificate no
+    /// public authority signed; saved with `login --server`
     #[arg(long, global = true, env = "CYXCLOUD_CA_CERT")]
     ca_cert: Option<PathBuf>,
 
@@ -61,10 +62,6 @@ struct Cli {
     /// Path to client private key for mTLS (PEM format)
     #[arg(long, global = true, env = "CYXCLOUD_CLIENT_KEY")]
     client_key: Option<PathBuf>,
-
-    /// Skip server certificate verification (DANGEROUS - development only)
-    #[arg(long, global = true, default_value = "false")]
-    insecure: bool,
 
     #[command(subcommand)]
     command: Commands,
@@ -330,7 +327,7 @@ async fn main() {
             console::style(symbols::CROSS).red(),
             exit::describe(&e)
         );
-        if let Some(step) = exit::next_step(kind) {
+        if let Some(step) = exit::next_step(&e, kind) {
             eprintln!("  {}", step);
         }
         std::process::exit(kind.code());
@@ -342,7 +339,13 @@ async fn run() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(tracing::Level::WARN.into()),
+                .add_directive(tracing::Level::WARN.into())
+                // it logs each refused certificate; the CLI says it once, with what to do
+                .add_directive(
+                    "rustls_platform_verifier=off"
+                        .parse()
+                        .expect("a valid directive"),
+                ),
         )
         .init();
 
@@ -369,26 +372,29 @@ async fn run() -> Result<()> {
     let gateway_url = cli.gateway.unwrap_or(cfg.gateway.http_url);
     let api_url = cli.api_url.unwrap_or(cfg.auth.api_url);
 
+    // Plain http:// only to this machine or a private network (TOFIX192 D3).
+    // `config` itself stays usable, so a bad address can be fixed.
+    if !matches!(cli.command, Commands::Config { .. }) {
+        for url in [&grpc_url, &gateway_url, &api_url] {
+            cyxcloud_core::plain_http::check_url(url).map_err(anyhow::Error::msg)?;
+        }
+    }
+
+    // Every client verifies the server: the saved (or given) CA, else the
+    // system's roots
+    let tls = TlsConfig {
+        ca_cert: cli.ca_cert.clone().or_else(|| cfg.server.ca_cert.clone()),
+        client_cert: cli.client_cert,
+        client_key: cli.client_key,
+    };
+
     // Create CyxWiz API client for auth commands
-    let cyxwiz_client = CyxWizClient::new(&api_url);
+    let cyxwiz_client = CyxWizClient::new(&api_url, &tls)?;
 
     // Get auth token for gateway commands
     let auth_token = config::get_valid_credentials().map(|c| c.access_token);
 
-    // Build TLS configuration from CLI args
-    let tls_config = if cli.ca_cert.is_some() || cli.client_cert.is_some() || cli.insecure {
-        Some(TlsConfig {
-            ca_cert: cli.ca_cert,
-            client_cert: cli.client_cert,
-            client_key: cli.client_key,
-            danger_accept_invalid_certs: cli.insecure,
-        })
-    } else {
-        None
-    };
-
-    // Create gateway client with auth token and optional TLS
-    let client = GatewayClient::with_tls(&gateway_url, auth_token.clone(), tls_config)?;
+    let client = GatewayClient::with_tls(&gateway_url, auth_token.clone(), &tls)?;
 
     match cli.command {
         // Auth commands
@@ -401,6 +407,11 @@ async fn run() -> Result<()> {
                 email,
                 server,
                 password_file,
+                tls: client::TlsConfig {
+                    // only a CA given on this command is saved with the server
+                    ca_cert: cli.ca_cert.clone(),
+                    ..tls.clone()
+                },
             };
             auth::login(&cyxwiz_client, config).await?;
         }
@@ -455,7 +466,7 @@ async fn run() -> Result<()> {
         },
 
         Commands::Doctor => {
-            let code = doctor::run(&cyxwiz_client).await?;
+            let code = doctor::run(&cyxwiz_client, &tls).await?;
             std::process::exit(code);
         }
 
@@ -490,9 +501,12 @@ async fn run() -> Result<()> {
                     dataset::share(&client, config).await?;
                 }
                 other => {
-                    let cloud =
-                        cloud::Cloud::connect(&grpc_url, auth_token.as_deref().unwrap_or(""))
-                            .await?;
+                    let cloud = cloud::Cloud::connect(
+                        &grpc_url,
+                        auth_token.as_deref().unwrap_or(""),
+                        tls.ca_cert.as_deref(),
+                    )
+                    .await?;
                     match other {
                         DatasetCommands::Put {
                             paths,
@@ -523,8 +537,12 @@ async fn run() -> Result<()> {
 
         Commands::Token { command } => {
             require_auth(&auth_token)?;
-            let cloud =
-                cloud::Cloud::connect(&grpc_url, auth_token.as_deref().unwrap_or("")).await?;
+            let cloud = cloud::Cloud::connect(
+                &grpc_url,
+                auth_token.as_deref().unwrap_or(""),
+                tls.ca_cert.as_deref(),
+            )
+            .await?;
             match command {
                 TokenCommands::Create { dataset, ttl } => {
                     datasets::token_create(&cloud, &dataset, &ttl).await?
@@ -551,6 +569,9 @@ fn handle_config_command(command: Option<ConfigCommands>) -> Result<()> {
             match &cfg.server.host {
                 Some(host) => println!("  host = \"{}\"", host),
                 None => println!("  (not set: cyxcloud login --server HOST)"),
+            }
+            if let Some(ca) = &cfg.server.ca_cert {
+                println!("  ca_cert = \"{}\"", ca.display());
             }
             println!();
             println!("{}", style("[gateway]").cyan());
@@ -614,6 +635,19 @@ fn handle_config_command(command: Option<ConfigCommands>) -> Result<()> {
                     println!("  gateway  {}", cfg.gateway.http_url);
                     println!("  gRPC     {}", cfg.gateway.grpc_url);
                     println!("  sign-in  {}", cfg.auth.api_url);
+                    server::print_plain_note(&cfg.auth.api_url);
+                }
+                "server.ca_cert" => {
+                    if value.trim().is_empty() {
+                        cfg.server.ca_cert = None;
+                        println!("  the system's trusted roots verify the server");
+                    } else {
+                        cfg.set_ca_cert(std::path::Path::new(value.trim()))
+                            .map_err(anyhow::Error::msg)?;
+                        if let Some(ca) = &cfg.server.ca_cert {
+                            println!("  trusts {}", ca.display());
+                        }
+                    }
                 }
                 "gateway.http_url" => cfg.gateway.http_url = value,
                 "gateway.grpc_url" => cfg.gateway.grpc_url = value,
@@ -621,7 +655,7 @@ fn handle_config_command(command: Option<ConfigCommands>) -> Result<()> {
                 "cli.default_bucket" => cfg.cli.default_bucket = Some(value),
                 _ => {
                     anyhow::bail!(
-                        "Unknown config key: {}. Valid keys: server, gateway.http_url, gateway.grpc_url, auth.api_url, cli.default_bucket",
+                        "Unknown config key: {}. Valid keys: server, server.ca_cert, gateway.http_url, gateway.grpc_url, auth.api_url, cli.default_bucket",
                         key
                     );
                 }

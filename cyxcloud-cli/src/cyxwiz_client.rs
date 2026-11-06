@@ -86,17 +86,15 @@ pub struct CyxWizClient {
 }
 
 impl CyxWizClient {
-    /// Create a new CyxWiz API client
-    pub fn new(base_url: &str) -> Self {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()
-            .expect("Failed to create HTTP client");
-
-        Self {
+    /// A CyxWiz API client verifying the server as `tls` says.
+    pub fn new(base_url: &str, tls: &crate::client::TlsConfig) -> anyhow::Result<Self> {
+        let client = tls
+            .apply(Client::builder().timeout(Duration::from_secs(30)))?
+            .build()?;
+        Ok(Self {
             client,
             base_url: base_url.trim_end_matches('/').to_string(),
-        }
+        })
     }
 
     /// Login with email and password

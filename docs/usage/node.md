@@ -17,8 +17,14 @@ cyxcloud doctor                       # what is wrong, and what to do
 ```
 
 `HOST` is the server's host name or IP (dev stack: `localhost`, the HP setup:
-`192.168.1.116`). An `https://` address means one front door for everything
-(TOFIX168, when it exists).
+`192.168.1.180`). An `https://` address means one front door for everything.
+For a server with a private CA (a test server, `tls.md`), sign in with
+`cyxcloud login --server https://HOST --ca-cert ca.crt` first: `node init`
+writes that CA into the node's `[network] tls_ca_cert`, and the node uses it
+for the gateway, DataStream and sign-in (environment: `TLS_CA_CERT`). Plain
+`http://` is accepted only to this machine or a private network; the node
+refuses to start otherwise, and logs a warning for plain text to another
+machine.
 
 ### `cyxcloud node init`
 

@@ -107,7 +107,7 @@ pub fn disk_check(offered: u64, used: u64, free: u64, total: u64, data_dir: &str
 }
 
 /// Run every check and print it; returns the exit code.
-pub async fn run(cyxwiz: &CyxWizClient) -> Result<i32> {
+pub async fn run(cyxwiz: &CyxWizClient, tls: &crate::client::TlsConfig) -> Result<i32> {
     let cfg = config::load_config();
     let mut checks = Vec::new();
 
@@ -124,8 +124,26 @@ pub async fn run(cyxwiz: &CyxWizClient) -> Result<i32> {
         )),
     }
 
-    let http = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
+    // How the server is verified
+    if cfg.auth.api_url.starts_with("https://") {
+        match &tls.ca_cert {
+            Some(ca) => checks.push(Check::ok(format!(
+                "TLS: trusts the server's CA {}",
+                ca.display()
+            ))),
+            None => checks.push(Check::ok("TLS: the system's trusted roots")),
+        }
+    } else if let Some(host) = crate::server::url_host(&cfg.auth.api_url) {
+        if !cyxcloud_core::plain_http::is_loopback(host) {
+            checks.push(Check::warn(format!(
+                "plain http:// to {} (unencrypted): fine on your own network, use https:// over the internet",
+                host
+            )));
+        }
+    }
+
+    let http = tls
+        .apply(reqwest::Client::builder().timeout(Duration::from_secs(10)))?
         .build()?;
 
     // Gateway
@@ -159,6 +177,11 @@ pub async fn run(cyxwiz: &CyxWizClient) -> Result<i32> {
             "storage gateway {} answered {}",
             cfg.gateway.http_url,
             resp.status()
+        ))),
+        Err(e) if crate::exit::untrusted_certificate(&e) => checks.push(Check::down(format!(
+            "storage gateway {}: {}",
+            cfg.gateway.http_url,
+            short_error(&e)
         ))),
         Err(e) => checks.push(Check::down(format!(
             "cannot reach the storage gateway {}: {} (check the address with `cyxcloud config show` or your network)",
@@ -294,7 +317,9 @@ fn port_check(listen_addr: &str) -> Check {
 }
 
 fn short_error(e: &reqwest::Error) -> String {
-    if e.is_timeout() {
+    if crate::exit::untrusted_certificate(e) {
+        crate::exit::UNTRUSTED_CERTIFICATE_STEP.to_string()
+    } else if e.is_timeout() {
         "timed out".to_string()
     } else if e.is_connect() {
         "connection refused or no route".to_string()

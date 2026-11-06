@@ -48,16 +48,44 @@ pub struct CyxCloudConfig {
 pub struct ServerConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<String>,
+    /// The server's private CA (a test server's ca.crt, docs/usage/tls.md),
+    /// for a server whose certificate no public authority signed. Cleared
+    /// when the server changes: another server's CA is no use to it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ca_cert: Option<PathBuf>,
 }
 
 impl CyxCloudConfig {
     /// Point every service at `server` (a host, or a front door: https://HOST, http://HOST:PORT).
     pub fn set_server(&mut self, server: &str) -> std::result::Result<(), String> {
         let urls = crate::server::urls_for_server(server)?;
-        self.server.host = Some(server.trim().trim_end_matches('/').to_string());
+        cyxcloud_core::plain_http::check_url(&urls.api)?;
+        let host = server.trim().trim_end_matches('/').to_string();
+        if self.server.host.as_deref() != Some(host.as_str()) {
+            self.server.ca_cert = None;
+        }
+        self.server.host = Some(host);
         self.gateway.http_url = urls.gateway_http;
         self.gateway.grpc_url = urls.gateway_grpc;
         self.auth.api_url = urls.api;
+        Ok(())
+    }
+
+    /// Trust `path` (a PEM CA certificate) for the saved server. It must
+    /// read as at least one certificate; the absolute path is kept, so the
+    /// setting works from any folder.
+    pub fn set_ca_cert(&mut self, path: &std::path::Path) -> std::result::Result<(), String> {
+        use rustls::pki_types::{pem::PemObject, CertificateDer};
+        let certs = CertificateDer::pem_file_iter(path)
+            .and_then(|c| c.collect::<std::result::Result<Vec<_>, _>>())
+            .map_err(|e| format!("{}: not a PEM certificate ({})", path.display(), e))?;
+        if certs.is_empty() {
+            return Err(format!("{}: holds no certificate", path.display()));
+        }
+        // absolute, not canonicalize: no \\?\ prefix on Windows
+        let absolute =
+            std::path::absolute(path).map_err(|e| format!("{}: {}", path.display(), e))?;
+        self.server.ca_cert = Some(absolute);
         Ok(())
     }
 }
@@ -253,6 +281,42 @@ pub fn get_valid_credentials() -> Option<Credentials> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_public_server_must_be_https() {
+        let mut cfg = CyxCloudConfig::default();
+        assert!(cfg.set_server("http://192.168.1.180:8000").is_ok());
+        assert!(cfg.set_server("https://cloud.cyxwiz.ai").is_ok());
+        let err = cfg.set_server("http://cloud.cyxwiz.ai:8000").unwrap_err();
+        assert!(err.contains("https://"), "{err}");
+        assert_eq!(cfg.server.host.as_deref(), Some("https://cloud.cyxwiz.ai"));
+    }
+
+    #[test]
+    fn the_ca_belongs_to_its_server() {
+        let dir = tempfile::tempdir().unwrap();
+        let ca = dir.path().join("ca.crt");
+        let cert = rcgen::generate_simple_self_signed(vec!["cyxwiz-hp".into()]).unwrap();
+        std::fs::write(&ca, cert.cert.pem()).unwrap();
+
+        let mut cfg = CyxCloudConfig::default();
+        cfg.set_server("https://192.168.1.180").unwrap();
+        cfg.set_ca_cert(&ca).unwrap();
+        assert!(cfg.server.ca_cert.as_ref().unwrap().is_absolute());
+
+        cfg.set_server("https://192.168.1.180/").unwrap();
+        assert!(cfg.server.ca_cert.is_some(), "the same server keeps its CA");
+        cfg.set_server("https://cloud.cyxwiz.ai").unwrap();
+        assert!(
+            cfg.server.ca_cert.is_none(),
+            "another server's CA is dropped"
+        );
+
+        let not_pem = dir.path().join("notes.txt");
+        std::fs::write(&not_pem, "not a certificate").unwrap();
+        assert!(cfg.set_ca_cert(&not_pem).is_err());
+        assert!(cfg.set_ca_cert(&dir.path().join("missing.crt")).is_err());
+    }
 
     #[test]
     fn test_credentials_expiry() {

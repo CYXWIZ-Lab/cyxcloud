@@ -17,6 +17,9 @@ pub struct LoginConfig {
     /// Read the password from this file's first line instead of prompting
     /// (for scripts; the password never goes on the command line)
     pub password_file: Option<std::path::PathBuf>,
+    /// How to verify the server; with `server`, its `ca_cert` (if any) is
+    /// saved with it
+    pub tls: crate::client::TlsConfig,
 }
 
 /// Register configuration
@@ -35,9 +38,17 @@ pub async fn login(cyxwiz_client: &CyxWizClient, config: LoginConfig) -> Result<
             let mut cfg = config::load_config();
             let before = cfg.auth.api_url.clone();
             cfg.set_server(server).map_err(anyhow::Error::msg)?;
+            if let Some(ca) = &config.tls.ca_cert {
+                cfg.set_ca_cert(ca).map_err(anyhow::Error::msg)?;
+            }
+            crate::server::print_plain_note(&cfg.auth.api_url);
             config::save_config(&cfg)?;
             switched_server = cfg.auth.api_url != before;
-            owned_client = CyxWizClient::new(&cfg.auth.api_url);
+            let tls = crate::client::TlsConfig {
+                ca_cert: cfg.server.ca_cert.clone(),
+                ..config.tls.clone()
+            };
+            owned_client = CyxWizClient::new(&cfg.auth.api_url, &tls)?;
             &owned_client
         }
         None => {

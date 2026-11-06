@@ -123,6 +123,12 @@ impl NodeConfig {
             ));
         }
 
+        // Plain http:// only to this machine or a private network: the node
+        // sends its sign-in and tokens to both (TOFIX192 D3)
+        for url in [&self.central.address, &self.cyxwiz_api.base_url] {
+            cyxcloud_core::plain_http::check_url(url).map_err(ConfigError::ValidationError)?;
+        }
+
         Ok(())
     }
 
@@ -723,6 +729,23 @@ mod tests {
         )
         .unwrap();
         assert_eq!(shared.auth.api_url, default_cyxwiz_api_url());
+    }
+
+    #[test]
+    fn plain_http_to_a_public_server_is_refused() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut config = NodeConfig::default();
+        config.storage.data_dir = temp_dir.path().to_path_buf();
+
+        config.central.address = "http://192.168.1.180:8000".into();
+        assert!(config.validate().is_ok(), "a LAN server may be plain");
+        config.central.address = "https://cloud.cyxwiz.ai".into();
+        assert!(config.validate().is_ok());
+        config.central.address = "http://cloud.cyxwiz.ai:8000".into();
+        assert!(config.validate().is_err(), "the internet must be https");
+        config.central.address = "https://cloud.cyxwiz.ai".into();
+        config.cyxwiz_api.base_url = "http://203.0.113.9/api".into();
+        assert!(config.validate().is_err());
     }
 
     #[test]

@@ -21,7 +21,7 @@ Plain text is meant only for this machine or a private LAN. Clients refuse
 | --- | --- |
 | Clients to the front door | **available**: the front door serves TLS when given a certificate (below); the HP test server still runs plain *(T1d switches it)* |
 | Front door to the services | plain on the private network, by design |
-| Clients trusting a private CA | *(to come, T1c)* |
+| Clients trusting a private CA | **CLI and storage node: available** (below); Engine and server node *(to come, T1c-2/3)* |
 | Gateway / rebalancer to storage nodes | plain *(to come, T2)* |
 | Central and the Engine to server nodes | plain *(to come, T3)* |
 | Browser to the website | plain on its own port *(to come, T4: through the front door)* |
@@ -118,9 +118,9 @@ On the server, in the deploy folder (cyxwiz_web `deploy/server`):
 ### Giving clients the CA
 
 Copy `certs/ca.crt` (public, safe to send) to each client machine, and give
-its path to the client *(the client settings come with T1c)*. Before
-trusting a copy that came over email or a chat, compare its fingerprint
-with the one `./new-certs.sh show` prints on the server:
+its path to the client (below). Before trusting a copy that came over email
+or a chat, compare its fingerprint with the one `./new-certs.sh show`
+prints on the server:
 
 ```
 openssl x509 -in ca.crt -noout -fingerprint -sha256
@@ -138,6 +138,23 @@ Tools and browsers can also use it:
   `/usr/local/share/ca-certificates/cyxwiz-test.crt` and
   `update-ca-certificates`). Only on machines you control, and remove it
   when the test server is gone.
+
+### The client settings
+
+A client given a CA trusts **only** that CA for the server; without one it
+uses the system's trusted roots (a public certificate). No client has a
+switch that skips certificate checks.
+
+| Client | Setting |
+| --- | --- |
+| `cyxcloud` CLI | `cyxcloud login --server https://HOST --ca-cert ca.crt` (saved as `[server] ca_cert`; `config set server.ca_cert PATH`, empty clears; env `CYXCLOUD_CA_CERT` for one run). `cyxcloud doctor` shows which CA is in use. |
+| Storage node | `[network] tls_ca_cert` in its config (written by `cyxcloud node init` from the CLI's saved CA), or env `TLS_CA_CERT`. Used for the gateway, DataStream and sign-in. |
+| Engine, server node | *(to come, T1c-2/3: Preferences > Servers and Settings > Network, "Certificate authority")* |
+
+Plain `http://` is refused by every client to anything but this machine
+or a private network (loopback, RFC 1918, link-local, 100.64/10, IPv6 ULA
+and link-local, one-label LAN names, `.local` / `.lan` / `.internal` /
+`.home.arpa`). On the LAN it is allowed, with a note.
 
 ### When something goes wrong
 
@@ -159,7 +176,6 @@ Tools and browsers can also use it:
 
 ## To come in this runbook
 
-- The client settings that trust it: Engine, server node, CLI, storage node
-  (T1c).
+- The Engine and server node settings (T1c-2/3).
 - Switching the HP test server to TLS, and checking every client (T1d).
 - Node certificates and pinning (T2, T3).

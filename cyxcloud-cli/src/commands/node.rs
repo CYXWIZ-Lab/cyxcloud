@@ -57,12 +57,22 @@ pub struct NodeSetup {
     pub status_port: u16,
     pub gateway_grpc: String,
     pub api_url: String,
+    /// The server's private CA, when the user set one (`login --ca-cert`)
+    pub ca_cert: Option<PathBuf>,
 }
 
 /// The node daemon's config.toml for this setup. No `[node] id`: the node key
 /// decides the id.
 pub fn node_config_toml(setup: &NodeSetup) -> String {
     let q = |s: &str| toml::Value::String(s.to_string()).to_string();
+    // the node verifies an https:// gateway with the same CA as the CLI
+    let ca = match &setup.ca_cert {
+        Some(p) => format!(
+            "tls_ca_cert = {}\n",
+            q(&p.to_string_lossy().replace('\\', "/"))
+        ),
+        None => String::new(),
+    };
     format!(
         "# Written by `cyxcloud node init`. The node id comes from ~/.cyxcloud/node/key.\n\
          [node]\n\
@@ -77,6 +87,7 @@ pub fn node_config_toml(setup: &NodeSetup) -> String {
          bind_address = \"0.0.0.0\"\n\
          grpc_port = {grpc}\n\
          public_address = {public}\n\
+         {ca}\
          \n\
          [metrics]\n\
          enabled = true\n\
@@ -95,6 +106,7 @@ pub fn node_config_toml(setup: &NodeSetup) -> String {
         offer = setup.offer_gb,
         grpc = setup.grpc_port,
         public = q(&setup.public_address),
+        ca = ca,
         status = setup.status_port,
         gateway = q(&setup.gateway_grpc),
         api = q(&setup.api_url),
@@ -471,6 +483,7 @@ pub async fn init(cfg: InitConfig) -> Result<()> {
         status_port: cfg.status_port.unwrap_or(DEFAULT_STATUS_PORT),
         gateway_grpc: shared.gateway.grpc_url.clone(),
         api_url: shared.auth.api_url.clone(),
+        ca_cert: shared.server.ca_cert.clone(),
     };
     std::fs::create_dir_all(node_dir()?)?;
     std::fs::write(&config_path, node_config_toml(&setup))
@@ -911,7 +924,25 @@ mod tests {
             status_port: 9090,
             gateway_grpc: "http://192.168.1.116:50060".into(),
             api_url: "http://192.168.1.116:3002".into(),
+            ca_cert: None,
         }
+    }
+
+    #[test]
+    fn the_servers_ca_goes_to_the_nodes_network_settings() {
+        assert!(!node_config_toml(&hp_setup()).contains("tls_ca_cert"));
+        let mut s = hp_setup();
+        s.gateway_grpc = "https://192.168.1.180".into();
+        s.ca_cert = Some(PathBuf::from(r"C:\Users\me\cyxwiz-hp-ca.crt"));
+        let v: toml::Value = toml::from_str(&node_config_toml(&s)).unwrap();
+        assert_eq!(
+            v["network"]["tls_ca_cert"].as_str(),
+            Some("C:/Users/me/cyxwiz-hp-ca.crt")
+        );
+        assert_eq!(
+            v["central"]["address"].as_str(),
+            Some("https://192.168.1.180")
+        );
     }
 
     #[test]

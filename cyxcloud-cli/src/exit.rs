@@ -91,8 +91,31 @@ fn reqwest_kind(e: &reqwest::Error) -> Kind {
     }
 }
 
+/// Whether a TLS handshake failed because the server's certificate is not
+/// trusted (no CA the client trusts signed it). The user acts: a test
+/// server needs its CA set, docs/usage/tls.md. The TLS libraries only say
+/// so in their messages, so this reads them.
+pub fn untrusted_certificate(err: &(dyn std::error::Error + 'static)) -> bool {
+    let mut cause = Some(err);
+    while let Some(e) = cause {
+        let text = e.to_string();
+        if text.contains("UnknownIssuer") || text.contains("invalid peer certificate") {
+            return true;
+        }
+        cause = e.source();
+    }
+    false
+}
+
+/// What to say about a certificate no trusted CA signed.
+pub const UNTRUSTED_CERTIFICATE_STEP: &str = "the server's certificate is not signed by a CA this machine trusts: \
+     for a test server, give its CA with `cyxcloud config set server.ca_cert ca.crt` (see the TLS runbook)";
+
 /// The exit code for a failed command.
 pub fn classify(err: &anyhow::Error) -> Kind {
+    if err.chain().any(untrusted_certificate) {
+        return Kind::User;
+    }
     for cause in err.chain() {
         if let Some(c) = cause.downcast_ref::<Coded>() {
             return c.kind;
@@ -143,8 +166,11 @@ pub fn describe(err: &anyhow::Error) -> String {
     line
 }
 
-/// What to do next, when the code alone says it.
-pub fn next_step(kind: Kind) -> Option<&'static str> {
+/// What to do next, when the error says it.
+pub fn next_step(err: &anyhow::Error, kind: Kind) -> Option<&'static str> {
+    if err.chain().any(untrusted_certificate) {
+        return Some(UNTRUSTED_CERTIFICATE_STEP);
+    }
     match kind {
         Kind::Network => Some("check the address or your network, then run `cyxcloud doctor`"),
         Kind::User | Kind::Server => None,
@@ -176,6 +202,22 @@ mod tests {
         );
         let node = coded(Kind::Server, "the node stopped right away");
         assert_eq!(classify(&node), Kind::Server);
+    }
+
+    #[test]
+    fn an_untrusted_certificate_is_for_the_user_to_fix() {
+        let tls = anyhow::anyhow!("invalid peer certificate: UnknownIssuer")
+            .context("error sending request")
+            .context("cannot reach the storage gateway");
+        assert_eq!(classify(&tls), Kind::User);
+        assert!(next_step(&tls, classify(&tls))
+            .unwrap()
+            .contains("server.ca_cert"));
+        let down = anyhow::anyhow!("connection refused");
+        assert_eq!(
+            next_step(&down, Kind::Network).map(|s| s.contains("ca_cert")),
+            Some(false)
+        );
     }
 
     #[test]

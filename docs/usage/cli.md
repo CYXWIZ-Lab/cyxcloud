@@ -23,6 +23,22 @@ cyxcloud config set server HOST
     `:50060`, sign-in `:3002`).
   The separate keys (`gateway.http_url`, `gateway.grpc_url`, `auth.api_url`)
   can still be set one by one.
+- Plain `http://` (and a bare `HOST`) is allowed only to this machine or a
+  private network: loopback, 10/8, 172.16/12, 192.168/16, 169.254/16,
+  100.64/10, fc00::/7, fe80::/10, and LAN names (one label like `hp-linux`, or
+  `.local`, `.lan`, `.internal`, `.home.arpa`). Anything else is refused
+  with "use the server's https:// address": a sign-in token would cross the
+  internet unencrypted. Setting a plain LAN server prints a one-line note.
+- A server whose certificate comes from a private CA (a test server, see
+  `tls.md`): `cyxcloud login --server https://HOST --ca-cert ca.crt`. The CA
+  is saved with the server (`[server] ca_cert`, an absolute path) and used
+  by every command, for gRPC, the gateway and sign-in, and by
+  `cyxcloud node init` for the node. When it is set, only that CA is
+  trusted for the server, not the public ones. `cyxcloud config set
+  server.ca_cert PATH` changes it, an empty value clears it, and changing
+  the server clears it too. `--ca-cert` (or `CYXCLOUD_CA_CERT`) on any
+  command overrides it for that command. There is no switch that skips
+  certificate checks.
 - Changing the server drops the old sign-in: a sign-in belongs to the server
   that issued it.
 - The password is prompted for, or read from the first line of
