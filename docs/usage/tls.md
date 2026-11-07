@@ -13,13 +13,13 @@ in stages; each section says whether it is in place or still to come.
 | To a storage or server node (gateway, rebalancer, central, the Engine) | the node proves it holds its key | *(to come, TOFIX192 T2/T3)* each node has a self-signed certificate whose fingerprint is bound to its node key at registration and pinned by whoever dials it |
 
 Plain text is meant only for this machine or a private LAN. Clients refuse
-`http://` to a public address *(to come, T1c)*.
+`http://` to a public address (below, "The client settings").
 
 ## Where we are
 
 | Hop | TLS |
 | --- | --- |
-| Clients to the front door | **available**: the front door serves TLS when given a certificate (below); the HP test server still runs plain *(T1d switches it)* |
+| Clients to the front door | **in place**: the front door serves TLS when given a certificate (below); the HP test server runs TLS on 443 since 2026-11-07 |
 | Front door to the services | plain on the private network, by design |
 | Clients trusting a private CA | **available** in the CLI, storage node, Engine and server node (below) |
 | Gateway / rebalancer to storage nodes | plain *(to come, T2)* |
@@ -58,6 +58,47 @@ Check it from another machine:
 curl --cacert ca.crt https://SERVER/health      # {"front":"ok",...} (Windows: add --ssl-no-revoke)
 curl http://SERVER:443/health                    # no answer: TLS only
 ```
+
+## Switching a running server to TLS
+
+For a server that already runs the compose plain on 8000. The website and
+the storage node in the compose keep working unchanged (they use the
+internal 8000); every client outside the machine changes its address from
+`http://HOST:8000` to `https://HOST` and gets the CA. Do it when nobody is
+in the middle of a job.
+
+1. Back up the deploy folder: `cp -a ~/cyxwiz/server ~/cyxwiz/server-backup-$(date +%F)`.
+2. Bring the deploy files up to date (a checkout, or `git archive HEAD
+   deploy/server` from one) and load the current front image. A front
+   built before `internal_listen` existed does not start with the TLS
+   lines.
+3. `./new-server-env.sh`: on an existing `.env` it adds only the keys it
+   lacks (`FRONT_LISTEN_PORT`) and keeps every secret.
+4. `./new-certs.sh ca` (once per server), then
+   `./new-certs.sh server <IP> <host name> ...` with every name or address
+   clients will dial ("The door's certificate", below).
+5. In `front.toml`, replace `listen = "0.0.0.0:8000"` with the four TLS
+   lines (shown commented there).
+6. In `.env`, set `FRONT_PORT=443` **and** `FRONT_LISTEN_PORT=443`.
+7. `docker compose up -d --force-recreate --no-build front`, then
+   `docker compose ps front`: healthy, published `0.0.0.0:443->443/tcp`
+   only.
+8. Check from another machine:
+   - `curl --cacert ca.crt https://HOST/health` answers with every service
+     `up`; without `--cacert` it fails (untrusted root);
+   - `curl http://HOST:8000/health` cannot connect (8000 is no longer
+     published);
+   - `curl http://HOST:443/health` gets no HTTP answer.
+9. Give the clients the CA and the new address ("The client settings",
+   below) and check each one: `cyxcloud login --server https://HOST
+   --ca-cert ca.crt` then `cyxcloud doctor`; a dataset `put` / `get`;
+   the Engine's Preferences > Servers check; a server node's Settings >
+   Network; the website (sign in, Drive upload and download). The door's
+   audit lines (`docker compose logs front`) show `tls=true` for every
+   outside client.
+
+To roll back, restore `front.toml` and `.env` from the backup and run step
+7 again; clients go back to `http://HOST:8000`.
 
 ## The door's certificate
 
@@ -177,5 +218,4 @@ and link-local, one-label LAN names, `.local` / `.lan` / `.internal` /
 
 ## To come in this runbook
 
-- Switching the HP test server to TLS, and checking every client (T1d).
 - Node certificates and pinning (T2, T3).
