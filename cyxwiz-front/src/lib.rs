@@ -274,34 +274,48 @@ impl Front {
     }
 
     /// `GET /health`: the door, and whether it reaches each service behind
-    /// it (a TCP connect, 2 s each). 503 when one is down, so `cyxcloud
+    /// it (a TCP connect, 2 s, all services at once so the answer comes
+    /// within 2 s even when several are down and a client's short probe
+    /// still sees the ones that are up). 503 when one is down, so `cyxcloud
     /// doctor` through the door sees a dead service. Names only, no
     /// addresses.
     async fn health(&self) -> Response<Body> {
-        let mut services = serde_json::Map::new();
-        let mut all_up = true;
+        let mut checked = std::collections::HashSet::new();
+        let mut checks = tokio::task::JoinSet::new();
         for route in &self.config.routes {
-            if services.contains_key(&route.name) {
+            if !checked.insert(route.name.clone()) {
                 continue;
             }
-            let up = match route
+            let name = route.name.clone();
+            let target = route
                 .upstream
                 .parse::<hyper::Uri>()
                 .ok()
-                .and_then(|u| Some((u.host()?.to_string(), u.port_u16().unwrap_or(80))))
-            {
-                Some((host, port)) => matches!(
-                    tokio::time::timeout(
-                        std::time::Duration::from_secs(2),
-                        tokio::net::TcpStream::connect((host.as_str(), port)),
-                    )
-                    .await,
-                    Ok(Ok(_))
-                ),
-                None => false,
+                .and_then(|u| Some((u.host()?.to_string(), u.port_u16().unwrap_or(80))));
+            checks.spawn(async move {
+                let up = match target {
+                    Some((host, port)) => matches!(
+                        tokio::time::timeout(
+                            std::time::Duration::from_secs(2),
+                            tokio::net::TcpStream::connect((host.as_str(), port)),
+                        )
+                        .await,
+                        Ok(Ok(_))
+                    ),
+                    None => false,
+                };
+                (name, up)
+            });
+        }
+        let mut services = serde_json::Map::new();
+        let mut all_up = true;
+        while let Some(done) = checks.join_next().await {
+            let Ok((name, up)) = done else {
+                all_up = false;
+                continue;
             };
             all_up &= up;
-            services.insert(route.name.clone(), (if up { "up" } else { "down" }).into());
+            services.insert(name, (if up { "up" } else { "down" }).into());
         }
         let body = serde_json::json!({ "front": "ok", "services": services });
         let mut r = Response::new(full(format!("{}\n", body)));
