@@ -177,11 +177,8 @@ async fn main() -> anyhow::Result<()> {
     }
     for url in [&config.central.address, &config.cyxwiz_api.base_url] {
         let plain_to_another_machine = !url.starts_with("https://")
-            && url
-                .split_once("://")
-                .map(|(_, rest)| rest)
-                .and_then(|rest| rest.split(['/', ':']).next())
-                .is_some_and(|host| !cyxcloud_core::plain_http::is_loopback(host));
+            && cyxcloud_core::plain_http::url_host(url)
+                .is_some_and(|host| !cyxcloud_core::plain_http::is_loopback(&host));
         if plain_to_another_machine {
             warn!(url = %url, "Plain http:// to another machine: unencrypted, for a private network only");
         }

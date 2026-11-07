@@ -61,7 +61,13 @@ impl CyxCloudConfig {
         let urls = crate::server::urls_for_server(server)?;
         cyxcloud_core::plain_http::check_url(&urls.api)?;
         let host = server.trim().trim_end_matches('/').to_string();
-        if self.server.host.as_deref() != Some(host.as_str()) {
+        // A CA belongs to its server: a different host or port drops it
+        // ("https://h" and "https://h:443" are the same server)
+        let same_server = self.server.host.as_deref().is_some_and(|old| {
+            let key = |s: &str| (crate::server::url_host(s), crate::server::url_port(s));
+            key(old) == key(&host)
+        });
+        if !same_server {
             self.server.ca_cert = None;
         }
         self.server.host = Some(host);
@@ -306,6 +312,18 @@ mod tests {
 
         cfg.set_server("https://192.168.1.180/").unwrap();
         assert!(cfg.server.ca_cert.is_some(), "the same server keeps its CA");
+        cfg.set_server("https://192.168.1.180:443").unwrap();
+        assert!(
+            cfg.server.ca_cert.is_some(),
+            "its default port is the same server"
+        );
+        cfg.set_server("https://192.168.1.180:8443").unwrap();
+        assert!(
+            cfg.server.ca_cert.is_none(),
+            "another port is another server"
+        );
+        cfg.set_server("https://192.168.1.180").unwrap();
+        cfg.set_ca_cert(&ca).unwrap();
         cfg.set_server("https://cloud.cyxwiz.ai").unwrap();
         assert!(
             cfg.server.ca_cert.is_none(),

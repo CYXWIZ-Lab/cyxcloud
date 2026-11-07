@@ -1065,6 +1065,7 @@ dependencies = [
  "tonic",
  "tracing",
  "tracing-subscriber",
+ "url",
 ]
 
 [[package]]
@@ -1094,6 +1095,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tonic",
+ "url",
  "uuid",
  "webpki-roots 0.26.11",
 ]

@@ -373,8 +373,17 @@ async fn run() -> Result<()> {
     let api_url = cli.api_url.unwrap_or(cfg.auth.api_url);
 
     // Plain http:// only to this machine or a private network (TOFIX192 D3).
-    // `config` itself stays usable, so a bad address can be fixed.
-    if !matches!(cli.command, Commands::Config { .. }) {
+    // `config` and `login --server` stay usable, so a bad address can be
+    // replaced; both check the new one when they set it.
+    let sets_the_server = matches!(cli.command, Commands::Config { .. })
+        || matches!(
+            cli.command,
+            Commands::Login {
+                server: Some(_),
+                ..
+            }
+        );
+    if !sets_the_server {
         for url in [&grpc_url, &gateway_url, &api_url] {
             cyxcloud_core::plain_http::check_url(url).map_err(anyhow::Error::msg)?;
         }

@@ -10,6 +10,7 @@ name = "cyxcloud"
 path = "src/main.rs"
 
 [dependencies]
+url = { workspace = true }
 rustls = { workspace = true }
 cyxcloud-core = { path = "../cyxcloud-core" }
 cyxcloud-protocol = { path = "../cyxcloud-protocol" }

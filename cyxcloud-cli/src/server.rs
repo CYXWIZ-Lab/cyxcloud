@@ -73,7 +73,7 @@ pub fn print_plain_note(url: &str) {
         return;
     }
     if let Some(host) = url_host(url) {
-        if !cyxcloud_core::plain_http::is_loopback(host) {
+        if !cyxcloud_core::plain_http::is_loopback(&host) {
             eprintln!(
                 "  note: {} is plain http:// (unencrypted). Fine on your own network; \
                  over the internet use the server's https:// address.",
@@ -84,26 +84,11 @@ pub fn print_plain_note(url: &str) {
 }
 
 /// Host part of a URL ("http://192.168.1.116:50060" -> "192.168.1.116").
-pub fn url_host(url: &str) -> Option<&str> {
-    let rest = url.split("://").nth(1).unwrap_or(url);
-    let host_port = rest.split('/').next()?;
-    let host = match host_port.rsplit_once(':') {
-        Some((h, p)) if p.chars().all(|c| c.is_ascii_digit()) => h,
-        _ => host_port,
-    };
-    (!host.is_empty()).then_some(host)
-}
+pub use cyxcloud_core::plain_http::url_host;
 
 /// Port of a URL, or the scheme's default.
 pub fn url_port(url: &str) -> Option<u16> {
-    let rest = url.split("://").nth(1).unwrap_or(url);
-    let host_port = rest.split('/').next()?;
-    match host_port.rsplit_once(':') {
-        Some((_, p)) => p.parse().ok(),
-        None if url.starts_with("https://") => Some(443),
-        None if url.starts_with("http://") => Some(80),
-        None => None,
-    }
+    cyxcloud_core::plain_http::parse_url(url)?.port_or_known_default()
 }
 
 /// "6.5 MB", "700 GB", "1.2 TB" (powers of 1024, one decimal under 10).
@@ -203,10 +188,13 @@ mod tests {
     #[test]
     fn hosts_and_ports_come_out_of_urls() {
         assert_eq!(
-            url_host("http://192.168.1.116:50060"),
+            url_host("http://192.168.1.116:50060").as_deref(),
             Some("192.168.1.116")
         );
-        assert_eq!(url_host("https://cloud.cyxwiz.ai"), Some("cloud.cyxwiz.ai"));
+        assert_eq!(
+            url_host("https://cloud.cyxwiz.ai").as_deref(),
+            Some("cloud.cyxwiz.ai")
+        );
         assert_eq!(url_port("http://localhost:3002/api"), Some(3002));
         assert_eq!(url_port("https://cloud.cyxwiz.ai"), Some(443));
     }

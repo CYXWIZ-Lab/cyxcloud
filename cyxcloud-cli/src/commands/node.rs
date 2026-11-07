@@ -886,7 +886,7 @@ pub fn local_address_towards(url: &str) -> Option<String> {
     if host == "localhost" || host.starts_with("127.") {
         return Some("127.0.0.1".to_string());
     }
-    let target = std::net::ToSocketAddrs::to_socket_addrs(&(host, port))
+    let target = std::net::ToSocketAddrs::to_socket_addrs(&(host.as_str(), port))
         .ok()?
         .find(|a| a.is_ipv4())?;
     let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;

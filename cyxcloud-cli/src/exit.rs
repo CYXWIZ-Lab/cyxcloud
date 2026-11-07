@@ -99,7 +99,9 @@ pub fn untrusted_certificate(err: &(dyn std::error::Error + 'static)) -> bool {
     let mut cause = Some(err);
     while let Some(e) = cause {
         let text = e.to_string();
-        if text.contains("UnknownIssuer") || text.contains("invalid peer certificate") {
+        // rustls says "invalid peer certificate: <reason>" for every
+        // certificate failure; only an unknown issuer is fixed by a CA
+        if text.contains("UnknownIssuer") {
             return true;
         }
         cause = e.source();

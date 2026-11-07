@@ -36,7 +36,7 @@ pub fn allowed(host: &str) -> bool {
 /// Whether `host` is this machine (loopback): plain text there never leaves it.
 pub fn is_loopback(host: &str) -> bool {
     let host = host.trim().trim_start_matches('[').trim_end_matches(']');
-    let host = host.to_ascii_lowercase();
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
     host == "localhost"
         || host.ends_with(".localhost")
         || host.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback())
@@ -63,23 +63,26 @@ fn private_v6(ip: Ipv6Addr) -> bool {
         || (first & 0xffc0) == 0xfe80
 }
 
-/// The host of an `http://` or `https://` URL ("http://[::1]:8000/x" -> "::1").
-fn url_host(url: &str) -> Option<&str> {
-    let rest = url.split_once("://").map(|(_, r)| r).unwrap_or(url);
-    let authority = rest.split(['/', '?', '#']).next()?;
-    let authority = authority
-        .rsplit_once('@')
-        .map(|(_, a)| a)
-        .unwrap_or(authority);
-    if let Some(v6) = authority.strip_prefix('[') {
-        return v6.split(']').next();
+/// A URL read the way the HTTP clients read it (WHATWG, as reqwest and
+/// tonic); a bare host or `host:port` means http://.
+pub fn parse_url(url: &str) -> Option<url::Url> {
+    let url = url.trim();
+    if url.contains("://") {
+        url::Url::parse(url).ok()
+    } else {
+        url::Url::parse(&format!("http://{url}")).ok()
     }
-    Some(
-        authority
-            .rsplit_once(':')
-            .map(|(h, _)| h)
-            .unwrap_or(authority),
-    )
+}
+
+/// The host a client will dial for `url`, as it reads it: "http://[::1]:8000/x"
+/// -> "::1", "http://134744072/" -> "8.8.8.8", "http://evil.com\@10.0.0.1/"
+/// -> "evil.com", a full-width dot -> ".". Judge this, never the raw text.
+pub fn url_host(url: &str) -> Option<String> {
+    Some(match parse_url(url)?.host()? {
+        url::Host::Domain(name) => name.to_string(),
+        url::Host::Ipv4(ip) => ip.to_string(),
+        url::Host::Ipv6(ip) => ip.to_string(),
+    })
 }
 
 /// Refuse a plain `http://` URL (or a bare host, which means plain) to a
@@ -87,11 +90,11 @@ fn url_host(url: &str) -> Option<&str> {
 /// instead. An `https://` URL is always fine.
 pub fn check_url(url: &str) -> Result<(), String> {
     let url = url.trim();
-    if url.starts_with("https://") {
+    if parse_url(url).is_some_and(|u| u.scheme() == "https") {
         return Ok(());
     }
-    let host = url_host(url).unwrap_or("");
-    if allowed(host) {
+    let host = url_host(url).unwrap_or_default();
+    if allowed(&host) {
         Ok(())
     } else {
         Err(format!(
@@ -159,6 +162,36 @@ mod tests {
         let err = check_url("http://cloud.cyxwiz.ai:8000").unwrap_err();
         assert!(err.contains("https://"), "{err}");
         assert!(check_url("http://user@203.0.113.9/x").is_err());
+        assert!(check_url("HTTPS://cloud.cyxwiz.ai").is_ok());
+    }
+
+    #[test]
+    fn the_host_is_the_one_the_client_dials() {
+        // Text that looks private or one-label, but that reqwest dials on
+        // the internet: each must be refused
+        for url in [
+            "http://134744072/",              // 8.8.8.8 as one number
+            "http://0x8080808/",              // 8.8.8.8 in hex
+            "http://8%2e8%2e8%2e8/",          // percent-encoded dots
+            "http://evil\u{3002}com/",        // a full-width dot
+            r"http://evil.com\@192.168.1.1/", // `\` ends the host
+        ] {
+            assert!(check_url(url).is_err(), "{url} must be refused");
+        }
+        assert_eq!(url_host("http://134744072/").as_deref(), Some("8.8.8.8"));
+        assert_eq!(
+            url_host(r"http://evil.com\@192.168.1.1/").as_deref(),
+            Some("evil.com")
+        );
+        assert_eq!(url_host("http://[::1]:8000/x").as_deref(), Some("::1"));
+        assert_eq!(
+            url_host("192.168.1.180:8000").as_deref(),
+            Some("192.168.1.180")
+        );
+        assert_eq!(
+            url_host("http://Hp-Linux.:8000").as_deref(),
+            Some("hp-linux.")
+        );
     }
 
     #[test]
@@ -166,6 +199,7 @@ mod tests {
         assert!(is_loopback("localhost"));
         assert!(is_loopback("127.0.0.1"));
         assert!(is_loopback("[::1]"));
+        assert!(is_loopback("localhost."));
         assert!(!is_loopback("192.168.1.180"));
         assert!(!is_loopback("hp-linux"));
     }

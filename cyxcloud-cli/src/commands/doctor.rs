@@ -134,7 +134,7 @@ pub async fn run(cyxwiz: &CyxWizClient, tls: &crate::client::TlsConfig) -> Resul
             None => checks.push(Check::ok("TLS: the system's trusted roots")),
         }
     } else if let Some(host) = crate::server::url_host(&cfg.auth.api_url) {
-        if !cyxcloud_core::plain_http::is_loopback(host) {
+        if !cyxcloud_core::plain_http::is_loopback(&host) {
             checks.push(Check::warn(format!(
                 "plain http:// to {} (unencrypted): fine on your own network, use https:// over the internet",
                 host

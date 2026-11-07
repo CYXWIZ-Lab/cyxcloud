@@ -60,6 +60,7 @@ tonic-prost = "0.14"
 tonic-prost-build = "0.14"
 # HTTP client: rustls on the ring provider the rest of the workspace uses
 # (reqwest's own default would add aws-lc-rs as a second provider).
+url = "2"
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "http2", "charset", "system-proxy", "json"] }
 bincode = "1.3"
 serde = { version = "1.0", features = ["derive"] }
