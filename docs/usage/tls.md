@@ -21,7 +21,7 @@ Plain text is meant only for this machine or a private LAN. Clients refuse
 | --- | --- |
 | Clients to the front door | **available**: the front door serves TLS when given a certificate (below); the HP test server still runs plain *(T1d switches it)* |
 | Front door to the services | plain on the private network, by design |
-| Clients trusting a private CA | **CLI and storage node: available** (below); Engine and server node *(to come, T1c-2/3)* |
+| Clients trusting a private CA | **available** in the CLI, storage node, Engine and server node (below) |
 | Gateway / rebalancer to storage nodes | plain *(to come, T2)* |
 | Central and the Engine to server nodes | plain *(to come, T3)* |
 | Browser to the website | plain on its own port *(to come, T4: through the front door)* |
@@ -149,7 +149,8 @@ switch that skips certificate checks.
 | --- | --- |
 | `cyxcloud` CLI | `cyxcloud login --server https://HOST --ca-cert ca.crt` (saved as `[server] ca_cert`; `config set server.ca_cert PATH`, empty clears; env `CYXCLOUD_CA_CERT` for one run). `cyxcloud doctor` shows which CA is in use. |
 | Storage node | `[network] tls_ca_cert` in its config (written by `cyxcloud node init` from the CLI's saved CA), or env `TLS_CA_CERT`. Used for the gateway, DataStream and sign-in. |
-| Engine, server node | *(to come, T1c-2/3: Preferences > Servers and Settings > Network, "Certificate authority")* |
+| Engine | Preferences > Servers > **Certificate authority (optional)** under the address (saved as `servers.ca_file` in `engine_config.json`; env `CYXWIZ_CA_FILE` when empty). Shows the CA's SHA-256 to compare with `new-certs.sh show`. |
+| Server node | Settings > Network, the same row (saved as `network.server_ca_file` in `server_config.yaml`). |
 
 Plain `http://` is refused by every client to anything but this machine
 or a private network (loopback, RFC 1918, link-local, 100.64/10, IPv6 ULA
@@ -176,6 +177,5 @@ and link-local, one-label LAN names, `.local` / `.lan` / `.internal` /
 
 ## To come in this runbook
 
-- The Engine and server node settings (T1c-2/3).
 - Switching the HP test server to TLS, and checking every client (T1d).
 - Node certificates and pinning (T2, T3).
